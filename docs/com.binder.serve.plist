@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs `binder serve` (the remote-control gateway) at login and keeps it running.
+  Replace /Users/YOU with your home, and /usr/local/bin with the directory that
+  holds node, binder and claude (with a Node version manager, a stable path such
+  as its default alias, not a per-shell one).
+  Install:  cp docs/com.binder.serve.plist ~/Library/LaunchAgents/
+            launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.binder.serve.plist
+  Stop:     launchctl bootout gui/$(id -u)/com.binder.serve
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.binder.serve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/binder</string>
+    <string>serve</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/.local/state/bindertui/serve.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/.local/state/bindertui/serve.log</string>
+</dict>
+</plist>

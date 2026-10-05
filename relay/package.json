@@ -1,0 +1,17 @@
+{
+  "name": "binder-relay",
+  "version": "0.1.0",
+  "description": "Forwards binder's end-to-end encrypted remote-control frames between a computer and its clients",
+  "type": "module",
+  "private": true,
+  "main": "relay.mjs",
+  "scripts": {
+    "start": "node relay.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}
