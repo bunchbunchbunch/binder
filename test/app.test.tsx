@@ -411,6 +411,32 @@ describe('draft prompt', () => {
     await session.close();
     ui.unmount();
   });
+
+  // A permission prompt used to replace the composer, and putting it back
+  // brought the draft back with it, dropping whatever was typed since.
+  it('does not come back after a permission prompt, and text typed meanwhile stays', async () => {
+    const cwd = process.cwd();
+    setup('permission-safety-check.jsonl', { BINDER_FAKE_DELAY_MS: '300' });
+    const sessionId = '00000000-0000-4000-8000-00000000000e';
+    const session = new Session({ sessionId, resume: false, cwd, passthrough: [] });
+    session.start();
+    const { ui } = mount(session, sessionId, cwd, initialState(sessionId), 'Pay rent');
+
+    await until(() => plainFrame(ui).includes('❯ Pay rent'), 8000, () => ui.lastFrame());
+    await sleep(50);
+    ui.stdin.write(ENTER);
+    await until(() => plainFrame(ui).includes('Enter queues a new tab'), 8000, () => ui.lastFrame());
+    ui.stdin.write('next idea');
+    await until(() => plainFrame(ui).includes('❯ next idea'), 8000, () => ui.lastFrame());
+    await until(() => plainFrame(ui).includes('Allow Bash?'), 8000, () => ui.lastFrame());
+    await sleep(50); // let the picker's input hook attach after its first paint
+    ui.stdin.write('1');
+    await until(() => plainFrame(ui).includes('Removed the log.'), 8000, () => ui.lastFrame());
+    expect(plainFrame(ui)).toContain('❯ next idea');
+    expect(plainFrame(ui)).not.toContain('❯ Pay rent');
+    await session.close();
+    ui.unmount();
+  });
 });
 
 describe('layout with a long response', () => {

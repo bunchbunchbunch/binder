@@ -90,7 +90,7 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
   const picked = pick.value === e.value ? Math.min(pick.index, items.length - 1) : 0;
   useEffect(() => {
     onMenuChange?.(menuOpen || showShortcuts);
-    return () => onMenuChange?.(false); // also when a question replaces the prompt
+    return () => onMenuChange?.(false); // also when a rewind remounts the prompt
   }, [menuOpen, showShortcuts, onMenuChange]);
   const selected = isActive && ed.selection(e) !== null;
   useEffect(() => {

@@ -385,9 +385,11 @@ export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppPr
         <Text dimColor>{[turnStatus && bgCount, state.contextTokens ? `${state.contextTokens} tokens` : ''].filter(Boolean).join(' · ')}</Text>
       </Box>
       <Text dimColor>{titledRule(columns, title)}</Text>
-      {answering && state.question ? (
+      {answering && state.question && (
         <QuestionView question={state.question} onAnswer={onAnswer} onDeny={state.question.toolName === 'AskUserQuestion' ? undefined : onDeny} />
-      ) : (
+      )}
+      {/* Hidden, not unmounted, under a question: remounting would bring back the initial text and drop what was typed. */}
+      <Box display={answering ? 'none' : 'flex'} flexDirection="column">
         <PromptInput
           key={fill.key}
           initialValue={fill.text}
@@ -410,7 +412,7 @@ export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppPr
           }}
           placeholder={running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : '? for shortcuts'}
         />
-      )}
+      </Box>
       <Text dimColor>{'─'.repeat(columns)}</Text>
       <Box height={statusRows} paddingX={1}>
         <StatusBar line={statusLine} notice={notice} />
