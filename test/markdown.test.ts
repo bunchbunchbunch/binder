@@ -227,4 +227,15 @@ describe('double-height rows', () => {
     expect(unstampRows()).toBe('\x1b7\x1b[4;1H\x1b#5\x1b[5;1H\x1b#5\x1b8');
     expect(unstampRows()).toBe('');
   });
+
+  it('leaves the rows under a box drawn over the viewport alone', () => {
+    const text = { nodeName: '#text', nodeValue: `${BIG_TOP}H\n${BIG_BOTTOM}H\n${BIG_TOP}J\n${BIG_BOTTOM}J` };
+    const parent = { nodeName: 'ink-box', childNodes: [] as unknown[], yogaNode: { getComputedTop: () => 0 }, parentNode: undefined };
+    const viewport = { nodeName: 'ink-box', style: {}, childNodes: [text], yogaNode: { getComputedTop: () => 2 }, parentNode: parent };
+    const cover = { nodeName: 'ink-box', style: { position: 'absolute' }, childNodes: [], yogaNode: { getComputedTop: () => 3, getComputedHeight: () => 2 }, parentNode: parent };
+    parent.childNodes.push(viewport, cover);
+    setBigViewport(viewport as unknown as DOMElement);
+    expect(stampRows()).toBe('\x1b7\x1b[3;1H\x1b#3\x1b[6;1H\x1b#4\x1b8');
+    unstampRows();
+  });
 });

@@ -1,9 +1,9 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { Box } from 'ink';
+import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { PromptInput } from '../src/ui/PromptInput.js';
-import { shortcutColumns } from '../src/ui/Shortcuts.js';
+import { shortcutColumns, Shortcuts } from '../src/ui/Shortcuts.js';
 import { RAINBOW, RAINBOW_SHIMMER } from '../src/ui/ultrathink.js';
 import { wordColors } from './helpers.js';
 
@@ -120,9 +120,34 @@ describe('shortcuts popup', () => {
     expect(narrow.flat()).toEqual(wide.flat());
   });
 
+  it('draws the key in blue and the action dim', () => {
+    const ui = render(<Shortcuts width={100} />); // ink-testing-library's width
+    expect(wordColors(ui.lastFrame() ?? '', 'ctrl + n / p')).toEqual(Array(12).fill('#7CC4FF'));
+    expect(wordColors(ui.lastFrame() ?? '', 'to switch tabs')).toEqual(Array(14).fill(undefined));
+    expect(ui.lastFrame()).toContain('\x1b[2m to switch tabs');
+    ui.unmount();
+  });
+
+  it('covers what it is drawn over, border to border', () => {
+    const ui = render(
+      <Box flexDirection="column" width={120} height={14}>
+        {Array.from({ length: 14 }, (_, i) => <Text key={i}>{'#'.repeat(120)}</Text>)}
+        <Box position="absolute" bottom={0} left={0}>
+          <Shortcuts width={120} />
+        </Box>
+      </Box>,
+    );
+    const rows = plain(ui.lastFrame()).split('\n');
+    const box = rows.filter((r) => /^[╭│╰]/.test(r));
+    expect(box).toHaveLength(10); // 8 rows of shortcuts and the border
+    for (const r of box) expect(r).toMatch(/^[╭│╰][^#]*[╮│╯]#*$/);
+    ui.unmount();
+  });
+
   it('"?" on an empty prompt opens it; Esc, "?" or typing closes it', async () => {
-    const ui = render(<PromptInput onSubmit={() => {}} isActive width={120} />);
-    const open = () => plain(ui.lastFrame()).includes('ctrl + n / p to switch tabs');
+    let shown = false;
+    const ui = render(<PromptInput onSubmit={() => {}} isActive width={120} onShortcutsChange={(o) => (shown = o)} />);
+    const open = () => shown;
     ui.stdin.write('?');
     await until(open);
     expect(plain(ui.lastFrame()).split('\n')[0]).not.toContain('?'); // not typed

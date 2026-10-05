@@ -48,6 +48,18 @@ function screenTop(node: DOMElement): number {
   return y;
 }
 
+// Rows under a box drawn over the viewport (the "?" shortcuts): stamped, they
+// would draw the box at double size.
+function coveredRows(): Set<number> {
+  const rows = new Set<number>();
+  for (const n of viewport?.parentNode?.childNodes ?? []) {
+    if (n.nodeName === '#text' || n.style.position !== 'absolute' || !n.yogaNode) continue;
+    const top = screenTop(n);
+    for (let r = 0; r < n.yogaNode.getComputedHeight(); r++) rows.add(top + r);
+  }
+  return rows;
+}
+
 // Cursor-saved sequences that set row attributes, '' when there are none.
 const atRows = (rows: Array<[number, string]>) =>
   rows.length ? '\x1b7' + rows.map(([r, a]) => `\x1b[${r + 1};1H${a}`).join('') + '\x1b8' : '';
@@ -64,11 +76,12 @@ export function stampRows(): string {
   const rows: Array<[number, string]> = [];
   if (viewport?.yogaNode) {
     const top = screenTop(viewport);
+    const covered = coveredRows();
     textOf(viewport)
       .split('\n')
       .forEach((l, i) => {
         const a = bigAttr(l);
-        if (a) rows.push([top + i, a]);
+        if (a && !covered.has(top + i)) rows.push([top + i, a]);
       });
   }
   stamped = rows.map(([r]) => r);

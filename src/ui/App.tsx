@@ -16,6 +16,7 @@ import { PromptInput } from './PromptInput.js';
 import { QuestionView } from './QuestionView.js';
 import { StatusBar } from './StatusBar.js';
 import { HelpView } from './HelpView.js';
+import { Shortcuts } from './Shortcuts.js';
 import { Welcome } from './Welcome.js';
 import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, rewindTargets } from './panels.js';
 import { SPINNER, elapsed, turnVerb } from './tabLayout.js';
@@ -80,6 +81,7 @@ export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppPr
   }, []);
   const [commands, setCommands] = useState<SlashCommand[]>(() => host.commands);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
   const [help, setHelp] = useState(false);
   const [mdStyle, setMdStyle] = useState(markdownStyle);
   const [panel, setPanel] = useState<Panel | null>(null);
@@ -375,6 +377,12 @@ export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppPr
             {state.childExit.stderr.slice(-5).map((l, i) => <Text key={i} dimColor>{l}</Text>)}
           </Box>
         )}
+        {/* "?" pops the shortcuts out over the bottom of the transcript, just above the prompt. */}
+        {shortcuts && (
+          <Box position="absolute" bottom={0} left={0}>
+            <Shortcuts width={columns} />
+          </Box>
+        )}
       </Box>
       <Box justifyContent="space-between" height={1} paddingLeft={1}>
         {turnStatus || !bg.length ? (
@@ -399,6 +407,7 @@ export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppPr
           history={history}
           cwd={cwd}
           onMenuChange={setMenuOpen}
+          onShortcutsChange={setShortcuts}
           onSelectionChange={onSelectionChange}
           onSubmit={(text, images, followup) => {
             setHelp(false);

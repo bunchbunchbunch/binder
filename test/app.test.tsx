@@ -343,7 +343,7 @@ describe('copying the prompt selection', () => {
 });
 
 describe('shortcuts popup', () => {
-  it('opens with "?" under the prompt, and Esc closes it without counting toward a rewind', async () => {
+  it('pops out with "?" over the transcript above the prompt, and Esc closes it without counting toward a rewind', async () => {
     const cwd = process.cwd();
     setup('single-turn-partial.jsonl');
     const sessionId = '00000000-0000-4000-8000-000000000021';
@@ -353,6 +353,10 @@ describe('shortcuts popup', () => {
     await until(() => plainFrame(ui).includes('? for shortcuts'), 8000, () => ui.lastFrame());
     ui.stdin.write('?');
     await until(() => plainFrame(ui).includes('ctrl + n / p to switch tabs'), 8000, () => ui.lastFrame());
+    const rows = plainFrame(ui).split('\n');
+    const bottom = rows.findIndex((r) => r.startsWith('╰'));
+    expect(bottom).toBeGreaterThan(0);
+    expect(rows.findIndex((r) => r.startsWith('❯'))).toBeGreaterThan(bottom);
     ui.stdin.write('\x1b');
     await sleep(60);
     ui.stdin.write('\x1b');

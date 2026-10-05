@@ -7,7 +7,6 @@ import { matchCommands, type SlashCommand } from '../slashCommands.js';
 import { commonPrefix, completeCommand, completePath, wordAt } from '../complete.js';
 import { glimmerAt, keywordColors, SWEEP_MS, ultrathinkRanges } from './ultrathink.js';
 import { copyText, readClipboardText } from '../openUrl.js';
-import { shortcutColumns, Shortcuts } from './Shortcuts.js';
 
 export type Attachment = ClipboardImage & { id: number };
 
@@ -25,6 +24,8 @@ type Props = {
   cwd?: string;
   // The menu or the shortcuts opened or closed (App leaves Esc to them while open).
   onMenuChange?: (open: boolean) => void;
+  // The shortcuts opened or closed (App draws them over the transcript).
+  onShortcutsChange?: (open: boolean) => void;
   // Text was selected or deselected (App leaves Ctrl+C to it while selected).
   onSelectionChange?: (selected: boolean) => void;
 };
@@ -48,7 +49,7 @@ const THINK_NOTICE = 'Deeper reasoning requested for this turn';
 //   Typing "/" opens the command menu and "@" a file menu: Up/Down pick, Tab
 //   or Enter takes the pick, Esc closes. Tab completes paths (and commands
 //   after "!"); with several matches it fills the common part, then lists them.
-export function PromptInput({ onSubmit, isActive, placeholder, width, initialValue, commands = [], history = [], cwd = process.cwd(), onMenuChange, onSelectionChange }: Props) {
+export function PromptInput({ onSubmit, isActive, placeholder, width, initialValue, commands = [], history = [], cwd = process.cwd(), onMenuChange, onShortcutsChange, onSelectionChange }: Props) {
   const [e, setE] = useState<ed.Editor>(() => (initialValue ? ed.insert(ed.empty, initialValue) : ed.empty));
   const [images, setImages] = useState<Attachment[]>([]);
   const [pastes, setPastes] = useState<{ label: string; text: string }[]>([]);
@@ -92,6 +93,10 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
     onMenuChange?.(menuOpen || showShortcuts);
     return () => onMenuChange?.(false); // also when a rewind remounts the prompt
   }, [menuOpen, showShortcuts, onMenuChange]);
+  useEffect(() => {
+    onShortcutsChange?.(showShortcuts);
+    return () => onShortcutsChange?.(false);
+  }, [showShortcuts, onShortcutsChange]);
   const selected = isActive && ed.selection(e) !== null;
   useEffect(() => {
     onSelectionChange?.(selected);
@@ -318,10 +323,8 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
   // Bash mode, like Claude Code's: a pink "!" prompt.
   const bashMode = value.startsWith('!');
 
-  const shortcutCols = showShortcuts ? shortcutColumns(width) : [];
-
   return (
-    <Box flexDirection="column" height={Math.min(8, rows + (notice ? 1 : 0)) + shown.length + (shortcutCols[0]?.length ?? 0)}>
+    <Box flexDirection="column" height={Math.min(8, rows + (notice ? 1 : 0)) + shown.length}>
       <Text>
         <Text color={!isActive ? 'gray' : bashMode ? '#FF79C6' : 'cyan'} bold>{bashMode ? '! ' : '❯ '}</Text>
         {!value && placeholder ? (
@@ -339,7 +342,6 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
         ) : null}
       </Text>
       {notice ? <Text dimColor>{notice}</Text> : null}
-      {showShortcuts ? <Shortcuts columns={shortcutCols} /> : null}
       {shown.map((item, i) => {
         const selected = first + i === picked;
         return (
