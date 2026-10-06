@@ -60,10 +60,10 @@ elsewhere):
 
 | Key | Action |
 |-----|--------|
-| `?` (empty prompt) | show the shortcuts under the prompt, like Claude Code; the next key closes them |
+| `?` (empty prompt) | show the shortcuts in a box above the prompt; the next key closes them |
 | `Enter` | send the prompt (opens a new tab; queued if a turn is running) |
 | `Ctrl+Enter` | send the prompt into the current tab instead: on a running turn it is sent now (Claude Code's "send now": the turn stops and the follow-up runs next), otherwise it runs after the current turn. Needs a terminal with the kitty keyboard protocol (iTerm2, kitty, WezTerm, Ghostty); elsewhere it acts as `Enter` |
-| `Alt+Enter` or `\` then `Enter` | newline in the prompt |
+| `Shift+Enter`, `Alt+Enter`, or `\` then `Enter` | newline in the prompt. `Shift+Enter` needs the kitty keyboard protocol, like `Ctrl+Enter`; elsewhere it sends, so use `Alt+Enter` |
 | `Up` / `Down` | earlier / later prompts from this directory (inside a multi-line prompt they move between lines first) |
 | `Tab` | complete the path before the cursor (after `!`, the command name); with several matches it fills the common part, then lists them |
 | `@` | list files as you type a path after it |

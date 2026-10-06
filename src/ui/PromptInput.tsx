@@ -42,7 +42,8 @@ const THINK_NOTICE = 'Deeper reasoning requested for this turn';
 
 // Multi-line prompt editor with macOS-style keyboard selection.
 //   Enter submits; Ctrl+Enter submits into the current tab (the terminal must
-//   report it, see renderOptions.ts); Alt+Enter or a trailing backslash inserts a newline.
+//   report it, see renderOptions.ts); Shift+Enter (same), Alt+Enter or a
+//   trailing backslash inserts a newline.
 //   Shift+arrows select; Option+arrows move by word; Home/End (Ctrl+A/E) line ends.
 //   Up/Down walk the prompt history from the first/last line.
 //   Ctrl+V attaches the clipboard image as "[Image #n]", like Claude Code.
@@ -211,7 +212,7 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
         if (key.upArrow) return move(-1);
         if (key.downArrow) return move(1);
         if (key.escape) return setDismissed(e.value);
-        if (key.tab || (key.return && !key.meta)) {
+        if (key.tab || (key.return && !key.meta && !key.shift)) {
           const fill = (text: string) => setE(ed.replaceRange(e, item.start, item.end, text));
           if (!item.run) return fill(item.text + (key.tab && !item.text.endsWith('/') ? ' ' : ''));
           // Tab, or Enter on a command that needs an argument, fills it in for typing the rest.
@@ -226,7 +227,7 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
         return;
       }
       if (key.return || (input === '\n' && !key.meta)) {
-        if (key.meta) setE(ed.insert(e, '\n'));
+        if (key.meta || key.shift) setE(ed.insert(e, '\n'));
         else if (key.ctrl && key.return) submit(e, true);
         else if (e.value.endsWith('\\') && e.cursor === e.value.length && !ed.selection(e)) {
           setE({ value: e.value.slice(0, -1) + '\n', cursor: e.value.length, anchor: null });

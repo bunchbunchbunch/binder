@@ -4,7 +4,7 @@ import { Box, Text } from 'ink';
 const KEYS: Array<[string, string]> = [
   ['Enter', 'send the prompt in a new tab'],
   ['Ctrl+Enter', 'send into the current tab (on a running turn: send now)'],
-  ['Alt+Enter, \\ Enter', 'newline'],
+  ['Shift+Enter, Alt+Enter, \\ Enter', 'newline'],
   ['Up / Down', 'earlier / later prompts'],
   ['Tab, @', 'complete a path (after !, a command)'],
   ['!command', 'bash mode: run it here, the model sees the output next prompt'],

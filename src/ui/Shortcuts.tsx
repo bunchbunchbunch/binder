@@ -12,7 +12,7 @@ const SHORTCUTS: Shortcut[] = [
   ['@', 'for file paths'],
   ['tab', 'to complete'],
   ['↑ ↓', 'for earlier prompts'],
-  ['alt + enter', 'for newline'],
+  ['shift + enter', 'for newline'],
   ['shift + arrows', 'to select'],
   ['enter', 'to send in a new tab'],
   ['ctrl + enter', 'to send in this tab'],

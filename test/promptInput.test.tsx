@@ -168,6 +168,47 @@ describe('shortcuts popup', () => {
   });
 });
 
+describe('Shift+Enter', () => {
+  const SHIFT_ENTER = '\x1b[13;2u'; // how iTerm2 and kitty report it with the kitty keyboard protocol on
+  const plain = (frame = '') => frame.replace(/\x1b\[[0-9;]*m/g, '');
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const until = async (check: () => boolean, ms = 3000) => {
+    const start = Date.now();
+    while (!check()) {
+      if (Date.now() - start > ms) throw new Error('timed out');
+      await sleep(20);
+    }
+  };
+
+  it('inserts a newline instead of sending, as in Claude Code', async () => {
+    const sent: string[] = [];
+    const ui = render(<PromptInput onSubmit={(text) => sent.push(text)} isActive width={60} />);
+    ui.stdin.write('one');
+    await until(() => plain(ui.lastFrame()).startsWith('❯ one'));
+    ui.stdin.write(SHIFT_ENTER);
+    await until(() => plain(ui.lastFrame()).split('\n').length === 2);
+    ui.stdin.write('two');
+    await until(() => plain(ui.lastFrame()).includes('two'));
+    expect(sent).toEqual([]);
+    ui.stdin.write('\r');
+    await until(() => sent.length === 1);
+    expect(sent[0]).toBe('one\ntwo');
+    ui.unmount();
+  });
+
+  it('leaves the command menu pick alone', async () => {
+    const sent: string[] = [];
+    const ui = render(<PromptInput onSubmit={(text) => sent.push(text)} isActive width={60} commands={[{ name: 'help', description: 'Show keys' }]} />);
+    ui.stdin.write('/he');
+    await until(() => plain(ui.lastFrame()).includes('Show keys'));
+    ui.stdin.write(SHIFT_ENTER);
+    await until(() => !plain(ui.lastFrame()).includes('Show keys'));
+    await sleep(50);
+    expect(sent).toEqual([]);
+    ui.unmount();
+  });
+});
+
 describe('wrapping in the prompt', () => {
   const plain = (frame = '') => frame.replace(/\x1b\[[0-9;]*m/g, '');
   const squash = (s: string) => s.replace(/\s/g, '');
