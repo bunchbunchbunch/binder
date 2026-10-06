@@ -7,6 +7,7 @@ const KEYS: Array<[string, string]> = [
   ['Shift+Enter, Alt+Enter, \\ Enter', 'newline'],
   ['Up / Down', 'earlier / later prompts'],
   ['Tab, @', 'complete a path (after !, a command)'],
+  ['Tab, Right (empty prompt)', 'take the suggested next prompt'],
   ['!command', 'bash mode: run it here, the model sees the output next prompt'],
   ['Ctrl+N / Ctrl+P', 'next / previous tab (also Ctrl+Right / Left, Alt+1-9)'],
   ['Wheel, PgUp / PgDn, Home / End', 'scroll the tab (Option+drag selects text)'],

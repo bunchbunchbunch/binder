@@ -37,6 +37,9 @@ export function buildArgs({ sessionId, resume, passthrough, forkFrom }: BuildArg
     // Routes permission prompts (and AskUserQuestion, which is otherwise
     // unavailable headless) to us as can_use_tool control requests.
     '--permission-prompt-tool', 'stdio',
+    // A prompt_suggestion line after each turn: the next prompt Claude Code
+    // predicts, shown in the empty prompt as in Claude Code.
+    '--prompt-suggestions',
     ...(forkFrom ? ['--resume', forkFrom, '--fork-session', '--session-id', sessionId] : [resume ? '--resume' : '--session-id', sessionId]),
   ];
   // Without one, Claude Code's own default mode applies.

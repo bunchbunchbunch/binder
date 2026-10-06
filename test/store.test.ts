@@ -181,6 +181,36 @@ describe('store', () => {
   });
 });
 
+// With --prompt-suggestions the child writes the next prompt it predicts
+// after a turn's result (shape recorded from the real binary).
+describe('prompt suggestions', () => {
+  const suggestion = { type: 'prompt_suggestion', suggestion: 'write tests', uuid: 'u1', session_id: 'sid' } as ClaudeEvent;
+  const finished = () => {
+    const s = reduce(reduce(initialState('sid'), { type: 'submit', prompt: 'Reply with just: ok' }), { type: 'sent', tabId: 1 });
+    return play(s, fixture('single-turn-partial.jsonl'));
+  };
+
+  it('keeps the suggestion that follows a turn until anything is sent', () => {
+    const s = reduce(finished(), { type: 'event', event: suggestion });
+    expect(s.suggestion).toBe('write tests');
+    expect(reduce(s, { type: 'submit', prompt: 'write tests' }).suggestion).toBeUndefined();
+    expect(reduce(s, { type: 'followup', tabId: 1, prompt: 'more' }).suggestion).toBeUndefined();
+    expect(reduce(s, { type: 'steer', tabId: 1, prompt: 'more', uuid: 'u2' }).suggestion).toBeUndefined();
+    expect(reduce(s, { type: 'bash_start', command: 'ls' }).suggestion).toBeUndefined();
+  });
+
+  it('drops one that arrives after the next prompt was queued', () => {
+    const queued = reduce(finished(), { type: 'submit', prompt: 'next' });
+    expect(reduce(queued, { type: 'event', event: suggestion }).suggestion).toBeUndefined();
+  });
+
+  it('clears it when the child starts a turn of its own', () => {
+    const s = reduce(finished(), { type: 'event', event: suggestion });
+    const init = { type: 'system', subtype: 'init', session_id: 'sid', cwd: '/private/tmp', model: 'm', permissionMode: 'default' } as ClaudeEvent;
+    expect(reduce(s, { type: 'event', event: init }).suggestion).toBeUndefined();
+  });
+});
+
 // Recorded from the real binary: a prompt starts background work and the turn
 // ends; when the work finishes the child starts a turn of its own about it.
 describe('background work', () => {

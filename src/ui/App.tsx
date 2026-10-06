@@ -420,6 +420,7 @@ export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppPr
             host.send(text, images, followup && !active?.bash ? active?.id : undefined);
           }}
           placeholder={running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : '? for shortcuts'}
+          suggestion={state.suggestion}
         />
       </Box>
       <Text dimColor>{'─'.repeat(columns)}</Text>

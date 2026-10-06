@@ -33,6 +33,61 @@ describe('prompt placeholder', () => {
   });
 });
 
+describe('suggested next prompt', () => {
+  const plain = (frame = '') => frame.replace(/\x1b\[[0-9;]*m/g, '');
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const until = async (check: () => boolean, ms = 3000) => {
+    const start = Date.now();
+    while (!check()) {
+      if (Date.now() - start > ms) throw new Error('timed out');
+      await sleep(20);
+    }
+  };
+  const mount = (sent: string[] = []) =>
+    render(<PromptInput onSubmit={(text) => sent.push(text)} isActive placeholder="? for shortcuts" suggestion="write tests" width={60} />);
+
+  it('shows in place of the placeholder, dim, with the cursor on its first letter', () => {
+    const ui = mount();
+    expect(plain(ui.lastFrame())).toBe('❯ write tests');
+    expect(cursorCell(ui.lastFrame())).toBe('w');
+    expect(ui.lastFrame()).toContain('\x1b[2mrite tests');
+    ui.unmount();
+  });
+
+  it('Tab fills it in to edit or send; Enter on the empty prompt sends nothing', async () => {
+    const sent: string[] = [];
+    const ui = mount(sent);
+    ui.stdin.write('\r');
+    await sleep(50);
+    expect(sent).toEqual([]);
+    ui.stdin.write('\t');
+    await until(() => cursorCell(ui.lastFrame()) === ' ');
+    ui.stdin.write(' first');
+    await until(() => plain(ui.lastFrame()).includes('first'));
+    ui.stdin.write('\r');
+    await until(() => sent.length === 1);
+    expect(sent[0]).toBe('write tests first');
+    ui.unmount();
+  });
+
+  it('Right fills it in too', async () => {
+    const ui = mount();
+    ui.stdin.write('\x1b[C');
+    await until(() => cursorCell(ui.lastFrame()) === ' ');
+    expect(plain(ui.lastFrame())).toBe('❯ write tests ');
+    expect(ui.lastFrame()).not.toContain('\x1b[2m');
+    ui.unmount();
+  });
+
+  it('gives way to what is typed', async () => {
+    const ui = mount();
+    ui.stdin.write('f');
+    await until(() => plain(ui.lastFrame()).startsWith('❯ f'));
+    expect(plain(ui.lastFrame())).not.toContain('write tests');
+    ui.unmount();
+  });
+});
+
 describe('ultrathink in the prompt', () => {
   const plain = (frame = '') => frame.replace(/\x1b\[[0-9;]*m/g, '');
   const until = async (check: () => boolean, ms = 3000) => {

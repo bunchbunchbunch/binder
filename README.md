@@ -66,6 +66,7 @@ elsewhere):
 | `Shift+Enter`, `Alt+Enter`, or `\` then `Enter` | newline in the prompt. `Shift+Enter` needs the kitty keyboard protocol, like `Ctrl+Enter`; elsewhere it sends, so use `Alt+Enter` |
 | `Up` / `Down` | earlier / later prompts from this directory (inside a multi-line prompt they move between lines first) |
 | `Tab` | complete the path before the cursor (after `!`, the command name); with several matches it fills the common part, then lists them |
+| `Tab` or `Right` (empty prompt) | take the suggested next prompt. After a turn, Claude Code may predict what you will ask next; like Claude Code, binder shows it dim in the empty prompt. Typing replaces it, and `Enter` alone does not send it |
 | `@` | list files as you type a path after it |
 | `!command` | bash mode: binder runs the command in the session's directory and shows it in its own tab; the output goes to the model with your next prompt. `Esc` stops it |
 | `Ctrl+N` / `Ctrl+P`, `Ctrl+Right` / `Ctrl+Left` | next / previous tab |

@@ -112,6 +112,13 @@ export type CommandLifecycleEvent = {
   state: 'queued' | 'started' | 'completed' | 'cancelled' | 'discarded';
 };
 
+// The next prompt Claude Code predicts, written after a turn's result
+// (--prompt-suggestions). It may not come at all.
+export type PromptSuggestionEvent = {
+  type: 'prompt_suggestion';
+  suggestion: string;
+};
+
 export type ClaudeEvent =
   | InitEvent
   | OtherSystemEvent
@@ -123,6 +130,7 @@ export type ClaudeEvent =
   | ControlRequestEvent
   | ControlResponseEvent
   | CommandLifecycleEvent
+  | PromptSuggestionEvent
   | { type: string; [key: string]: unknown };
 
 export function isInit(e: ClaudeEvent): e is InitEvent {

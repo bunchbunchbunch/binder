@@ -1,4 +1,4 @@
-import type { ClaudeEvent, CommandLifecycleEvent, ContentBlock, RateLimitEvent, StreamEvent } from './events.js';
+import type { ClaudeEvent, CommandLifecycleEvent, ContentBlock, PromptSuggestionEvent, RateLimitEvent, StreamEvent } from './events.js';
 import { isInit } from './events.js';
 import type { ImageAttachment } from './claudeProcess.js';
 
@@ -103,6 +103,8 @@ export type State = {
   notices: { toolUseId: string; status: string }[];
   // Background shells and agents still running (background_tasks_changed).
   backgroundTasks: { id: string; type: string; description: string }[];
+  // The next prompt Claude Code predicts after a turn, until anything is sent.
+  suggestion?: string;
 };
 
 export type Action =
@@ -334,7 +336,7 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
   if (isInit(ev)) {
     const caps = ev.capabilities ?? [];
     const canSteer = caps.includes('interrupt_send_now_v1') && caps.includes('msg_lifecycle_v1');
-    const next = { ...state, model: ev.model, cwd: ev.cwd, permissionMode: ev.permissionMode, canSteer };
+    const next = { ...state, model: ev.model, cwd: ev.cwd, permissionMode: ev.permissionMode, canSteer, suggestion: undefined };
     // Every turn starts with an init. With no prompt of ours running, the turn
     // is the child's own, reporting background work that finished.
     return state.running === null ? startAutoTurn(next) : { ...next, notices: [] };
@@ -364,6 +366,11 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
     const other = runningTab(next);
     const s = other ? replaceTab(next, { ...other, status: 'done', blocks: other.blocks.map((b) => ({ ...b, final: true })) }) : next;
     return { ...replaceTab(s, { ...tab, status: 'running', result: undefined }), running: tab.id, streamIndex: {} };
+  }
+  // It follows the turn's result; a prompt sent meanwhile makes it stale.
+  if (ev.type === 'prompt_suggestion') {
+    const idle = state.running === null && !state.queue.length && !state.steer && !state.unstarted;
+    return idle ? { ...state, suggestion: (ev as PromptSuggestionEvent).suggestion || undefined } : state;
   }
   if (ev.type === 'rate_limit_event') {
     const w = (ev as RateLimitEvent).rate_limit_info?.unifiedWindows;
@@ -441,11 +448,11 @@ export function reduce(state: State, action: Action): State {
       const id = action.tabId ?? nextTabId(state);
       const tab: Tab = { id, prompt: action.prompt, status: 'queued', blocks: [], earlier: [] };
       const queued: QueuedPrompt = { tabId: id, prompt: action.prompt, images: action.images ?? [], followup: false };
-      return { ...addTab(state, tab), queue: state.queue.concat(queued) };
+      return { ...addTab(state, tab), queue: state.queue.concat(queued), suggestion: undefined };
     }
     case 'bash_start': {
       const tab: Tab = { id: action.tabId ?? nextTabId(state), prompt: `!${action.command}`, status: 'running', blocks: [], earlier: [], bash: true, seq: state.seq };
-      return { ...addTab(state, tab), seq: state.seq + 1 };
+      return { ...addTab(state, tab), seq: state.seq + 1, suggestion: undefined };
     }
     case 'bash_done': {
       const tab = state.tabs.find((t) => t.id === action.tabId);
@@ -475,15 +482,15 @@ export function reduce(state: State, action: Action): State {
         const last = earlier.pop();
         if (last) tabs.push({ ...last, id: tab.id, earlier });
       }
-      return { ...state, tabs, active: Math.min(state.active, tabs.length - 1), bashContext: [] };
+      return { ...state, tabs, active: Math.min(state.active, tabs.length - 1), bashContext: [], suggestion: undefined };
     }
     case 'followup': {
       if (!state.tabs.some((t) => t.id === action.tabId)) return state;
       const queued: QueuedPrompt = { tabId: action.tabId, prompt: action.prompt, images: action.images ?? [], followup: true };
-      return { ...state, queue: state.queue.concat(queued) };
+      return { ...state, queue: state.queue.concat(queued), suggestion: undefined };
     }
     case 'steer':
-      return { ...state, steer: { tabId: action.tabId, prompt: action.prompt, uuid: action.uuid } };
+      return { ...state, steer: { tabId: action.tabId, prompt: action.prompt, uuid: action.uuid }, suggestion: undefined };
     case 'sent': {
       const at = state.queue.findIndex((q) => q.tabId === action.tabId);
       const tab = state.tabs.find((t) => t.id === action.tabId);

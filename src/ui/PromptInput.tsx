@@ -15,6 +15,9 @@ type Props = {
   onSubmit: (text: string, images: ClipboardImage[], followup: boolean) => void;
   isActive: boolean;
   placeholder?: string;
+  // The next prompt Claude Code predicts: shown in place of the placeholder,
+  // taken with Tab or Right.
+  suggestion?: string;
   width: number;
   initialValue?: string;
   commands?: SlashCommand[];
@@ -46,11 +49,12 @@ const THINK_NOTICE = 'Deeper reasoning requested for this turn';
 //   trailing backslash inserts a newline.
 //   Shift+arrows select; Option+arrows move by word; Home/End (Ctrl+A/E) line ends.
 //   Up/Down walk the prompt history from the first/last line.
+//   On an empty prompt, Tab or Right takes the suggested next prompt, as in Claude Code.
 //   Ctrl+V attaches the clipboard image as "[Image #n]", like Claude Code.
 //   Typing "/" opens the command menu and "@" a file menu: Up/Down pick, Tab
 //   or Enter takes the pick, Esc closes. Tab completes paths (and commands
 //   after "!"); with several matches it fills the common part, then lists them.
-export function PromptInput({ onSubmit, isActive, placeholder, width, initialValue, commands = [], history = [], cwd = process.cwd(), onMenuChange, onShortcutsChange, onSelectionChange }: Props) {
+export function PromptInput({ onSubmit, isActive, placeholder, suggestion, width, initialValue, commands = [], history = [], cwd = process.cwd(), onMenuChange, onShortcutsChange, onSelectionChange }: Props) {
   const [e, setE] = useState<ed.Editor>(() => (initialValue ? ed.insert(ed.empty, initialValue) : ed.empty));
   const [images, setImages] = useState<Attachment[]>([]);
   const [pastes, setPastes] = useState<{ label: string; text: string }[]>([]);
@@ -206,6 +210,9 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
         copyText(e.value.slice(sel.start, sel.end));
         return flash('copied to clipboard');
       }
+      if (!e.value && suggestion && ((key.tab && !key.shift) || (key.rightArrow && !key.shift && !key.meta && !key.ctrl))) {
+        return setE(ed.insert(ed.empty, suggestion));
+      }
       if (menuOpen) {
         const item = items[picked];
         const move = (d: number) => setPick({ value: e.value, index: (picked + d + items.length) % items.length });
@@ -323,20 +330,21 @@ export function PromptInput({ onSubmit, isActive, placeholder, width, initialVal
   const labelWidth = Math.min(32, Math.max(0, ...shown.map((i) => i.label.length))) + 3;
   // Bash mode, like Claude Code's: a pink "!" prompt.
   const bashMode = value.startsWith('!');
+  const hint = suggestion || placeholder;
 
   return (
     <Box flexDirection="column" height={Math.min(8, rows + (notice ? 1 : 0)) + shown.length}>
       <Text>
         <Text color={!isActive ? 'gray' : bashMode ? '#FF79C6' : 'cyan'} bold>{bashMode ? '! ' : '❯ '}</Text>
-        {!value && placeholder ? (
-          // The cursor sits on the placeholder's first letter, where typing starts.
+        {!value && hint ? (
+          // The cursor sits on the hint's first letter, where typing starts.
           isActive ? (
             <>
-              <Text inverse>{placeholder[0]}</Text>
-              <Text dimColor>{placeholder.slice(1)}</Text>
+              <Text inverse>{hint[0]}</Text>
+              <Text dimColor>{hint.slice(1)}</Text>
             </>
           ) : (
-            <Text dimColor>{placeholder}</Text>
+            <Text dimColor>{hint}</Text>
           )
         ) : value || isActive ? (
           body

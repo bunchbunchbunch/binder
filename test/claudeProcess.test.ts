@@ -37,6 +37,7 @@ describe('buildArgs', () => {
     expect(args).not.toContain('--resume');
     expect(args).not.toContain('--permission-mode');
     expect(args).toContain('--include-partial-messages');
+    expect(args).toContain('--prompt-suggestions');
   });
 
   it('passes the permission mode from config.json', () => {

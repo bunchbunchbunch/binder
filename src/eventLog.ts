@@ -80,6 +80,7 @@ export function replay(sessionId: string): State {
   for (const tab of state.tabs) {
     if (tab.bash && tab.status === 'running') state = reduce(state, { type: 'bash_done', tabId: tab.id, output: '', exitCode: null });
   }
-  // Background work ended with the child that ran it.
-  return { ...state, bashContext: [], notices: [], backgroundTasks: [] };
+  // Background work ended with the child that ran it. A suggestion is for
+  // the moment it was made, so a resumed session starts without one, as in Claude Code.
+  return { ...state, bashContext: [], notices: [], backgroundTasks: [], suggestion: undefined };
 }
