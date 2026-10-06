@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { ClaudeProcess, buildArgs, type ImageAttachment } from './claudeProcess.js';
-import type { ClaudeEvent, ControlRequestEvent } from './events.js';
+import type { ClaudeEvent, ControlRequestEvent, OtherSystemEvent } from './events.js';
 import { appendLocal, appendPrompt, appendRaw, type LocalMarker } from './eventLog.js';
 import { childEnv, stateDir } from './paths.js';
 import type { SlashCommand } from './slashCommands.js';
@@ -61,6 +61,9 @@ export class Session extends EventEmitter<SessionEvents> {
   private forkFrom: string | undefined;
   private extraArgs: string[] = [];
   private requests = new Map<string, PendingRequest>();
+  // The child's permission mode, and the one it was in when it entered plan mode.
+  private mode: string | undefined;
+  private beforePlan: string | undefined;
 
   constructor(private readonly opts: SessionOptions) {
     super();
@@ -96,6 +99,12 @@ export class Session extends EventEmitter<SessionEvents> {
     proc.on('event', (e) => {
       // A child being replaced by switchTo() may still flush a few lines.
       if (this.proc !== proc) return;
+      // Each turn's init carries the mode, and a status event carries a change mid-turn.
+      const mode = e.type === 'system' ? (e as OtherSystemEvent).permissionMode : undefined;
+      if (typeof mode === 'string') {
+        if (mode === 'plan' && this.mode !== 'plan') this.beforePlan = this.mode;
+        this.mode = mode;
+      }
       if (e.type === 'control_response') {
         const r = (e as { response?: { subtype?: string; request_id?: string; error?: string; response?: Record<string, unknown> } }).response;
         const waiting = r?.request_id ? this.requests.get(r.request_id) : undefined;
@@ -109,13 +118,21 @@ export class Session extends EventEmitter<SessionEvents> {
       if (e.type === 'control_request') {
         const req = e as ControlRequestEvent;
         if (req.request.subtype === 'can_use_tool') {
-          this.emit('permission', {
+          const perm: PermissionRequest = {
             requestId: req.request_id,
             toolName: String(req.request.tool_name ?? ''),
             toolUseId: req.request.tool_use_id as string | undefined,
             input: (req.request.input as Record<string, unknown>) ?? {},
             reason: req.request.decision_reason as string | undefined,
-          });
+          };
+          // In plan mode entered from bypass mode, interactive Claude Code asks
+          // only for its safety checks and the tools that need the user
+          // (AskUserQuestion, the plan itself). Headless Claude Code asks binder
+          // about every tool it can't prove read-only, so answer those here.
+          const bypassed = this.mode === 'plan' && this.beforePlan === 'bypassPermissions'
+            && req.request.requires_user_interaction !== true && req.request.decision_reason_type !== 'safetyCheck';
+          if (bypassed) this.allow(perm);
+          else this.emit('permission', perm);
           return;
         }
       }

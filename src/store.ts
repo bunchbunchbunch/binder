@@ -378,7 +378,11 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
   }
   if (ev.type === 'system') {
     const sub = (ev as { subtype: string }).subtype;
-    if (sub === 'status') return { ...state, activity: String((ev as { status?: unknown }).status ?? '') };
+    if (sub === 'status') {
+      // A mode change mid-turn (EnterPlanMode, ExitPlanMode) comes as a status event.
+      const { status, permissionMode } = ev as { status?: unknown; permissionMode?: unknown };
+      return { ...state, activity: String(status ?? ''), ...(typeof permissionMode === 'string' && { permissionMode }) };
+    }
     if (sub === 'background_tasks_changed') {
       const tasks = (ev as { tasks?: { task_id: string; task_type?: string; description?: string }[] }).tasks ?? [];
       return { ...state, backgroundTasks: tasks.map((t) => ({ id: t.task_id, type: t.task_type ?? '', description: t.description ?? '' })) };

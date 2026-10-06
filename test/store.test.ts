@@ -211,6 +211,24 @@ describe('prompt suggestions', () => {
   });
 });
 
+describe('permission mode', () => {
+  // Claude can switch modes mid-turn (EnterPlanMode, ExitPlanMode); the
+  // footer should change then, not at the next turn's init.
+  it('follows a mode change reported in a status event', () => {
+    const events = fixture('plan-after-bypass.jsonl');
+    const at = (uuid: string) => events.findIndex((e) => (e as { uuid?: string }).uuid === uuid) + 1;
+    expect(play(initialState('sid'), events.slice(0, 1)).permissionMode).toBe('bypassPermissions');
+    expect(play(initialState('sid'), events.slice(0, at('s1'))).permissionMode).toBe('plan');
+    expect(play(initialState('sid'), events.slice(0, at('u2'))).permissionMode).toBe('plan');
+    expect(play(initialState('sid'), events.slice(0, at('s2'))).permissionMode).toBe('bypassPermissions');
+  });
+
+  it('keeps the mode through status events that do not carry one', () => {
+    const s = play(initialState('sid'), fixture('plan-after-bypass.jsonl').slice(0, 3));
+    expect(play(s, [{ type: 'system', subtype: 'status', status: 'requesting' } as ClaudeEvent]).permissionMode).toBe('plan');
+  });
+});
+
 // Recorded from the real binary: a prompt starts background work and the turn
 // ends; when the work finishes the child starts a turn of its own about it.
 describe('background work', () => {
