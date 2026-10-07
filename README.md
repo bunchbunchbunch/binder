@@ -41,13 +41,14 @@ Binder leaves the permission mode to Claude Code (`permissions.defaultMode` in
 ## Configuration
 
 Binder reads optional defaults from `~/.config/binder/config.json` (`BINDER_CONFIG` points
-elsewhere):
+elsewhere). `/settings` shows and changes them, or edit the file:
 
 ```json
 {
   "permissionMode": "bypassPermissions",
   "configDirs": { "~/work": "~/.claude-work" },
-  "stickyPrompt": true
+  "stickyPrompt": true,
+  "markdownStyle": "classic"
 }
 ```
 
@@ -61,6 +62,13 @@ elsewhere):
   with `+N lines` when it is longer. `Home` shows the whole prompt at the top of the tab. In
   a tab with follow-ups, the pinned prompt is the one for the turn on screen. Off by default;
   the Mac app reads it too.
+- `markdownStyle` is `vivid` (the default) or `classic`; see Output rendering. `BINDER_MD`
+  overrides it, and `/md` switches for the running session only.
+
+`/settings` saves to the file in place (a symlink into a dotfiles repo stays a symlink) and
+keeps keys it does not know. Sticky prompt and markdown style change at once; a running
+binder keeps the permission mode and config dirs it started with, so they apply to sessions
+opened from then on.
 
 ## Keys
 
@@ -127,6 +135,7 @@ session or directory the child is on, or they need a picker:
 | `/mcp` | MCP servers and their status; pick one to authenticate (opens the sign-in page), reconnect, enable or disable it, or clear its authentication |
 | `/chrome` | Claude in Chrome: extension status, enable or disable it for this session (restarts claude with `--chrome`), and links to reconnect or manage permissions |
 | `/artifacts` | artifacts published in this session: `Enter`/`o` opens one, `c` copies its link |
+| `/settings` | binder's `config.json`: permission mode for new sessions, sticky prompt, markdown style, and config dirs (add one by typing its folder and config dir, `Tab` completes; `Enter` on one removes it) |
 | `/exit` (`/quit`) | quit |
 
 `/resume`, `/clear`, `/fork`, `/rewind` and `/cd` wait until no turn is running or queued.

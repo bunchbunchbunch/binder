@@ -58,8 +58,10 @@ export function main(argv = process.argv.slice(2)): void {
   // screen. In raw mode it waits unechoed until Ink reads it.
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
   if (process.stdout.isTTY) stampFrames(process.stdout);
-  // Responses render vivid unless BINDER_MD=classic; /md switches while running.
-  setMarkdownStyle(MARKDOWN_STYLES.find((s) => s === process.env.BINDER_MD) ?? 'vivid');
+  // Responses render vivid unless BINDER_MD or config.json's markdownStyle says
+  // classic; /md switches while running.
+  const style = (s?: string) => MARKDOWN_STYLES.find((m) => m === s);
+  setMarkdownStyle(style(process.env.BINDER_MD) ?? style(binderConfig().markdownStyle) ?? 'vivid');
   const app = render(
     <App host={host} configDir={cfg} statusLineCommand={readStatusLineCommand(cfg)} draft={draft} stickyPrompt={binderConfig().stickyPrompt === true} onQuit={shutdown} />,
     { ...RENDER_OPTIONS, stdin: filterInput(process.stdin, (chunk) => takeMouse(keypadToText(chunk))) },

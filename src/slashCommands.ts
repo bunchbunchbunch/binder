@@ -4,7 +4,7 @@
 
 export type SlashCommand = { name: string; description: string; argumentHint?: string; aliases?: string[] };
 
-export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'markdown';
+export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'markdown' | 'settings';
 
 const LOCAL: Array<SlashCommand & { name: LocalCommandName }> = [
   { name: 'help', description: 'Show keys and commands' },
@@ -20,6 +20,7 @@ const LOCAL: Array<SlashCommand & { name: LocalCommandName }> = [
   { name: 'chrome', description: 'Claude in Chrome: status and setup' },
   { name: 'artifacts', description: 'Artifacts published in this session (Ctrl+] opens the latest)' },
   { name: 'markdown', description: 'Switch the markdown style for responses: classic or vivid', argumentHint: '[style]', aliases: ['md'] },
+  { name: 'settings', description: "Binder's settings (config.json): permission mode, sticky prompt, markdown style, config dirs" },
 ];
 
 // The child's commands plus binder's own, which replace any of the same name.

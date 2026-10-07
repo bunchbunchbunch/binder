@@ -6,10 +6,15 @@ import { openExternal, copyText } from '../openUrl.js';
 import { sessionArtifacts } from '../artifacts.js';
 import { currentBranch, listTranscripts, worktreePaths, type SessionSummary } from '../transcripts.js';
 import { logPath } from '../eventLog.js';
-import { existsSync } from 'node:fs';
+import { configPath, readConfig, saveConfig, type BinderConfig } from '../config.js';
+import { completePath } from '../complete.js';
+import { expandHome } from '../paths.js';
+import { MARKDOWN_STYLES, type MarkdownStyle } from './md/theme.js';
+import { existsSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 
 // binder's own panels, shown in place of the transcript: /model, /effort,
-// /mcp, /chrome, /rewind, /artifacts, /resume, and a yes/no confirm.
+// /mcp, /chrome, /rewind, /artifacts, /resume, /settings, and a yes/no confirm.
 
 type Common = { session: Session; flash: (msg: string) => void; close: () => void };
 
@@ -354,6 +359,186 @@ export function ResumePanel({ close, cwd, configDir, currentId, onResume }: Comm
         if (input === 'b') return toggle('branch'), true;
         return false;
       }}
+    />
+  );
+}
+
+// The modes `claude --permission-mode` takes.
+const PERMISSION_MODES: Array<[string, string]> = [
+  ['manual', 'ask before edits and commands'],
+  ['acceptEdits', 'edit files without asking; ask before commands'],
+  ['plan', 'read and plan, no edits'],
+  ['auto', "Claude Code's auto mode"],
+  ['dontAsk', 'deny anything settings.json does not allow'],
+  ['bypassPermissions', 'never ask'],
+];
+
+const isDir = (p: string) => {
+  try {
+    return statSync(expandHome(p)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+// Folders for a typed path (from ~/ or /): the path itself when it is one, or
+// when `allowNew`, then the folders that complete it.
+function folderItems(query: string, allowNew: boolean): PickerItem[] {
+  if (!/^[~/]/.test(query)) return [];
+  const typed = query.length > 1 ? query.replace(/\/+$/, '') : query;
+  const exists = isDir(typed);
+  const head: PickerItem[] = exists || allowNew ? [{ key: typed, label: typed, description: exists ? undefined : 'does not exist yet' }] : [];
+  const more = completePath(query, homedir())
+    .filter((p) => p.endsWith('/'))
+    .map((p) => p.slice(0, -1))
+    .filter((p) => p !== typed);
+  return head.concat(more.map((p) => ({ key: p, label: p })));
+}
+
+type SettingsView = { kind: 'list' | 'mode' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string };
+
+// /settings: binder's config.json. The view settings apply at once; a running
+// binder keeps the permission mode and config dirs it started with.
+export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Common, 'session'> & { onSticky: (on: boolean) => void; onMarkdown: (style: MarkdownStyle) => void }) {
+  const [loaded] = useState(() => {
+    try {
+      return { config: readConfig(), error: '' };
+    } catch (e) {
+      return { config: {} as BinderConfig, error: errText(e) };
+    }
+  });
+  const [config, setConfig] = useState(loaded.config);
+  const [error, setError] = useState(loaded.error);
+  const [view, setView] = useState<SettingsView>({ kind: 'list' });
+  const [query, setQuery] = useState('');
+  // The row last picked, for the cursor on the way back to the list.
+  const [last, setLast] = useState('mode');
+  const save = (patch: BinderConfig, msg: string): boolean => {
+    try {
+      setConfig(saveConfig(patch));
+      setError('');
+      flash(msg);
+      return true;
+    } catch (e) {
+      setError(errText(e));
+      return false;
+    }
+  };
+  const back = () => setView({ kind: 'list' });
+  const dirs = config.configDirs ?? {};
+  const style = MARKDOWN_STYLES.find((s) => s === config.markdownStyle) ?? 'vivid';
+  const backHint = '↑↓ move · enter selects · esc back';
+
+  if (view.kind === 'mode') {
+    const current = config.permissionMode ?? 'unset';
+    const modes: PickerItem[] = [
+      { key: 'unset', label: "Claude Code's default", description: 'permissions.defaultMode in settings.json' },
+      ...PERMISSION_MODES.map(([key, description]) => ({ key, label: key, description })),
+    ].map((m) => ({ ...m, mark: m.key === current ? '✓' : ' ', markColor: '#98C379' }));
+    return (
+      <Picker
+        key="mode"
+        title="Permission mode"
+        subtitle={error || 'For sessions opened from now on; open ones keep the mode they started with'}
+        items={modes}
+        initial={Math.max(0, modes.findIndex((m) => m.key === current))}
+        onSelect={(i) => save({ permissionMode: i.key === 'unset' ? undefined : i.key }, `Permission mode: ${i.label}`) && back()}
+        onCancel={back}
+        hint={backHint}
+      />
+    );
+  }
+
+  if (view.kind === 'mapping') {
+    const { folder } = view;
+    const remove = () => {
+      const { [folder]: _, ...rest } = dirs;
+      return save({ configDirs: Object.keys(rest).length ? rest : undefined }, `Removed the config dir for ${folder}`);
+    };
+    return (
+      <Picker
+        key="mapping"
+        title={`${folder} → ${dirs[folder]}`}
+        subtitle={error || undefined}
+        items={[
+          { key: 'remove', label: 'Remove', description: `claude in ${folder} goes back to the usual config dir` },
+          { key: 'keep', label: 'Keep' },
+        ]}
+        onSelect={(i) => (i.key === 'keep' || remove()) && back()}
+        onCancel={back}
+        hint={backHint}
+      />
+    );
+  }
+
+  if (view.kind === 'folder' || view.kind === 'dir') {
+    const folder = view.kind === 'dir' ? view.folder : null;
+    const pick = (item: PickerItem) => {
+      if (folder === null) {
+        setQuery('~/.claude');
+        return setView({ kind: 'dir', folder: item.key });
+      }
+      if (save({ configDirs: { ...dirs, [folder]: item.key } }, `claude in ${folder} will use ${item.key}`)) {
+        setLast(`dir:${folder}`);
+        back();
+      }
+    };
+    return (
+      <Picker
+        key={view.kind}
+        title={folder === null ? 'Add a config dir: the folder' : `Config dir for ${folder}`}
+        subtitle={error || (folder === null ? 'claude run in this folder, or below it, uses another config dir' : 'The Claude Code config dir (CLAUDE_CONFIG_DIR) for claude run there')}
+        items={folderItems(query, folder !== null)}
+        search={{ query, onChange: setQuery }}
+        onSelect={pick}
+        onCancel={back}
+        empty={/^[~/]/.test(query) ? 'no folder here' : 'start with ~/ or /'}
+        hint="type a path · tab completes · enter picks · esc back"
+        onKey={(_input, key, item) => {
+          if (!key.tab || !item) return false;
+          setQuery(item.key + '/');
+          return true;
+        }}
+      />
+    );
+  }
+
+  const items: PickerItem[] = [
+    { key: 'mode', label: 'Permission mode', description: config.permissionMode ?? "Claude Code's default" },
+    { key: 'sticky', label: 'Sticky prompt', description: config.stickyPrompt === true ? 'on' : 'off' },
+    { key: 'markdown', label: 'Markdown style', description: style },
+    ...Object.entries(dirs).map(([folder, dir]) => ({ key: `dir:${folder}`, label: 'Config dir', description: `${folder} → ${dir}` })),
+    { key: 'add', label: 'Add a config dir…', description: Object.keys(dirs).length ? undefined : 'for a second account: claude run in a folder you pick uses another config dir' },
+  ];
+  const pick = (item: PickerItem) => {
+    setLast(item.key);
+    if (item.key === 'mode') return setView({ kind: 'mode' });
+    if (item.key === 'sticky') {
+      const on = config.stickyPrompt !== true;
+      if (save({ stickyPrompt: on }, `Sticky prompt ${on ? 'on' : 'off'}`)) onSticky(on);
+      return;
+    }
+    if (item.key === 'markdown') {
+      const next = MARKDOWN_STYLES[(MARKDOWN_STYLES.indexOf(style) + 1) % MARKDOWN_STYLES.length];
+      if (save({ markdownStyle: next }, `Markdown: ${next}`)) onMarkdown(next);
+      return;
+    }
+    if (item.key === 'add') {
+      setQuery('~/');
+      return setView({ kind: 'folder' });
+    }
+    setView({ kind: 'mapping', folder: item.key.slice('dir:'.length) });
+  };
+  return (
+    <Picker
+      key="list"
+      title="Settings"
+      subtitle={error || `${configPath().replace(homedir(), '~')} · permission mode and config dirs apply to sessions opened from now on`}
+      items={items}
+      initial={Math.max(0, items.findIndex((i) => i.key === last))}
+      onSelect={pick}
+      onCancel={close}
+      hint="↑↓ move · enter changes · esc closes"
     />
   );
 }

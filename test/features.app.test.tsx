@@ -259,6 +259,87 @@ describe('/artifacts', () => {
   });
 });
 
+describe('/settings', () => {
+  it('saves to config.json: sticky prompt, markdown style, permission mode, and a config dir added then removed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'binder-settings-'));
+    const file = join(dir, 'config.json');
+    writeFileSync(file, JSON.stringify({ permissionMode: 'plan', mine: true }));
+    const work = join(dir, 'work');
+    mkdirSync(work);
+    const account = join(dir, 'claude-work');
+    const config = () => JSON.parse(readFileSync(file, 'utf8'));
+    const before = process.env.BINDER_CONFIG;
+    process.env.BINDER_CONFIG = file;
+    const t = start('settings');
+    try {
+      await t.type('/settings');
+      await t.wait(() => t.frame().includes('Sticky prompt') && t.frame().includes('plan'));
+      await t.key(DOWN);
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes('Sticky prompt on'));
+      await t.key(DOWN);
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes('Markdown: classic'));
+      expect(config()).toEqual({ permissionMode: 'plan', mine: true, stickyPrompt: true, markdownStyle: 'classic' });
+
+      // Back to Claude Code's own default: the key goes.
+      await t.key(UP);
+      await t.key(UP);
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes('bypassPermissions'));
+      for (let i = 0; i < 3; i++) await t.key(UP);
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes("Permission mode: Claude Code's default"));
+      expect(config().permissionMode).toBeUndefined();
+
+      // Add a config dir: type the folder, then a config dir that does not exist yet.
+      for (let i = 0; i < 3; i++) await t.key(DOWN);
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes('Add a config dir: the folder'));
+      for (let i = 0; i < 2; i++) await t.key('\x7f');
+      await t.key(work);
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes(`Config dir for ${work}`));
+      for (let i = 0; i < '~/.claude'.length; i++) await t.key('\x7f');
+      await t.key(account);
+      await t.wait(() => t.frame().includes('does not'));
+      await t.key(ENTER);
+      await t.wait(() => config().configDirs?.[work] === account);
+      expect(config().configDirs).toEqual({ [work]: account });
+
+      // The cursor is back on the new row: remove it.
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes('Remove'));
+      await t.key(ENTER);
+      await t.wait(() => !config().configDirs);
+      expect(config()).toEqual({ mine: true, stickyPrompt: true, markdownStyle: 'classic' });
+      await t.key(ESC);
+      await t.wait(() => !t.frame().includes('Sticky prompt'));
+    } finally {
+      process.env.BINDER_CONFIG = before;
+      await t.stop();
+    }
+  });
+
+  it('shows why when config.json does not parse, and leaves it alone', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'binder-settings-')), 'config.json');
+    writeFileSync(file, '{');
+    const before = process.env.BINDER_CONFIG;
+    process.env.BINDER_CONFIG = file;
+    const t = start('settings-bad');
+    try {
+      await t.type('/settings');
+      await t.wait(() => t.frame().includes(`${file}:`));
+      await t.key(DOWN);
+      await t.key(ENTER);
+      expect(readFileSync(file, 'utf8')).toBe('{');
+    } finally {
+      process.env.BINDER_CONFIG = before;
+      await t.stop();
+    }
+  });
+});
+
 describe('/resume scopes', () => {
   it('starts with this folder; Ctrl+A shows all projects and typing filters', async () => {
     const t = start('resume');

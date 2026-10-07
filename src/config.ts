@@ -1,16 +1,18 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 // ~/.config/binder/config.json: one person's defaults, kept out of the code.
 //   permissionMode  passed to claude as --permission-mode, unless one comes after --
 //   configDirs      folder -> CLAUDE_CONFIG_DIR for claude run inside it, when
 //                   CLAUDE_CONFIG_DIR is not set already
 //   stickyPrompt    pin a turn's prompt to the top of the tab once it scrolls out
+//   markdownStyle   how responses render: vivid (the default) or classic
 export type BinderConfig = {
   permissionMode?: string;
   configDirs?: Record<string, string>;
   stickyPrompt?: boolean;
+  markdownStyle?: string;
 };
 
 export const configPath = () => process.env.BINDER_CONFIG || join(homedir(), '.config', 'binder', 'config.json');
@@ -24,5 +26,20 @@ export function readConfig(path = configPath()): BinderConfig {
   }
 }
 
+// Sets keys in config.json (undefined removes one), keeping the rest of the
+// file. Written in place, so a symlink into a dotfiles repo stays a symlink.
+// A file that does not parse is left alone: readConfig throws first.
+export function saveConfig(patch: BinderConfig, path = configPath()): BinderConfig {
+  const next: Record<string, unknown> = { ...readConfig(path) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete next[k];
+    else next[k] = v;
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(next, null, 2) + '\n');
+  return next;
+}
+
+// Read once per process: a running binder keeps the settings it started with.
 let cached: BinderConfig | undefined;
 export const binderConfig = (): BinderConfig => (cached ??= readConfig());

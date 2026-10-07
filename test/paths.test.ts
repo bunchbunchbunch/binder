@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { childEnv } from '../src/paths.js';
-import { readConfig } from '../src/config.js';
+import { readConfig, saveConfig } from '../src/config.js';
 
 describe('account routing', () => {
   const config = { configDirs: { '~/work': '~/.claude-alt' } };
@@ -41,5 +41,20 @@ describe('config.json', () => {
     expect(readConfig(join(dir, 'ok.json'))).toEqual({ permissionMode: 'plan' });
     writeFileSync(join(dir, 'bad.json'), '{');
     expect(() => readConfig(join(dir, 'bad.json'))).toThrow(join(dir, 'bad.json'));
+  });
+  it('saves keys in place: others kept, undefined removed, a symlink kept a symlink', () => {
+    const target = join(dir, 'dotfiles.json');
+    writeFileSync(target, JSON.stringify({ permissionMode: 'plan', stickyPrompt: true, extra: 1 }));
+    const link = join(dir, 'linked.json');
+    symlinkSync(target, link);
+    expect(saveConfig({ permissionMode: undefined, markdownStyle: 'classic' }, link)).toEqual({ stickyPrompt: true, extra: 1, markdownStyle: 'classic' });
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, 'utf8')).toBe('{\n  "stickyPrompt": true,\n  "extra": 1,\n  "markdownStyle": "classic"\n}\n');
+    expect(saveConfig({ stickyPrompt: false }, join(dir, 'new', 'config.json'))).toEqual({ stickyPrompt: false });
+  });
+  it('leaves a file that does not parse alone', () => {
+    writeFileSync(join(dir, 'broken.json'), '{');
+    expect(() => saveConfig({ stickyPrompt: true }, join(dir, 'broken.json'))).toThrow(join(dir, 'broken.json'));
+    expect(readFileSync(join(dir, 'broken.json'), 'utf8')).toBe('{');
   });
 });

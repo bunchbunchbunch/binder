@@ -18,9 +18,9 @@ import { StatusBar } from './StatusBar.js';
 import { HelpView } from './HelpView.js';
 import { Shortcuts } from './Shortcuts.js';
 import { Welcome } from './Welcome.js';
-import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, rewindTargets } from './panels.js';
+import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, SettingsPanel, rewindTargets } from './panels.js';
 import { SPINNER, elapsed, turnVerb } from './tabLayout.js';
-import { MARKDOWN_STYLES, markdownStyle, setMarkdownStyle } from './md/theme.js';
+import { MARKDOWN_STYLES, markdownStyle, setMarkdownStyle, type MarkdownStyle } from './md/theme.js';
 
 
 // "──────── title ─", with the title right-aligned like Claude Code's composer.
@@ -50,7 +50,7 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // binder's own panels, shown in place of the transcript.
 type Panel =
-  | { kind: 'resume' | 'mcp' | 'model' | 'effort' | 'chrome' | 'rewind' | 'artifacts' }
+  | { kind: 'resume' | 'mcp' | 'model' | 'effort' | 'chrome' | 'rewind' | 'artifacts' | 'settings' }
   | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
 
 
@@ -86,6 +86,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   const [shortcuts, setShortcuts] = useState(false);
   const [help, setHelp] = useState(false);
   const [mdStyle, setMdStyle] = useState(markdownStyle);
+  const [sticky, setSticky] = useState(stickyPrompt === true);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [cwd, setCwd] = useState(host.cwd);
   const [history, setHistory] = useState<string[]>(() => loadHistory(host.cwd));
@@ -219,6 +220,11 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
     flash(`Opened ${latest.url}`);
   };
 
+  const applyMarkdown = (style: MarkdownStyle) => {
+    setMarkdownStyle(style);
+    setMdStyle(style);
+  };
+
   const runLocal = (name: LocalCommandName, args: string) => {
     switch (name) {
       case 'help':
@@ -228,6 +234,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
       case 'artifacts':
       case 'mcp':
       case 'chrome':
+      case 'settings':
         return setPanel({ kind: name });
       case 'model':
         return args ? setModel(args) : setPanel({ kind: 'model' });
@@ -237,8 +244,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         // A named style, or the next one in turn.
         const named = MARKDOWN_STYLES.find((s) => s === args);
         const next = named ?? MARKDOWN_STYLES[(MARKDOWN_STYLES.indexOf(mdStyle) + 1) % MARKDOWN_STYLES.length];
-        setMarkdownStyle(next);
-        setMdStyle(next);
+        applyMarkdown(next);
         return flash(`Markdown: ${next}`);
       }
     }
@@ -322,6 +328,8 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         return <RewindPanel {...common} tabs={state.tabs} onRewind={(t, mode) => void rewind(t, mode)} />;
       case 'artifacts':
         return <ArtifactsPanel {...common} tabs={state.tabs} />;
+      case 'settings':
+        return <SettingsPanel flash={flash} close={closePanel} onSticky={setSticky} onMarkdown={applyMarkdown} />;
       case 'confirm':
         return (
           <ConfirmPanel
@@ -369,7 +377,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         ) : help ? (
           <HelpView commandCount={commands.length} />
         ) : active ? (
-          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} sticky={stickyPrompt} />
+          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} sticky={sticky} />
         ) : (
           <Welcome model={state.model} effort={effort} plan={plan} cwd={cwd} width={columns} />
         )}

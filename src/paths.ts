@@ -15,7 +15,7 @@ export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 }
 
-const expandHome = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir()));
+export const expandHome = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir()));
 
 // The environment for the claude child: the user's own, minus the NODE_ENV
 // binder set for itself. Without CLAUDE_CONFIG_DIR, the first configDirs folder

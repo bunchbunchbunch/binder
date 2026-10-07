@@ -34,7 +34,7 @@ export function HelpView({ commandCount }: { commandCount: number }) {
       ))}
       <Text> </Text>
       <Text bold color="#7CC4FF">Commands</Text>
-      <Text>{`  Type / to browse all ${commandCount}. Binder runs /help, /resume, /clear, /fork, /rewind, /cd, /model, /effort, /mcp, /chrome, /artifacts and /exit itself; the rest go to Claude Code.`}</Text>
+      <Text>{`  Type / to browse all ${commandCount}. Binder runs /help, /resume, /clear, /fork, /rewind, /cd, /model, /effort, /mcp, /chrome, /artifacts, /settings and /exit itself; the rest go to Claude Code.`}</Text>
       <Text> </Text>
       <Text dimColor>  Esc closes this.</Text>
     </Box>
