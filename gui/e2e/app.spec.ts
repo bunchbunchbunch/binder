@@ -237,6 +237,22 @@ test('fits a narrow window, counts tabs out of view, and hides the sidebar', asy
   await expect(page.locator('.tab-more')).toHaveText(/\d+ ›/);
   await page.screenshot({ path: shot('tab-overflow') });
 
+  // Paging or scrolling the strip by hand leaves it there: the count that
+  // appears on the other side narrows the strip, which must not snap it back.
+  const strip = page.locator('.session:not([hidden]) .tabs');
+  const scrolled = () => strip.evaluate((el) => el.scrollLeft);
+  await page.locator('.tab-more').click();
+  await page.waitForTimeout(800);
+  expect(await scrolled()).toBeGreaterThan(0);
+  await expect(page.locator('.tab-more')).toHaveCount(2);
+  const paged = await scrolled();
+  await strip.hover();
+  await page.mouse.wheel(-60, 0);
+  await page.waitForTimeout(300);
+  expect(await scrolled()).toBeLessThan(paged);
+  expect(await scrolled()).toBeGreaterThan(0);
+  await expect(page.locator('.tab-more')).toHaveCount(2);
+
   await page.keyboard.press('Control+Meta+s');
   await expect(page.locator('.sidebar')).toHaveCount(0);
   await page.keyboard.press('Control+Meta+s');

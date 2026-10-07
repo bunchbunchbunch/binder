@@ -8,6 +8,9 @@ import { statusGlyph, tabTitle } from '../lib/work';
 export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: number | null; onSelect: (id: number) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState({ left: 0, right: 0 });
+  // Whether the strip keeps the active tab in view. Scrolling it by hand lets
+  // go until the active tab changes.
+  const follow = useRef(true);
 
   const measure = () => {
     const el = box.current;
@@ -24,14 +27,18 @@ export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: nu
   };
 
   // The active tab in view, then the counts. Again on resize: a count
-  // appearing narrows the strip and can cut the active tab off.
+  // appearing narrows the strip and can cut the active tab off. Not once
+  // scrolled by hand, or the count that scroll brings in snaps it back.
   const settle = () => {
-    box.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (follow.current) box.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     measure();
   };
   // Only a new active tab or a new tab moves the strip; patches (every
   // 120 ms while a turn runs) leave a strip scrolled by hand where it is.
-  useLayoutEffect(settle, [active, tabs.length]);
+  useLayoutEffect(() => {
+    follow.current = true;
+    settle();
+  }, [active, tabs.length]);
   useLayoutEffect(measure, [tabs]);
   useEffect(() => {
     const el = box.current;
@@ -42,7 +49,10 @@ export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: nu
   }, [tabs.length > 0]);
 
   if (!tabs.length) return <div className="no-tabs">No tabs yet: type a prompt below</div>;
-  const page = (dir: number) => box.current?.scrollBy({ left: dir * box.current.clientWidth * 0.8, behavior: 'smooth' });
+  const page = (dir: number) => {
+    follow.current = false;
+    box.current?.scrollBy({ left: dir * box.current.clientWidth * 0.8, behavior: 'smooth' });
+  };
   return (
     <div className="tabbar">
       {hidden.left > 0 && (
@@ -50,7 +60,7 @@ export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: nu
           ‹ {hidden.left}
         </button>
       )}
-      <div className="tabs" ref={box} onScroll={measure}>
+      <div className="tabs" ref={box} onScroll={measure} onWheel={() => (follow.current = false)}>
         {tabs.map((t) => {
           const status = t.status === 'superseded' ? 'running' : t.status;
           return (
