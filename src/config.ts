@@ -6,9 +6,11 @@ import { join } from 'node:path';
 //   permissionMode  passed to claude as --permission-mode, unless one comes after --
 //   configDirs      folder -> CLAUDE_CONFIG_DIR for claude run inside it, when
 //                   CLAUDE_CONFIG_DIR is not set already
+//   stickyPrompt    pin a turn's prompt to the top of the tab once it scrolls out
 export type BinderConfig = {
   permissionMode?: string;
   configDirs?: Record<string, string>;
+  stickyPrompt?: boolean;
 };
 
 export const configPath = () => process.env.BINDER_CONFIG || join(homedir(), '.config', 'binder', 'config.json');

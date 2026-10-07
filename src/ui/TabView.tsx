@@ -2,7 +2,7 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useBoxMetrics, useInput, type DOMElement } from 'ink';
 import type { Block, Tab } from '../store.js';
 import { renderMarkdown } from './markdown.js';
-import { tabLines, type PendingPrompt, type TextRenderer } from './tabLines.js';
+import { stickyLines, tabLines, type PendingPrompt, type TextRenderer, type TurnHead } from './tabLines.js';
 import { onWheel } from '../mouse.js';
 import { setBigViewport } from './lineAttrs.js';
 import { markdownStyle, type MarkdownStyle } from './md/theme.js';
@@ -55,9 +55,10 @@ function useTextRenderer(): TextRenderer {
 }
 
 // `mdStyle` is only read to redraw the tab when the markdown style changes.
-type TabViewProps = { tab: Tab; width: number; detail: boolean; scrollActive: boolean; questionPending: boolean; expandedOverride?: boolean; pending?: PendingPrompt[]; mdStyle?: MarkdownStyle };
+// `sticky`: once a turn's prompt scrolls out of view, its first rows stay at the top.
+type TabViewProps = { tab: Tab; width: number; detail: boolean; scrollActive: boolean; questionPending: boolean; expandedOverride?: boolean; pending?: PendingPrompt[]; mdStyle?: MarkdownStyle; sticky?: boolean };
 
-function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expandedOverride, pending }: TabViewProps) {
+function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expandedOverride, pending, sticky = false }: TabViewProps) {
   const viewportRef = useRef<DOMElement>(null);
   const { height: viewHeight } = useBoxMetrics(viewportRef);
   const [requested, setRequested] = useState(0);
@@ -85,9 +86,20 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
   const expanded = expandedOverride ?? override ?? autoExpanded;
 
   const textWidth = Math.max(20, width - 2);
-  const { lines, workAt } = tabLines(tab, { width: textWidth, detail, expanded, expandEarlier: override === true, renderText, pending });
+  const { lines, workAt, heads } = tabLines(tab, { width: textWidth, detail, expanded, expandEarlier: override === true, renderText, pending });
   const maxTop = Math.max(0, lines.length - viewHeight);
   const top = follow ? maxTop : Math.min(requested, maxTop);
+
+  // The sticky header, drawn over the top rows: the prompt of the turn that
+  // row `at` belongs to, once that prompt is scrolled past.
+  const headerRows = sticky ? Math.min(3, Math.floor(viewHeight / 4)) : 0;
+  const headerAt = (at: number): string[] => {
+    let cur: TurnHead | undefined;
+    for (const h of heads) if (h.at <= at) cur = h;
+    if (!cur || cur.at === at || headerRows < 1) return [];
+    return stickyLines(cur, textWidth, headerRows, cur === heads[0]);
+  };
+  const header = headerAt(top);
 
   // The wheel scrolls by lines. Steps that land before the next render add up.
   const pos = useRef({ top, maxTop });
@@ -104,7 +116,7 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
 
   useInput(
     (input, key) => {
-      const page = Math.max(1, viewHeight - 2);
+      const page = Math.max(1, viewHeight - 2 - header.length);
       if (key.pageUp) {
         setFollow(false);
         setRequested(Math.max(0, top - page));
@@ -120,9 +132,9 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
       } else if (key.ctrl && input === 'e') {
         setOverride(!expanded);
         if (!expanded && workAt >= 0) {
-          // Expanding: bring the start of the work to the top of the view.
+          // Expanding: bring the start of the work to the top of the view (under the header).
           setFollow(false);
-          setRequested(workAt);
+          setRequested(Math.max(0, workAt - headerAt(workAt).length));
         } else {
           setFollow(true);
         }
@@ -134,6 +146,7 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
   // Only the rows on screen reach Ink. Before the first measurement the
   // height is unknown, so nothing is drawn for that one frame.
   const visible = viewHeight > 0 ? lines.slice(top, top + viewHeight) : [];
+  visible.splice(0, header.length, ...header);
   return (
     <Box ref={viewportRef} flexGrow={1} flexDirection="column" overflow="hidden" paddingX={1}>
       <Text wrap="truncate-end">{visible.join('\n')}</Text>

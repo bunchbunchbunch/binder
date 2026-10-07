@@ -60,10 +60,12 @@ export type AppProps = {
   statusLineCommand?: string;
   /** Text the prompt starts with, unsent. */
   draft?: string;
+  /** Pin a turn's prompt to the top of the tab once it scrolls out (config.json stickyPrompt). */
+  stickyPrompt?: boolean;
   onQuit: () => void;
 };
 
-export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppProps) {
+export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, onQuit }: AppProps) {
   const state = useSyncExternalStore(host.subscribe, host.getState);
   const dispatch = host.dispatch.bind(host);
   const session = host.session;
@@ -367,7 +369,7 @@ export function App({ host, configDir, statusLineCommand, draft, onQuit }: AppPr
         ) : help ? (
           <HelpView commandCount={commands.length} />
         ) : active ? (
-          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} />
+          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} sticky={stickyPrompt} />
         ) : (
           <Welcome model={state.model} effort={effort} plan={plan} cwd={cwd} width={columns} />
         )}

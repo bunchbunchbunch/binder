@@ -46,7 +46,8 @@ elsewhere):
 ```json
 {
   "permissionMode": "bypassPermissions",
-  "configDirs": { "~/work": "~/.claude-work" }
+  "configDirs": { "~/work": "~/.claude-work" },
+  "stickyPrompt": true
 }
 ```
 
@@ -55,6 +56,11 @@ elsewhere):
   work repos: claude run inside `~/work` gets `CLAUDE_CONFIG_DIR=~/.claude-work`. It applies
   only when `CLAUDE_CONFIG_DIR` is not set already, so a shell hook that sets it still wins;
   it covers launches that skip your shell, such as `binder serve` under launchd.
+- `stickyPrompt` keeps the prompt in view while you read its response: once a turn's prompt
+  scrolls out of the top of the tab, its first 3 lines stay pinned there, over the response,
+  with `+N lines` when it is longer. `Home` shows the whole prompt at the top of the tab. In
+  a tab with follow-ups, the pinned prompt is the one for the turn on screen. Off by default;
+  the Mac app reads it too.
 
 ## Keys
 

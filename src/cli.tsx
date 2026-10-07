@@ -10,6 +10,7 @@ import { HostServer } from './remote/hostServer.js';
 import { liveElsewhere } from './remote/sockets.js';
 import { upsertSession } from './sessions.js';
 import { childEnv, configDir } from './paths.js';
+import { binderConfig } from './config.js';
 import { readStatusLineCommand } from './statusline.js';
 import { USAGE, initialStateFor, parseArgs } from './args.js';
 import { stampFrames } from './ui/lineAttrs.js';
@@ -60,7 +61,7 @@ export function main(argv = process.argv.slice(2)): void {
   // Responses render vivid unless BINDER_MD=classic; /md switches while running.
   setMarkdownStyle(MARKDOWN_STYLES.find((s) => s === process.env.BINDER_MD) ?? 'vivid');
   const app = render(
-    <App host={host} configDir={cfg} statusLineCommand={readStatusLineCommand(cfg)} draft={draft} onQuit={shutdown} />,
+    <App host={host} configDir={cfg} statusLineCommand={readStatusLineCommand(cfg)} draft={draft} stickyPrompt={binderConfig().stickyPrompt === true} onQuit={shutdown} />,
     { ...RENDER_OPTIONS, stdin: filterInput(process.stdin, (chunk) => takeMouse(keypadToText(chunk))) },
   );
   // The wheel scrolls the tab (see mouse.ts). Turned off on any exit, or the
