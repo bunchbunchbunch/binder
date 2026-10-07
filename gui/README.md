@@ -19,8 +19,9 @@ nobody attached exits after 15 idle minutes).
   `bin/binder.mjs`) overrides the lookup.
 - Your binder setup applies unchanged: `~/.config/binder/config.json` (`permissionMode`,
   `configDirs` for a second account, `stickyPrompt`), and everything Claude Code reads.
-  Settings (`⌘,`) changes that file. The app also reads `appearance` and `panes` there (see
-  [Settings](#settings) and [Panes](#panes-and-the-control-socket)).
+  Settings (`⌘,`) changes that file. The app also reads `appearance`, `sidebar` and `panes`
+  there (see [Settings](#settings), [Sidebar text](#sidebar-text) and
+  [Panes](#panes-and-the-control-socket)).
 
 ## Run it
 
@@ -38,8 +39,11 @@ icon from the TUI's pixel logo.
 
 - **Sidebar:** the panes, if config.json has any, and the sessions open in the app (`⌘1` to
   `⌘9`, panes first), then recent ones from
-  `binder sessions`: live sessions first (a green dot; gold while a turn runs), then what
-  `/resume` offers, across every config dir in `configDirs`.
+  `binder sessions`: live sessions first (⏳ while a turn runs), then what `/resume` offers,
+  across every config dir in `configDirs`. An open session's row shows its status (⏳ working,
+  ❓ waiting for you, 🐝 background tasks, ✅ done since you last looked, ⚠️ stopped), how long
+  its turn has run, its first prompt and its folder, unless config.json's `sidebar` says
+  otherwise (see [Sidebar text](#sidebar-text)).
 - **Tab bar:** each prompt and its response is a tab, as in the TUI.
 - **Transcript:** the prompt, the work (thinking and tool calls) folded into a one-line summary
   once the answer lands, then the answer. Tool calls have the TUI's views: Edit as a diff (blue
@@ -98,12 +102,12 @@ Added for the sidebar:
 ## Settings
 
 `⌘,` shows binder's `config.json` and changes it, as `/settings` does in the TUI: the
-permission mode for new sessions, the sticky prompt, the app's appearance, and config dirs
-(add one by typing or choosing its folder, then its config dir; pick one to remove it). The
-file is written in place, so a symlink into a dotfiles repo stays one, and keys the app does
-not know stay. The sticky prompt and appearance change at once; open sessions keep the
-permission mode and config dir they started with. The TUI's markdown style is there in the TUI
-only.
+permission mode for new sessions, the sticky prompt, the app's appearance, the sidebar's text,
+and config dirs (add one by typing or choosing its folder, then its config dir; pick one to
+remove it). The file is written in place, so a symlink into a dotfiles repo stays one, and keys
+the app does not know stay. The sticky prompt, appearance and sidebar change at once; open
+sessions keep the permission mode and config dir they started with. The TUI's markdown style is
+there in the TUI only.
 
 Appearance is `"appearance": "light"` or `"dark"` in config.json; without it (Auto) the app is
 light or dark as macOS is. The TUI ignores it: a terminal's colors are the terminal's.
@@ -111,6 +115,51 @@ light or dark as macOS is. The TUI ignores it: a terminal's colors are the termi
 Slash commands behave as in the TUI, with two differences: `/resume` opens the session picker
 and shows the session alongside the others instead of replacing this one, and `/exit` closes the
 session in the app rather than quitting.
+
+## Sidebar text
+
+An open session's row in the sidebar has two lines, each a template in config.json's
+`sidebar`. Settings (`⌘,`) edits them with a preview and the list of fields; edits to the file
+show when the app next comes to the front.
+
+```json
+"sidebar": {
+  "title": "{status} {elapsed} ([{modelLetter}]) {script|folder}",
+  "subtitle": "{folder}( · {branch})",
+  "script": "cat ~/.claude/summaries/$(jq -r .session_id) 2>/dev/null"
+}
+```
+
+- `{field}` puts in a field, and `{a|b}` the first of them with a value.
+- Text in `( )` shows only when a field inside it has a value, so `([{modelLetter}])` leaves no
+  `[]` behind. A backslash makes the next character plain text: `\(`.
+- Spaces left by empty fields collapse. An empty subtitle hides the second line; a title that
+  comes out empty shows the first prompt. A misspelled field shows as written.
+- The defaults are `{status} {elapsed} {title}` and `{folder}( · {waiting})`. Recent sessions
+  keep their fixed text.
+
+| Field | Shows |
+|-------|-------|
+| `status` | ⏳ a turn runs, ❓ a question waits for you, 🐝 background tasks run, ✅ a turn ended while you looked elsewhere (until you look), ⚠️ claude or its host stopped |
+| `title` | the first prompt |
+| `prompt` | the latest prompt |
+| `folder`, `path` | the session's folder, and its path |
+| `branch` | the folder's git branch |
+| `model`, `modelLetter` | `Opus 5.5`, and `O` |
+| `effort` | the effort level |
+| `elapsed` | how long the running turn has taken, or the last one took, in whole minutes rounded down (`0m`, `3m`, `1h5m`) |
+| `activity` | what the running turn does: `Thinking`, `Running Bash` |
+| `waiting` | `waiting for you` while a question is open |
+| `context` | tokens in context (`45.2k`) |
+| `tabs`, `tasks` | how many tabs, and how many background tasks; empty at zero |
+| `script` | the first line `sidebar.script` prints |
+
+`sidebar.script` covers what the fields do not. It runs as Claude Code runs a `statusLine`
+command: `sh -c` in the session's folder, with the session as JSON on stdin (`session_id`,
+`cwd`, `model.id`, `model.display_name`, `title`, `prompt`, and `status`: `working`,
+`waiting`, `background`, `done`, `stopped` or `idle`). Its first line, without colors, is
+`{script}`. It runs when the session's state changes and every 10 seconds, for 5 seconds at
+most. The example above shows a summary that a Claude Code hook writes per session.
 
 ## Panes and the control socket
 

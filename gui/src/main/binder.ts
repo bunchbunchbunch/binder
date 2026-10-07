@@ -4,7 +4,7 @@ import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
-import type { SessionRow, Settings, SettingsPatch } from '../shared/api';
+import type { SessionRow, Settings, SettingsPatch, SidebarConfig, SidebarScriptInput } from '../shared/api';
 
 export type PaneConfig = { name: string; command: string; cwd?: string };
 
@@ -115,6 +115,13 @@ function readConfig(path: string): Record<string, unknown> {
   }
 }
 
+// config.json's sidebar, keeping only the keys that are strings.
+function readSidebar(v: unknown): SidebarConfig {
+  if (!v || typeof v !== 'object') return {};
+  const s = v as Record<string, unknown>;
+  return Object.fromEntries((['title', 'subtitle', 'script'] as const).filter((k) => typeof s[k] === 'string').map((k) => [k, s[k]]));
+}
+
 /** binder's config.json, from where binder reads it. */
 export function readSettings(env: NodeJS.ProcessEnv): Settings {
   const path = configPath(env);
@@ -122,10 +129,35 @@ export function readSettings(env: NodeJS.ProcessEnv): Settings {
     const c = readConfig(path);
     const dirs = c.configDirs && typeof c.configDirs === 'object' ? (c.configDirs as Record<string, string>) : {};
     const appearance = c.appearance === 'light' || c.appearance === 'dark' ? c.appearance : 'auto';
-    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, appearance, configDirs: dirs };
+    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, appearance, configDirs: dirs, sidebar: readSidebar(c.sidebar) };
   } catch (e) {
-    return { path, permissionMode: null, stickyPrompt: true, appearance: 'auto', configDirs: {}, error: (e as Error).message };
+    return { path, permissionMode: null, stickyPrompt: true, appearance: 'auto', configDirs: {}, sidebar: {}, error: (e as Error).message };
   }
+}
+
+const SCRIPT_TIMEOUT_MS = 5000;
+
+/**
+ * Runs config.json's sidebar.script for a session, as Claude Code runs a
+ * statusLine command: `sh -c` in the session's folder with `input` as JSON
+ * on stdin. Its first line, without color codes, is the {script} field.
+ */
+export function runSidebarScript(env: NodeJS.ProcessEnv, input: SidebarScriptInput): Promise<string> {
+  const command = readSettings(env).sidebar.script;
+  if (!command) return Promise.resolve('');
+  return new Promise((done) => {
+    const child = spawn('sh', ['-c', command], { cwd: existsSync(input.cwd) ? input.cwd : homedir(), env, stdio: ['pipe', 'pipe', 'ignore'] });
+    let out = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), SCRIPT_TIMEOUT_MS);
+    child.stdout.on('data', (d) => (out += d));
+    child.stdin.on('error', () => {});
+    child.on('error', () => done(''));
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      done(code === 0 ? (out.replace(/\x1b\[[0-9;]*m/g, '').split('\n').find((l) => l.trim()) ?? '').trim() : '');
+    });
+    child.stdin.end(JSON.stringify(input));
+  });
 }
 
 /** config.json's `panes`: programs that run in a terminal beside the sessions. */

@@ -142,7 +142,7 @@ test('brings open sessions back after a relaunch; ⌘W closes one and ⌘K reope
   const tmp = run.tmp;
   run = await launch(SHOWCASE, {}, { reuse: tmp });
   const { page } = run;
-  await expect(page.locator('.session-row.active .title')).toHaveText('Fix the table alignment', { timeout: 20000 });
+  await expect(page.locator('.session-row.active .title')).toHaveText(/Fix the table alignment$/, { timeout: 20000 });
   await expect(page.locator('.md h1')).toHaveText('Table rendering');
 
   await page.keyboard.press('Meta+w');

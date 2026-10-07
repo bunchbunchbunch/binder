@@ -37,12 +37,20 @@ export type ImageAttachment = { mediaType: string; data: string };
 // The app's light or dark look; auto follows macOS.
 export type Appearance = 'auto' | 'light' | 'dark';
 
+// config.json's sidebar: templates for an open session's two lines (the
+// renderer's lib/sidebarText.ts has the defaults), and a command whose output
+// is their {script} field.
+export type SidebarConfig = { title?: string; subtitle?: string; script?: string };
+
+// What sidebar.script reads on stdin, as JSON.
+export type SidebarScriptInput = { session_id: string; cwd: string; model: { id: string; display_name: string }; status: string; title: string; prompt: string };
+
 // binder's config.json, as the settings panel shows it (binder host reads it too).
 // `error`: the file does not parse; the rest are defaults then.
-export type Settings = { path: string; permissionMode: string | null; stickyPrompt: boolean; appearance: Appearance; configDirs: Record<string, string>; error?: string };
+export type Settings = { path: string; permissionMode: string | null; stickyPrompt: boolean; appearance: Appearance; configDirs: Record<string, string>; sidebar: SidebarConfig; error?: string };
 
 // Keys to set; null removes one.
-export type SettingsPatch = { permissionMode?: string | null; stickyPrompt?: boolean; appearance?: Appearance | null; configDirs?: Record<string, string> | null };
+export type SettingsPatch = { permissionMode?: string | null; stickyPrompt?: boolean; appearance?: Appearance | null; configDirs?: Record<string, string> | null; sidebar?: SidebarConfig | null };
 
 // Remembered between launches.
 // `fresh`: no prompt yet, so there is no conversation to resume.
@@ -65,6 +73,8 @@ export type BinderApi = {
   onMessage(cb: (conn: string, msg: HostMessage) => void): () => void;
   /** The checkouts of the repo `cwd` is in, and its branch, for the resume picker's scopes. */
   repoInfo(cwd: string): Promise<{ worktrees: string[]; branch: string | null }>;
+  /** The first line config.json's sidebar.script prints for a session; empty without one, or when it fails. */
+  sidebarScript(input: SidebarScriptInput): Promise<string>;
   isDirectory(path: string): Promise<boolean>;
   /** A Finder dialog; `hidden` shows hidden folders (config dirs are). */
   chooseFolder(opts?: { buttonLabel?: string; hidden?: boolean }): Promise<string | null>;

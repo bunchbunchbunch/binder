@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ControlReply, ControlRequest, OpenRequest, SavedLayout, Settings, SettingsPatch } from '../shared/api';
+import type { ControlReply, ControlRequest, OpenRequest, SavedLayout, Settings, SettingsPatch, SidebarScriptInput } from '../shared/api';
 import type { HostMessage } from '../shared/wire';
-import { binder, ensureHost, listSessions, readPanes, readSettings, repoInfo, writeSettings } from './binder';
+import { binder, ensureHost, listSessions, readPanes, readSettings, repoInfo, runSidebarScript, writeSettings } from './binder';
 import { listenControl } from './control';
 import { HostConnection } from './hostConnection';
 import { paneInput, resizePane, startPane, stopPanes } from './panes';
@@ -108,6 +108,7 @@ function registerIpc(): void {
     conns.delete(conn);
   });
   ipcMain.handle('repoInfo', (_e, cwd: string) => repoInfo(cwd));
+  ipcMain.handle('sidebarScript', async (_e, input: SidebarScriptInput) => runSidebarScript(await loginEnv(), input));
   ipcMain.handle('isDirectory', (_e, path: string) => {
     const p = resolve(path.replace(/^~(?=$|\/)/, homedir()));
     return existsSync(p) && statSync(p).isDirectory();

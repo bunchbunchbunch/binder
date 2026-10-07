@@ -178,26 +178,13 @@ kbd {
   background: transparent;
 }
 
-.session-row .dot.live {
-  background: var(--green);
-}
-
-.session-row .dot.running {
-  background: var(--gold);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-.session-row .dot.problem {
-  background: var(--red);
-}
-
 .session-row .dot.square {
   border-radius: 2px;
   background: var(--text-faint);
 }
 
-.session-row .dot.opening {
-  background: var(--text-faint);
+/* A session's state is its {status} icon; while its host starts, the row pulses. */
+.session-row.opening .body {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -1645,6 +1632,15 @@ kbd {
   font-size: 12.5px;
   margin-top: 2px;
   user-select: text;
+}
+
+/* Settings > Sidebar title: the typed template, as the sidebar would show it. */
+.sidebar-preview {
+  color: var(--text);
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .picker-search {

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Appearance, SessionRow, Settings, SettingsPatch } from '@shared/api';
+import type { Appearance, SessionRow, Settings, SettingsPatch, SidebarConfig } from '@shared/api';
 import { ago, baseName, shortPath } from '../lib/format';
-import { errText, openSession, refreshSessions, setState, toast, useApp } from '../store';
+import { DEFAULT_SIDEBAR, FIELDS, sessionFields, sidebarTemplates, sidebarText } from '../lib/sidebarText';
+import { errText, openSession, refreshSessions, sessionFacts, setState, toast, useApp } from '../store';
 import { Picker, type PickerItem } from '../components/Picker';
 
 // Panels that act on the window rather than one session: picking a session
@@ -164,15 +165,21 @@ function useIsDirectory(path: string): boolean | null {
   return ok;
 }
 
-type SettingsView = { kind: 'list' | 'mode' | 'appearance' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string };
+type SidebarLine = 'title' | 'subtitle' | 'script';
+const SIDEBAR_LABEL: Record<SidebarLine, string> = { title: 'Sidebar title', subtitle: 'Sidebar subtitle', script: 'Sidebar script' };
+
+type SettingsView = { kind: 'list' | 'mode' | 'appearance' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string } | { kind: 'sidebar'; line: SidebarLine };
 
 /**
- * binder's config.json: permission mode, sticky prompt, appearance, and config
- * dirs. The sticky prompt and appearance apply at once; a running session
- * keeps the permission mode and config dir it started with.
+ * binder's config.json: permission mode, sticky prompt, appearance, the
+ * sidebar's text, and config dirs. The sticky prompt, appearance and sidebar
+ * apply at once; a running session keeps the permission mode and config dir
+ * it started with.
  */
 export function SettingsPanel({ close }: { close: () => void }) {
   const sessions = useApp((s) => s.sessions);
+  const conns = useApp((s) => s.conns);
+  const active = useApp((s) => s.active);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<SettingsView>({ kind: 'list' });
@@ -192,7 +199,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
       const s = await window.binder.saveSettings(patch);
       setSettings(s);
       setError(null);
-      setState({ stickyPrompt: s.stickyPrompt });
+      setState({ stickyPrompt: s.stickyPrompt, sidebar: s.sidebar });
       toast(msg);
       return true;
     } catch (e) {
@@ -236,6 +243,62 @@ export function SettingsPanel({ close }: { close: () => void }) {
         onSelect={(i) => void save({ appearance: i.key === 'auto' ? null : (i.key as Appearance) }, `Appearance: ${i.label}`).then((ok) => ok && back())}
         onCancel={back}
         hint="↑↓ move · ⏎ select · esc back"
+      />
+    );
+  }
+
+  if (view.kind === 'sidebar') {
+    const { line } = view;
+    const label = SIDEBAR_LABEL[line];
+    const value = query.trim();
+    const fallback = line === 'script' ? '' : DEFAULT_SIDEBAR[line];
+    const saveLine = (v: string) => {
+      const next: SidebarConfig = { ...settings?.sidebar };
+      if (v === fallback) delete next[line];
+      else next[line] = v;
+      void save({ sidebar: Object.keys(next).length ? next : null }, `${label}: ${v || 'none'}`).then((ok) => {
+        if (!ok) return;
+        setLast(`sidebar:${line}`);
+        back();
+      });
+    };
+    // The preview: the session on screen (else the first open one) with the typed template.
+    const sample = conns.find((c) => c.id === active) ?? conns[0];
+    const facts = sample && sessionFacts(sample);
+    const now = Date.now();
+    const preview = facts && line !== 'script' ? sidebarText({ ...sidebarTemplates(settings?.sidebar ?? {}), [line]: value }, facts, now)[line] : null;
+    const values = facts ? sessionFields(facts, now) : null;
+    const items: PickerItem[] = [
+      { key: 'save', label: 'Save', description: line === 'script' ? 'Its first line is the {script} field' : undefined },
+      ...(value !== fallback ? [{ key: 'default', label: line === 'script' ? 'Remove' : 'Use the default', description: fallback || undefined }] : []),
+      ...(line === 'script' ? [] : FIELDS.map((f) => ({ key: `field:${f.name}`, label: `{${f.name}}`, description: values?.[f.name] ? `${f.about} · now ${values[f.name]}` : f.about }))),
+    ];
+    const pick = (item: PickerItem) => {
+      if (item.key === 'save') return saveLine(value);
+      if (item.key === 'default') return saveLine(fallback);
+      setQuery((q) => `${q.trimEnd()}${q.trim() ? ' ' : ''}${item.label}`);
+    };
+    const about =
+      line === 'script'
+        ? "A command, run with sh in the session's folder; it reads the session as JSON on stdin"
+        : '{field} shows a field, {a|b} the first with a value, and ( ) text only when a field inside has one';
+    return (
+      <Picker
+        key="sidebar"
+        title={label}
+        subtitle={
+          error ?? (
+            <>
+              {about}
+              {preview !== null && <div className="sidebar-preview">Preview: {preview || '(none)'}</div>}
+            </>
+          )
+        }
+        items={items}
+        search={{ query, onChange: setQuery, placeholder: line === 'script' ? 'cat ~/notes/$(jq -r .session_id).txt' : line === 'title' ? '{status} {title}' : '{folder}( · {branch})' }}
+        onSelect={pick}
+        onCancel={back}
+        hint="⏎ save · ↑↓ then ⏎ adds a field · esc back"
       />
     );
   }
@@ -310,6 +373,9 @@ export function SettingsPanel({ close }: { close: () => void }) {
         { key: 'mode', label: 'Permission mode', description: settings.permissionMode ?? "Claude Code's default" },
         { key: 'sticky', label: 'Sticky prompt', description: settings.stickyPrompt ? 'On' : 'Off' },
         { key: 'appearance', label: 'Appearance', description: APPEARANCES.find((a) => a.key === settings.appearance)!.label },
+        { key: 'sidebar:title', label: SIDEBAR_LABEL.title, description: sidebarTemplates(settings.sidebar).title },
+        { key: 'sidebar:subtitle', label: SIDEBAR_LABEL.subtitle, description: sidebarTemplates(settings.sidebar).subtitle || 'None' },
+        { key: 'sidebar:script', label: SIDEBAR_LABEL.script, description: settings.sidebar.script ?? 'None: a command whose output is the {script} field' },
         ...Object.entries(dirs).map(([f, d]) => ({ key: `dir:${f}`, label: `Config dir for ${f}`, description: d })),
         { key: 'add', label: 'Add a config dir…', description: Object.keys(dirs).length ? undefined : 'For a second account: Claude in a folder you pick uses another config dir' },
       ]
@@ -318,6 +384,11 @@ export function SettingsPanel({ close }: { close: () => void }) {
     setLast(item.key);
     if (item.key === 'mode') return setView({ kind: 'mode' });
     if (item.key === 'appearance') return setView({ kind: 'appearance' });
+    if (item.key.startsWith('sidebar:')) {
+      const line = item.key.slice('sidebar:'.length) as SidebarLine;
+      setQuery(line === 'script' ? (settings!.sidebar.script ?? '') : sidebarTemplates(settings!.sidebar)[line]);
+      return setView({ kind: 'sidebar', line });
+    }
     if (item.key === 'sticky') {
       const on = !settings!.stickyPrompt;
       return void save({ stickyPrompt: on }, `Sticky prompt ${on ? 'on' : 'off'}`);

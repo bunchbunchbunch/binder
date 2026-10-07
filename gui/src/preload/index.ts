@@ -16,6 +16,7 @@ const api: BinderApi = {
     return () => void ipcRenderer.off('host', listener);
   },
   repoInfo: (cwd) => ipcRenderer.invoke('repoInfo', cwd),
+  sidebarScript: (input) => ipcRenderer.invoke('sidebarScript', input),
   isDirectory: (path) => ipcRenderer.invoke('isDirectory', path),
   chooseFolder: (opts) => ipcRenderer.invoke('chooseFolder', opts),
   pathForFile: (file) => webUtils.getPathForFile(file),
