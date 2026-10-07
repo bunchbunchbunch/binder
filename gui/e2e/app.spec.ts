@@ -96,6 +96,27 @@ test('opens the command menu and the model panel', async () => {
   await expect(page.locator('.shortcuts')).toHaveCount(0);
 });
 
+test('⌘/ and Help > Binder Guide open the guide; Esc closes it', async () => {
+  run = await launch(SHOWCASE);
+  const { app, page, project } = run;
+  await newSession(page, project);
+  const guide = page.locator('.guide');
+  await page.keyboard.press('Meta+Slash');
+  await expect(guide.locator('.picker-title')).toHaveText('Binder is a GTUI');
+  await expect(guide.locator('h2')).toHaveText(['In a session', 'In the window']);
+  await expect(guide.locator('td kbd', { hasText: 'Cmd+/' })).toBeVisible();
+  await expect(guide.locator('.guide-body')).toBeFocused();
+  await page.screenshot({ path: shot('guide') });
+  await page.keyboard.press('Escape');
+  await expect(guide).toHaveCount(0);
+  await expect(page.locator('.composer textarea')).toBeFocused();
+
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()!.getMenuItemById('guide')!.click());
+  await expect(guide).toBeVisible();
+  await guide.locator('..').click({ position: { x: 5, y: 5 } });
+  await expect(guide).toHaveCount(0);
+});
+
 test('runs a bash command in its own tab', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;

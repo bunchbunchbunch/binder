@@ -92,6 +92,7 @@ Added for the sidebar:
 | `⌘1` to `⌘9`, `⌘⇧[` / `⌘⇧]` | switch between panes and open sessions |
 | `⌘W` | close the session in the app (its host keeps running until idle) |
 | `⌘,` | settings: binder's `config.json` (also Binder > Settings… and `/settings`) |
+| `⌘/` | the guide: why the app works the way it does, then every key (also Help > Binder Guide) |
 | `⌃⌘S` | hide or show the sidebar |
 
 ## Settings

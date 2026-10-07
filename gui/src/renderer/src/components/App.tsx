@@ -3,14 +3,15 @@ import { closeConn, getState, handleControl, handleMessage, paneId, paneName, re
 import { NewSessionPanel, SessionSwitcher, SettingsPanel } from '../panels/AppPanels';
 import { PaneView } from './PaneView';
 import { SessionView } from './SessionView';
+import { Guide } from './Shortcuts';
 import { Sidebar } from './Sidebar';
 import { Logo } from './Welcome';
 
 // The window: the session sidebar, the panes and open sessions (one on
-// screen), and the window-wide keys: ⌘N, ⌘K, ⌘W, ⌘1-9, ⌘⇧[ ], ⌘,, ⌃⌘S, and
-// Ctrl+C (copy, or twice to quit).
+// screen), and the window-wide keys: ⌘N, ⌘K, ⌘W, ⌘1-9, ⌘⇧[ ], ⌘,, ⌘/, ⌃⌘S,
+// and Ctrl+C (copy, or twice to quit).
 
-type AppPanel = { kind: 'switcher'; scope: 'folder' | 'all' } | { kind: 'new' } | { kind: 'settings' };
+type AppPanel = { kind: 'switcher'; scope: 'folder' | 'all' } | { kind: 'new' } | { kind: 'settings' } | { kind: 'guide' };
 
 const QUIT_ARM_MS = 1500;
 
@@ -37,6 +38,7 @@ export function App() {
   useEffect(() => {
     const off = window.binder.onMessage(handleMessage);
     const offSettings = window.binder.onOpenSettings(() => setAppPanel({ kind: 'settings' }));
+    const offGuide = window.binder.onOpenGuide(() => setAppPanel({ kind: 'guide' }));
     const offControl = window.binder.onControl(handleControl);
     void window.binder.loadSettings().then((s) => setState({ stickyPrompt: s.stickyPrompt }));
     void restoreLayout();
@@ -46,6 +48,7 @@ export function App() {
     return () => {
       off();
       offSettings();
+      offGuide();
       offControl();
       clearInterval(t);
       window.removeEventListener('focus', onFocus);
@@ -65,6 +68,7 @@ export function App() {
         if (e.code === 'KeyN' && !e.shiftKey) return take(), setAppPanel({ kind: 'new' });
         if (e.code === 'KeyK' && !e.shiftKey) return take(), setAppPanel({ kind: 'switcher', scope: 'all' });
         if (e.code === 'Comma' && !e.shiftKey) return take(), setAppPanel({ kind: 'settings' });
+        if (e.code === 'Slash' && !e.shiftKey) return take(), setAppPanel({ kind: 'guide' });
         if (e.code === 'KeyW' && !e.shiftKey) return take(), active && paneName(active) === null && closeConn(active);
         if (/^Digit[1-9]$/.test(e.code) && !e.shiftKey) {
           take();
@@ -119,7 +123,7 @@ export function App() {
                   <h1>Binder</h1>
                   <div className="muted">Claude Code sessions, in tabs.</div>
                   <div className="hint">
-                    <kbd>⌘N</kbd> starts a session in a folder · <kbd>⌘K</kbd> opens one you had
+                    <kbd>⌘N</kbd> starts a session in a folder · <kbd>⌘K</kbd> opens one you had · <kbd>⌘/</kbd> shows the keys
                   </div>
                 </div>
               </div>
@@ -130,6 +134,7 @@ export function App() {
         {appPanel?.kind === 'switcher' && <SessionSwitcher cwd={cwd} initialScope={appPanel.scope} close={close} />}
         {appPanel?.kind === 'new' && <NewSessionPanel cwd={cwd} close={close} />}
         {appPanel?.kind === 'settings' && <SettingsPanel close={close} />}
+        {appPanel?.kind === 'guide' && <Guide close={close} />}
       </main>
     </div>
   );

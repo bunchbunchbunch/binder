@@ -80,6 +80,8 @@ export type BinderApi = {
   saveSettings(patch: SettingsPatch): Promise<Settings>;
   /** Binder > Settings… (⌘,) in the menu bar. */
   onOpenSettings(cb: () => void): () => void;
+  /** Help > Binder Guide (⌘/) in the menu bar. */
+  onOpenGuide(cb: () => void): () => void;
   saveLayout(layout: SavedLayout): Promise<void>;
   /** The names of config.json's panes, in order. */
   panes(): Promise<string[]>;

@@ -164,8 +164,8 @@ function registerIpc(): void {
   });
 }
 
-// The standard Mac menus plus Settings…, minus the shortcuts the window uses
-// itself (Cmd+N, Cmd+W, Cmd+K, Cmd+1-9 act on sessions).
+// The standard Mac menus plus Settings… and the guide, minus the shortcuts
+// the window uses itself (Cmd+N, Cmd+W, Cmd+K, Cmd+1-9 act on sessions).
 function buildMenu(): void {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
@@ -200,6 +200,7 @@ function buildMenu(): void {
         ],
       },
       { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
+      { role: 'help', submenu: [{ id: 'guide', label: 'Binder Guide', accelerator: 'Cmd+/', click: () => win?.webContents.send('openGuide') }] },
     ]),
   );
 }

@@ -32,6 +32,11 @@ const api: BinderApi = {
     ipcRenderer.on('openSettings', listener);
     return () => void ipcRenderer.off('openSettings', listener);
   },
+  onOpenGuide: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on('openGuide', listener);
+    return () => void ipcRenderer.off('openGuide', listener);
+  },
   panes: () => ipcRenderer.invoke('panes'),
   paneStart: (name, cols, rows) => ipcRenderer.invoke('paneStart', name, cols, rows),
   paneInput: (name, data) => ipcRenderer.send('paneInput', name, data),
