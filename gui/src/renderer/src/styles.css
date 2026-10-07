@@ -117,7 +117,9 @@ kbd {
 /* ───────── Sidebar ───────── */
 
 .sidebar {
+  position: relative;
   width: var(--sidebar-w);
+  max-width: 50vw;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -125,6 +127,18 @@ kbd {
   border-right: 1px solid var(--border);
   /* A tint over the window's vibrancy, so the sidebar reads without it too (Reduce Transparency). */
   background: var(--sidebar-bg);
+}
+
+/* The edge to drag. Inside the sidebar, so it comes after .sidebar-top's
+   drag area (no-drag wins) and before the main title bar's (it would lose). */
+.sidebar-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
 }
 
 .sidebar-top {

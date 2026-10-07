@@ -43,7 +43,8 @@ icon from the TUI's pixel logo.
   across every config dir in `configDirs`. An open session's row shows its status (⏳ working,
   ❓ waiting for you, 🐝 background tasks, ✅ done since you last looked, ⚠️ stopped), how long
   its turn has run, its first prompt and its folder, unless config.json's `sidebar` says
-  otherwise (see [Sidebar text](#sidebar-text)).
+  otherwise (see [Sidebar text](#sidebar-text)). Drag its right edge to resize it (the app
+  remembers the width); double-click the edge for the default.
 - **Tab bar:** each prompt and its response is a tab, as in the TUI.
 - **Transcript:** the prompt, the work (thinking and tool calls) folded into a one-line summary
   once the answer lands, then the answer. Tool calls have the TUI's views: Edit as a diff (blue

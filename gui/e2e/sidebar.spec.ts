@@ -101,3 +101,37 @@ test('Settings edits the sidebar templates with a preview', async () => {
   await expect(row.locator('.title')).toHaveText('0m Fix the table alignment');
   await expect(row.locator('.sub')).toHaveText('app');
 });
+
+test("dragging the sidebar's edge resizes it, and the width is remembered", async () => {
+  run = await launch(SHOWCASE);
+  const { page, tmp } = run;
+  const sidebar = page.locator('.sidebar');
+  const width = async () => (await sidebar.boundingBox())!.width;
+  const drag = async (dx: number) => {
+    const box = (await sidebar.boundingBox())!;
+    // Near the top too: the edge is over the title bar's drag area there.
+    await page.mouse.move(box.x + box.width - 2, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 2 + dx, box.y + 300, { steps: 5 });
+    await page.mouse.up();
+  };
+  expect(await width()).toBe(248);
+  await drag(120);
+  expect(await width()).toBe(368);
+  // No narrower than 180, no wider than half the window.
+  await drag(-400);
+  expect(await width()).toBe(180);
+  await drag(2000);
+  expect(await width()).toBe(Math.round((await page.evaluate(() => window.innerWidth)) / 2));
+  await drag(-100);
+  const chosen = await width();
+
+  await run.quitApp();
+  run = await launch(SHOWCASE, {}, { reuse: tmp });
+  const again = run.page.locator('.sidebar');
+  expect((await again.boundingBox())!.width).toBe(chosen);
+  // Double-clicking the edge puts back the default.
+  const box = (await again.boundingBox())!;
+  await run.page.mouse.dblclick(box.x + box.width - 2, box.y + 300);
+  expect((await again.boundingBox())!.width).toBe(248);
+});

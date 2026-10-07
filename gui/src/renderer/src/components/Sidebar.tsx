@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { baseName, ago } from '../lib/format';
 import { sidebarTemplates, sidebarText, usesField } from '../lib/sidebarText';
 import { openSession, paneId, sessionFacts, setState, useApp } from '../store';
@@ -7,7 +7,10 @@ import { openSession, paneId, sessionFacts, setState, useApp } from '../store';
 // `binder sessions`: live ones first, then what /resume would offer. An open
 // session's row says what config.json's sidebar templates make of it (by
 // default its status icon, how long its turn ran, and its first prompt), and
-// pulses while it opens.
+// pulses while it opens. Drag the sidebar's edge to resize it (remembered);
+// double-click the edge for the default.
+
+const MIN_WIDTH = 180;
 
 export function Sidebar({ onNew, onSwitcher, onSettings }: { onNew: () => void; onSwitcher: () => void; onSettings: () => void }) {
   const conns = useApp((s) => s.conns);
@@ -24,10 +27,18 @@ export function Sidebar({ onNew, onSwitcher, onSettings }: { onNew: () => void; 
     const t = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, [ticking]);
+  // null: the stylesheet's width.
+  const [width, setWidth] = useState(() => Number(localStorage.getItem('sidebarWidth')) || null);
+  useEffect(() => {
+    if (width) localStorage.setItem('sidebarWidth', String(width));
+    else localStorage.removeItem('sidebarWidth');
+  }, [width]);
+  // While dragging: the sidebar's width less the pointer's x when the drag began.
+  const dragFrom = useRef<number | null>(null);
   const open = new Set(conns.map((c) => c.sessionId));
   const recent = sessions.filter((r) => !open.has(r.id)).slice(0, 40);
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={width ? { width } : undefined}>
       <div className="sidebar-top" />
       <div className="sidebar-scroll">
         {panes.map((name, i) => (
@@ -82,6 +93,19 @@ export function Sidebar({ onNew, onSwitcher, onSettings }: { onNew: () => void; 
           Settings <kbd>⌘,</kbd>
         </button>
       </div>
+      <div
+        className="sidebar-edge"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          dragFrom.current = e.currentTarget.parentElement!.offsetWidth - e.clientX;
+        }}
+        onPointerMove={(e) => {
+          if (dragFrom.current !== null) setWidth(Math.round(Math.max(MIN_WIDTH, Math.min(window.innerWidth / 2, dragFrom.current + e.clientX))));
+        }}
+        onLostPointerCapture={() => (dragFrom.current = null)}
+        onDoubleClick={() => setWidth(null)}
+      />
     </aside>
   );
 }
