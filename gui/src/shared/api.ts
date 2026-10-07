@@ -34,12 +34,15 @@ export type PaneEvent = { t: 'data'; data: string } | { t: 'exit'; code: number 
 
 export type ImageAttachment = { mediaType: string; data: string };
 
+// The app's light or dark look; auto follows macOS.
+export type Appearance = 'auto' | 'light' | 'dark';
+
 // binder's config.json, as the settings panel shows it (binder host reads it too).
 // `error`: the file does not parse; the rest are defaults then.
-export type Settings = { path: string; permissionMode: string | null; stickyPrompt: boolean; configDirs: Record<string, string>; error?: string };
+export type Settings = { path: string; permissionMode: string | null; stickyPrompt: boolean; appearance: Appearance; configDirs: Record<string, string>; error?: string };
 
 // Keys to set; null removes one.
-export type SettingsPatch = { permissionMode?: string | null; stickyPrompt?: boolean; configDirs?: Record<string, string> | null };
+export type SettingsPatch = { permissionMode?: string | null; stickyPrompt?: boolean; appearance?: Appearance | null; configDirs?: Record<string, string> | null };
 
 // Remembered between launches.
 // `fresh`: no prompt yet, so there is no conversation to resume.

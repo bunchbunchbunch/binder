@@ -1,9 +1,9 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ControlReply, ControlRequest, OpenRequest, SavedLayout, SettingsPatch } from '../shared/api';
+import type { ControlReply, ControlRequest, OpenRequest, SavedLayout, Settings, SettingsPatch } from '../shared/api';
 import type { HostMessage } from '../shared/wire';
 import { binder, ensureHost, listSessions, readPanes, readSettings, repoInfo, writeSettings } from './binder';
 import { listenControl } from './control';
@@ -85,6 +85,12 @@ function askWindow(req: ControlRequest): Promise<ControlReply> {
 
 const loginEnv = () => binder().then((b) => b.env, () => process.env);
 
+// config.json's appearance. The window's colors, its panes' terminals and its
+// vibrancy all follow nativeTheme.
+function applyAppearance(s: Settings): void {
+  nativeTheme.themeSource = s.appearance === 'auto' ? 'system' : s.appearance;
+}
+
 function openExternal(url: string): void {
   if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url);
 }
@@ -130,7 +136,11 @@ function registerIpc(): void {
   ipcMain.handle('loadLayout', () => readJson<SavedLayout>('layout.json', { open: [], active: null }));
   ipcMain.handle('saveLayout', (_e, layout: SavedLayout) => writeFileSync(userFile('layout.json'), JSON.stringify(layout)));
   ipcMain.handle('loadSettings', async () => readSettings(await binder().then((b) => b.env, () => process.env)));
-  ipcMain.handle('saveSettings', async (_e, patch: SettingsPatch) => writeSettings(await binder().then((b) => b.env, () => process.env), patch));
+  ipcMain.handle('saveSettings', async (_e, patch: SettingsPatch) => {
+    const s = writeSettings(await binder().then((b) => b.env, () => process.env), patch);
+    applyAppearance(s);
+    return s;
+  });
   ipcMain.handle('panes', async () => readPanes(await loginEnv()).map((p) => p.name));
   ipcMain.handle('paneStart', async (_e, name: string, cols: number, rows: number) => {
     const env = await loginEnv();
@@ -280,6 +290,9 @@ app.whenReady().then(() => {
   listenControl(controlSocket, askWindow);
   registerIpc();
   buildMenu();
+  // Read with the app's own environment, so the window opens in these colors
+  // without waiting for the login shell.
+  applyAppearance(readSettings(process.env));
   createWindow();
   // Find binder while the window loads.
   binder().catch(() => {});

@@ -25,7 +25,7 @@ describe("binder's config.json", () => {
   const env = (name: string) => ({ BINDER_CONFIG: join(dir, name) });
 
   it('reads defaults when the file is missing, and names it when it does not parse', () => {
-    expect(readSettings(env('missing.json'))).toEqual({ path: join(dir, 'missing.json'), permissionMode: null, stickyPrompt: true, configDirs: {} });
+    expect(readSettings(env('missing.json'))).toEqual({ path: join(dir, 'missing.json'), permissionMode: null, stickyPrompt: true, appearance: 'auto', configDirs: {} });
     writeFileSync(join(dir, 'bad.json'), '{');
     expect(readSettings(env('bad.json')).error).toContain(join(dir, 'bad.json'));
   });
@@ -37,6 +37,13 @@ describe("binder's config.json", () => {
     expect(s).toMatchObject({ permissionMode: null, stickyPrompt: true, configDirs: { '~/work': '~/.claude-work' } });
     expect(lstatSync(join(dir, 'linked.json')).isSymbolicLink()).toBe(true);
     expect(JSON.parse(readFileSync(join(dir, 'dotfiles.json'), 'utf8'))).toEqual({ extra: 1, stickyPrompt: true, configDirs: { '~/work': '~/.claude-work' } });
+  });
+
+  it('reads appearance as auto unless it is light or dark', () => {
+    for (const [value, want] of [['light', 'light'], ['dark', 'dark'], ['auto', 'auto'], ['Dark', 'auto'], [true, 'auto']]) {
+      writeFileSync(join(dir, 'appearance.json'), JSON.stringify({ appearance: value }));
+      expect(readSettings(env('appearance.json')).appearance).toBe(want);
+    }
   });
 
   it('leaves a file that does not parse alone', () => {

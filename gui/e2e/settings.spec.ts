@@ -86,3 +86,42 @@ test('says why when config.json does not parse, and leaves it alone', async () =
   await expect(page.locator('.picker-sub')).toContainText(config);
   expect(readFileSync(config, 'utf8')).toBe('{');
 });
+
+test('opens in the appearance config.json names, and switches it at once', async () => {
+  const config = join(mkdtempSync('/tmp/bgc-'), 'config.json');
+  writeFileSync(config, JSON.stringify({ appearance: 'dark', mine: true }));
+  const saved = () => JSON.parse(readFileSync(config, 'utf8'));
+  run = await launch(SHOWCASE, { BINDER_CONFIG: config });
+  const { app, page } = run;
+  // Playwright pins the page to light; let it follow the app's appearance.
+  await page.emulateMedia({ colorScheme: null });
+  const source = () => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource);
+  const dark = () => page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches);
+  const picker = page.locator('.picker');
+  const row = (label: string) => picker.locator('.picker-item', { hasText: label });
+  // Auto's description says light or dark, so these match the label alone.
+  const choice = (label: string) => picker.locator('.picker-item .label', { hasText: new RegExp(`^${label}$`) });
+
+  expect(await source()).toBe('dark');
+  expect(await dark()).toBe(true);
+
+  await page.keyboard.press('Meta+Comma');
+  await expect(row('Appearance').locator('.desc')).toHaveText('Dark');
+  await row('Appearance').click();
+  await expect(picker.locator('.picker-title')).toHaveText('Appearance');
+  await expect(picker.locator('.picker-item.picked .label')).toHaveText('Dark');
+  await page.screenshot({ path: shot('settings-appearance') });
+
+  await choice('Light').click();
+  await expect(row('Appearance').locator('.desc')).toHaveText('Light');
+  expect(saved()).toEqual({ appearance: 'light', mine: true });
+  expect(await source()).toBe('light');
+  expect(await dark()).toBe(false);
+
+  // Auto follows macOS, and leaves the key out of the file.
+  await row('Appearance').click();
+  await choice('Auto').click();
+  await expect(row('Appearance').locator('.desc')).toHaveText('Auto');
+  expect(saved()).toEqual({ mine: true });
+  expect(await source()).toBe('system');
+});

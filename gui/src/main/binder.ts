@@ -121,9 +121,10 @@ export function readSettings(env: NodeJS.ProcessEnv): Settings {
   try {
     const c = readConfig(path);
     const dirs = c.configDirs && typeof c.configDirs === 'object' ? (c.configDirs as Record<string, string>) : {};
-    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, configDirs: dirs };
+    const appearance = c.appearance === 'light' || c.appearance === 'dark' ? c.appearance : 'auto';
+    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, appearance, configDirs: dirs };
   } catch (e) {
-    return { path, permissionMode: null, stickyPrompt: true, configDirs: {}, error: (e as Error).message };
+    return { path, permissionMode: null, stickyPrompt: true, appearance: 'auto', configDirs: {}, error: (e as Error).message };
   }
 }
 

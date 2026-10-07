@@ -19,8 +19,8 @@ nobody attached exits after 15 idle minutes).
   `bin/binder.mjs`) overrides the lookup.
 - Your binder setup applies unchanged: `~/.config/binder/config.json` (`permissionMode`,
   `configDirs` for a second account, `stickyPrompt`), and everything Claude Code reads.
-  Settings (`⌘,`) changes that file. The app also reads `panes` there (see
-  [Panes](#panes-and-the-control-socket)).
+  Settings (`⌘,`) changes that file. The app also reads `appearance` and `panes` there (see
+  [Settings](#settings) and [Panes](#panes-and-the-control-socket)).
 
 ## Run it
 
@@ -96,11 +96,15 @@ Added for the sidebar:
 ## Settings
 
 `⌘,` shows binder's `config.json` and changes it, as `/settings` does in the TUI: the
-permission mode for new sessions, the sticky prompt, and config dirs (add one by typing or
-choosing its folder, then its config dir; pick one to remove it). The file is written in
-place, so a symlink into a dotfiles repo stays one, and keys the app does not know stay. The
-sticky prompt changes at once; open sessions keep the permission mode and config dir they
-started with. The TUI's markdown style is there in the TUI only.
+permission mode for new sessions, the sticky prompt, the app's appearance, and config dirs
+(add one by typing or choosing its folder, then its config dir; pick one to remove it). The
+file is written in place, so a symlink into a dotfiles repo stays one, and keys the app does
+not know stay. The sticky prompt and appearance change at once; open sessions keep the
+permission mode and config dir they started with. The TUI's markdown style is there in the TUI
+only.
+
+Appearance is `"appearance": "light"` or `"dark"` in config.json; without it (Auto) the app is
+light or dark as macOS is. The TUI ignores it: a terminal's colors are the terminal's.
 
 Slash commands behave as in the TUI, with two differences: `/resume` opens the session picker
 and shows the session alongside the others instead of replacing this one, and `/exit` closes the

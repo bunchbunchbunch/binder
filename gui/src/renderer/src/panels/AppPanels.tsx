@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { SessionRow, Settings, SettingsPatch } from '@shared/api';
+import type { Appearance, SessionRow, Settings, SettingsPatch } from '@shared/api';
 import { ago, baseName, shortPath } from '../lib/format';
 import { errText, openSession, refreshSessions, setState, toast, useApp } from '../store';
 import { Picker, type PickerItem } from '../components/Picker';
@@ -139,6 +139,13 @@ const PERMISSION_MODES: Array<[string, string]> = [
   ['bypassPermissions', 'Never ask'],
 ];
 
+// config.json's appearance; Auto is the file without the key.
+const APPEARANCES: PickerItem[] = [
+  { key: 'auto', label: 'Auto', description: 'Light or dark, as macOS is' },
+  { key: 'light', label: 'Light' },
+  { key: 'dark', label: 'Dark' },
+];
+
 /** ~/... for a path in the home folder, as config.json writes them. */
 const tildePath = (p: string) => shortPath(p.replace(/\/+$/, '') || p);
 
@@ -157,12 +164,12 @@ function useIsDirectory(path: string): boolean | null {
   return ok;
 }
 
-type SettingsView = { kind: 'list' | 'mode' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string };
+type SettingsView = { kind: 'list' | 'mode' | 'appearance' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string };
 
 /**
- * binder's config.json: permission mode, sticky prompt, and config dirs. The
- * sticky prompt applies at once; a running session keeps the permission mode
- * and config dir it started with.
+ * binder's config.json: permission mode, sticky prompt, appearance, and config
+ * dirs. The sticky prompt and appearance apply at once; a running session
+ * keeps the permission mode and config dir it started with.
  */
 export function SettingsPanel({ close }: { close: () => void }) {
   const sessions = useApp((s) => s.sessions);
@@ -210,6 +217,23 @@ export function SettingsPanel({ close }: { close: () => void }) {
         items={items}
         initial={Math.max(0, items.findIndex((m) => m.key === current))}
         onSelect={(i) => void save({ permissionMode: i.key === 'unset' ? null : i.key }, `Permission mode: ${i.label}`).then((ok) => ok && back())}
+        onCancel={back}
+        hint="↑↓ move · ⏎ select · esc back"
+      />
+    );
+  }
+
+  if (view.kind === 'appearance') {
+    const current = settings?.appearance ?? 'auto';
+    const items = APPEARANCES.map((a) => ({ ...a, mark: a.key === current ? '✓' : ' ', markColor: '#98C379' }));
+    return (
+      <Picker
+        key="appearance"
+        title="Appearance"
+        subtitle={error ?? undefined}
+        items={items}
+        initial={items.findIndex((a) => a.key === current)}
+        onSelect={(i) => void save({ appearance: i.key === 'auto' ? null : (i.key as Appearance) }, `Appearance: ${i.label}`).then((ok) => ok && back())}
         onCancel={back}
         hint="↑↓ move · ⏎ select · esc back"
       />
@@ -285,6 +309,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
     ? [
         { key: 'mode', label: 'Permission mode', description: settings.permissionMode ?? "Claude Code's default" },
         { key: 'sticky', label: 'Sticky prompt', description: settings.stickyPrompt ? 'On' : 'Off' },
+        { key: 'appearance', label: 'Appearance', description: APPEARANCES.find((a) => a.key === settings.appearance)!.label },
         ...Object.entries(dirs).map(([f, d]) => ({ key: `dir:${f}`, label: `Config dir for ${f}`, description: d })),
         { key: 'add', label: 'Add a config dir…', description: Object.keys(dirs).length ? undefined : 'For a second account: Claude in a folder you pick uses another config dir' },
       ]
@@ -292,6 +317,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
   const pick = (item: PickerItem) => {
     setLast(item.key);
     if (item.key === 'mode') return setView({ kind: 'mode' });
+    if (item.key === 'appearance') return setView({ kind: 'appearance' });
     if (item.key === 'sticky') {
       const on = !settings!.stickyPrompt;
       return void save({ stickyPrompt: on }, `Sticky prompt ${on ? 'on' : 'off'}`);
