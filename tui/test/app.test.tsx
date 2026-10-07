@@ -571,6 +571,104 @@ describe('Ctrl+Enter', () => {
   });
 });
 
+describe('editing a queued prompt', () => {
+  const UP = '\x1b[A';
+  const ESC = '\x1b';
+  const CTRL_U = '\x15';
+  const EDITING = 'editing the queued prompt';
+  // The prompts the fake claude was sent, in order.
+  const sentTexts = (path: string) =>
+    readFileSync(path, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((m) => m.type === 'user').map((m) => m.message.content);
+
+  // The first prompt runs for about 2s (13 lines, 150ms apart) while the second waits.
+  function start(id: string) {
+    const cwd = process.cwd();
+    const stateDir = setup('two-turns-stdin.jsonl', { BINDER_FAKE_DELAY_MS: '150' });
+    const inputOut = join(stateDir, 'input.jsonl');
+    process.env.BINDER_FAKE_INPUT_OUT = inputOut;
+    const sessionId = `00000000-0000-4000-8000-0000000000${id}`;
+    const session = new Session({ sessionId, resume: false, cwd, passthrough: [] });
+    session.start();
+    return { session, inputOut, ...mount(session, sessionId, cwd) };
+  }
+
+  it('Up on an empty prompt opens it, and Enter saves it in place', async () => {
+    const { session, inputOut, ui } = start('e1');
+    try {
+      await type(ui, 'first prompt');
+      await type(ui, 'second prompt');
+      await until(() => plainFrame(ui).includes('↑ in an empty prompt to edit or remove it'), 8000, () => ui.lastFrame());
+      ui.stdin.write(UP);
+      await until(() => plainFrame(ui).includes(EDITING), 8000, () => ui.lastFrame());
+      expect(plainFrame(ui)).toContain('❯ second prompt');
+      // The queued prompt in the tab says how to save it.
+      expect(plainFrame(ui)).toContain('editing below · enter saves, or removes it if emptied · esc cancels');
+      expect(plainFrame(ui)).not.toContain('↑ in an empty prompt');
+      ui.stdin.write(' again');
+      await sleep(30);
+      ui.stdin.write(ENTER);
+      await until(() => plainFrame(ui).includes('2 ◌ second prompt again'), 8000, () => ui.lastFrame());
+      expect(plainFrame(ui)).not.toContain(EDITING);
+      expect(plainFrame(ui)).toContain('↑ in an empty prompt to edit or remove it');
+      // It runs as edited once the first turn ends.
+      await until(() => plainFrame(ui).includes('2 ● second prompt again'), 8000, () => ui.lastFrame());
+      expect(sentTexts(inputOut)).toEqual(['first prompt', 'second prompt again']);
+    } finally {
+      await session.close();
+      ui.unmount();
+    }
+  });
+
+  it('Esc leaves it as it was without interrupting the turn, and saving it empty removes it and its tab', async () => {
+    const { session, inputOut, ui } = start('e2');
+    try {
+      await type(ui, 'first prompt');
+      await type(ui, 'doomed prompt');
+      await until(() => plainFrame(ui).includes('2 ◌ doomed prompt'), 8000, () => ui.lastFrame());
+      ui.stdin.write(UP);
+      await until(() => plainFrame(ui).includes(EDITING), 8000, () => ui.lastFrame());
+      ui.stdin.write(ESC);
+      await until(() => !plainFrame(ui).includes(EDITING), 8000, () => ui.lastFrame());
+      expect(plainFrame(ui)).toContain('2 ◌ doomed prompt');
+
+      ui.stdin.write(UP);
+      await until(() => plainFrame(ui).includes(EDITING), 8000, () => ui.lastFrame());
+      ui.stdin.write(CTRL_U);
+      await until(() => plainFrame(ui).includes('Enter removes the queued prompt'), 8000, () => ui.lastFrame());
+      ui.stdin.write(ENTER);
+      await until(() => plainFrame(ui).includes('Removed the queued prompt'), 8000, () => ui.lastFrame());
+      expect(plainFrame(ui)).not.toContain('doomed prompt');
+      // The first turn ran to the end (not ◼ interrupted), and nothing followed it.
+      await until(() => plainFrame(ui).includes('1 ● first prompt'), 8000, () => ui.lastFrame());
+      await sleep(200);
+      expect(sentTexts(inputOut)).toEqual(['first prompt']);
+    } finally {
+      await session.close();
+      ui.unmount();
+    }
+  });
+
+  it('keeps the edit in the prompt when the queued prompt went out first', async () => {
+    const { session, ui } = start('e3');
+    try {
+      await type(ui, 'first prompt');
+      await type(ui, 'second prompt');
+      await until(() => plainFrame(ui).includes('2 ◌ second prompt'), 8000, () => ui.lastFrame());
+      ui.stdin.write(UP);
+      await until(() => plainFrame(ui).includes(EDITING), 8000, () => ui.lastFrame());
+      ui.stdin.write(' later');
+      await until(() => !plainFrame(ui).includes('2 ◌ second prompt'), 8000, () => ui.lastFrame());
+      ui.stdin.write(ENTER);
+      await until(() => plainFrame(ui).includes('That prompt is no longer queued'), 8000, () => ui.lastFrame());
+      expect(plainFrame(ui)).toContain('❯ second prompt later');
+      expect(plainFrame(ui)).not.toContain(EDITING);
+    } finally {
+      await session.close();
+      ui.unmount();
+    }
+  });
+});
+
 describe('slash commands', () => {
   const ESC = '\x1b';
   const DOWN = '\x1b[B';

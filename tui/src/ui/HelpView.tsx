@@ -6,6 +6,7 @@ const KEYS: Array<[string, string]> = [
   ['Ctrl+Enter', 'send into the current tab (on a running turn: send now)'],
   ['Shift+Enter, Alt+Enter, \\ Enter', 'newline'],
   ['Up / Down', 'earlier / later prompts'],
+  ['Up (empty prompt)', "edit the tab's queued prompt: Enter saves, empty removes, Esc cancels"],
   ['Tab, @', 'complete a path (after !, a command)'],
   ['Tab, Right (empty prompt)', 'take the suggested next prompt'],
   ['!command', 'bash mode: run it here, the model sees the output next prompt'],

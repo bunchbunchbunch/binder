@@ -112,6 +112,8 @@ export type Action =
   | { type: 'submit'; prompt: string; images?: ImageAttachment[]; tabId?: number }
   | { type: 'followup'; tabId: number; prompt: string; images?: ImageAttachment[] }
   | { type: 'steer'; tabId: number; prompt: string; uuid: string }
+  // A prompt still queued for tab `tabId` becomes `text`; empty text drops it.
+  | { type: 'edit_queued'; tabId: number; prompt: string; text: string }
   | { type: 'sent'; tabId: number; uuid?: string }
   | { type: 'bash_start'; command: string; tabId?: number }
   | { type: 'bash_done'; tabId: number; output: string; exitCode: number | null }
@@ -495,6 +497,23 @@ export function reduce(state: State, action: Action): State {
     }
     case 'steer':
       return { ...state, steer: { tabId: action.tabId, prompt: action.prompt, uuid: action.uuid }, suggestion: undefined };
+    case 'edit_queued': {
+      const at = state.queue.findIndex((q) => q.tabId === action.tabId && q.prompt === action.prompt);
+      if (at < 0) return state;
+      const item = state.queue[at];
+      if (action.text) {
+        const queue = state.queue.map((q, i) => (i === at ? { ...q, prompt: action.text } : q));
+        if (item.followup) return { ...state, queue };
+        // The prompt that opens a tab is the tab's prompt too.
+        return { ...state, queue, tabs: state.tabs.map((t) => (t.id === item.tabId ? { ...t, prompt: action.text } : t)) };
+      }
+      if (item.followup) return { ...state, queue: state.queue.filter((_, i) => i !== at) };
+      // The prompt that opens a tab: the tab goes, and whatever was queued into it.
+      const gone = state.tabs.findIndex((t) => t.id === item.tabId);
+      const tabs = state.tabs.filter((t) => t.id !== item.tabId);
+      const active = state.active > gone ? state.active - 1 : Math.min(state.active, tabs.length - 1);
+      return { ...state, tabs, active, queue: state.queue.filter((q) => q.tabId !== item.tabId) };
+    }
     case 'sent': {
       const at = state.queue.findIndex((q) => q.tabId === action.tabId);
       const tab = state.tabs.find((t) => t.id === action.tabId);

@@ -117,6 +117,7 @@ tested against Codex 0.160.1, the version `fixtures/codex/` was recorded with.
 | `Ctrl+Enter` | send the prompt into the current tab instead: on a running turn it is sent now (Claude Code's "send now": the turn stops and the follow-up runs next), otherwise it runs after the current turn. Needs a terminal with the kitty keyboard protocol (iTerm2, kitty, WezTerm, Ghostty); elsewhere it acts as `Enter` |
 | `Shift+Enter`, `Alt+Enter`, or `\` then `Enter` | newline in the prompt. `Shift+Enter` needs the kitty keyboard protocol, like `Ctrl+Enter`; elsewhere it sends, so use `Alt+Enter` |
 | `Up` / `Down` | earlier / later prompts from this directory (inside a multi-line prompt they move between lines first) |
+| `Up` (empty prompt, the tab has a queued prompt) | edit the tab's last queued prompt in place: `Enter` saves it, `Enter` on an emptied prompt removes it (a new tab's prompt takes its tab along), `Esc` leaves it as it was |
 | `Tab` | complete the path before the cursor (after `!`, the command name); with several matches it fills the common part, then lists them |
 | `Tab` or `Right` (empty prompt) | take the suggested next prompt. After a turn, Claude Code may predict what you will ask next; like Claude Code, binder shows it dim in the empty prompt. Typing replaces it, and `Enter` alone does not send it |
 | `@` | list files as you type a path after it |

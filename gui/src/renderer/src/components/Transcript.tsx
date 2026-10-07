@@ -10,6 +10,18 @@ import { Blocks, type BlockCtx } from './Blocks';
 
 export type PendingPrompt = { prompt: string; sending: boolean };
 
+// Edit (in the prompt below) and Remove for a prompt of this tab still in the queue.
+export type QueueControls = { edit: (prompt: string) => void; remove: (prompt: string) => void };
+
+function QueuedActions({ prompt, queued }: { prompt: string; queued: QueueControls }) {
+  return (
+    <span className="queued-actions">
+      <button onClick={() => queued.edit(prompt)}>Edit</button>
+      <button onClick={() => queued.remove(prompt)}>Remove</button>
+    </span>
+  );
+}
+
 export function PromptText({ text }: { text: string }) {
   return (
     <>
@@ -31,7 +43,7 @@ export function PromptText({ text }: { text: string }) {
 }
 
 // `pinned`: the prompt is held in the sticky header instead.
-function Turn({ turn, expanded, onToggle, ctx, latest, pinned }: { turn: WireTurn; expanded: boolean; onToggle: () => void; ctx: BlockCtx; latest: boolean; pinned?: boolean }) {
+function Turn({ turn, expanded, onToggle, ctx, latest, pinned, queued }: { turn: WireTurn; expanded: boolean; onToggle: () => void; ctx: BlockCtx; latest: boolean; pinned?: boolean; queued?: QueueControls }) {
   const { work, response } = splitWork(turn.blocks);
   // Expanded, the work keeps the text written between tool calls in place.
   const split = lastToolIndex(turn.blocks) + 1;
@@ -59,7 +71,12 @@ function Turn({ turn, expanded, onToggle, ctx, latest, pinned }: { turn: WireTur
       ) : (
         <Blocks blocks={expanded ? turn.blocks : response} ctx={ctx} />
       )}
-      {turn.status === 'queued' && <div className="turn-note">Queued, waiting for the current turn to finish</div>}
+      {turn.status === 'queued' && (
+        <div className="turn-note">
+          Queued, waiting for the current turn to finish
+          {queued && <QueuedActions prompt={turn.prompt} queued={queued} />}
+        </div>
+      )}
       {turn.status === 'interrupted' && <div className="turn-note warn">Interrupted</div>}
       {turn.result && turn.status !== 'interrupted' && turn.status !== 'superseded' && (
         <div className={`turn-note${turn.status === 'error' ? ' error' : ''}`}>
@@ -82,21 +99,31 @@ type Props = {
   pending: PendingPrompt[];
   // The latest prompt is in the sticky header (config.json stickyPrompt).
   pinned: boolean;
+  queued: QueueControls;
 };
 
-function TranscriptImpl({ tab, ctx, expanded, expandEarlier, onToggle, pending, pinned }: Props) {
+function TranscriptImpl({ tab, ctx, expanded, expandEarlier, onToggle, pending, pinned, queued }: Props) {
   return (
     <div className="transcript">
       {tab.earlier.map((turn, i) => (
         <Turn key={i} turn={turn} expanded={expandEarlier} onToggle={onToggle} ctx={ctx} latest={false} />
       ))}
-      <Turn turn={tab} expanded={expanded} onToggle={onToggle} ctx={ctx} latest pinned={pinned} />
+      <Turn turn={tab} expanded={expanded} onToggle={onToggle} ctx={ctx} latest pinned={pinned} queued={queued} />
       {pending.map((p, i) => (
         <div key={i} className="turn">
           <div className="prompt pending">
             <PromptText text={p.prompt} />
           </div>
-          <div className="turn-note pending-note">{p.sending ? 'Sending now…' : 'Queued; sends into this tab when the current turn finishes'}</div>
+          <div className="turn-note pending-note">
+            {p.sending ? (
+              'Sending now…'
+            ) : (
+              <>
+                Queued; sends into this tab when the current turn finishes
+                <QueuedActions prompt={p.prompt} queued={queued} />
+              </>
+            )}
+          </div>
         </div>
       ))}
     </div>

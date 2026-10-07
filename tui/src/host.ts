@@ -193,6 +193,15 @@ export class SessionHost extends EventEmitter<HostEvents> {
     return target.id;
   }
 
+  /**
+   * Changes a prompt still queued for tab `tabId`, found by its text. Empty
+   * text removes it; for the prompt that opens a new tab, the tab goes too.
+   */
+  editQueued(tabId: number, prompt: string, text: string): void {
+    if (!this.current.queue.some((q) => q.tabId === tabId && q.prompt === prompt)) throw new Error('That prompt is no longer queued');
+    this.dispatch({ type: 'edit_queued', tabId, prompt, text: text.trim() ? text : '' });
+  }
+
   // Bash mode: run it here, show it in its own tab, and hand the output to the model with the next prompt.
   runBash(command: string): number {
     const sid = this.sessionId;

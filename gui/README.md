@@ -68,6 +68,7 @@ The TUI's keys work the same way; `?` on an empty prompt lists them and `/help` 
 | `Ctrl+Enter` | send into this tab: on a running turn it is sent now, otherwise after it |
 | `Shift+Enter`, `Alt+Enter`, `\` `Enter` | newline |
 | `Up` / `Down` | earlier / later prompts from this folder |
+| `Up` (empty prompt) | edit the tab's queued prompt in place: `Enter` saves, empty removes, `Esc` cancels. A queued prompt's Edit and Remove buttons do the same |
 | `Tab`, `@` | complete a path (after `!`, a command) |
 | `Tab` or `Right` (empty prompt) | take the suggested next prompt |
 | `/` | command menu: Claude Code's commands plus binder's own |

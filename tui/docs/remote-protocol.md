@@ -97,6 +97,7 @@ paused, or this client revoked).
 | `t` | Fields | Result |
 |-----|--------|--------|
 | `send` | `text`, `images?`, `tabId?` | `{tabId}`. A new tab, or into tab `tabId` (sent at once on its running turn when the child supports it, else after it). Text starting with `!` runs in bash mode. `images` is `[{mediaType, data}]`, data base64 |
+| `edit_queued` | `tabId`, `prompt`, `text` | `{}`. The prompt still in `queue` for tab `tabId` whose text is `prompt` becomes `text`, keeping its place and images. An empty `text` removes it; for the prompt that opens a new tab, the tab goes too, with anything queued into it. Refused once the prompt is no longer queued (sent, or removed) |
 | `interrupt` | | `{}` |
 | `stop_bash` | `tabId` | `{}` |
 | `answer` | `requestId`, `answers` | `{}`; AskUserQuestion: `answers` maps question text to the chosen label(s) (comma-separated for multi-select) |

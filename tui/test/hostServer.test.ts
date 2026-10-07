@@ -129,6 +129,22 @@ describe('host server', () => {
     expect((await a.request('answer', { requestId: q.requestId, answers: {} })).ok).toBe(false);
   });
 
+  it('edits and removes queued prompts, and refuses one already sent', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl', { BINDER_FAKE_DELAY_MS: '100' });
+    const id = '00000000-0000-4000-8000-0000000000a8';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    for (const text of ['first prompt', 'second prompt', 'third prompt']) await v.request('send', { text });
+    await until(() => v.state!.queue.length === 2);
+    expect((await v.request('edit_queued', { tabId: 2, prompt: 'second prompt', text: 'second, edited' })).ok).toBe(true);
+    expect((await v.request('edit_queued', { tabId: 3, prompt: 'third prompt', text: '' })).ok).toBe(true);
+    await until(() => v.state!.queue.length === 1 && v.state!.tabs.length === 2);
+    expect(v.state!.queue).toEqual([{ tabId: 2, prompt: 'second, edited', followup: false }]);
+    expect(v.state!.tabs[1].prompt).toBe('second, edited');
+    expect(await v.request('edit_queued', { tabId: 1, prompt: 'first prompt', text: 'too late' })).toMatchObject({ ok: false, error: 'That prompt is no longer queued' });
+  });
+
   it('answers info without attaching', async () => {
     const stateDir = setup('two-turns-stdin.jsonl');
     const id = '00000000-0000-4000-8000-0000000000a3';

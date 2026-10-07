@@ -45,6 +45,7 @@ const KEYS: [string, string][] = [
   ['Ctrl+Enter', 'Send into the current tab: on a running turn it is sent now, otherwise after it'],
   ['Shift+Enter, Alt+Enter, \\ Enter', 'Newline'],
   ['Up / Down', 'Earlier / later prompts from this folder (inside a multi-line prompt, move between lines first)'],
+  ['Up (empty prompt)', "Edit the tab's queued prompt in place: Enter saves it, Enter on an empty prompt removes it, Esc leaves it. Queued prompts also have Edit and Remove buttons"],
   ['Tab, @', 'Complete a path (after !, a command name)'],
   ['Tab, Right (empty prompt)', 'Take the suggested next prompt'],
   ['!command', 'Bash mode: run it in the session folder; the model sees the output with your next prompt'],

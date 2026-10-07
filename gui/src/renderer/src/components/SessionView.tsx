@@ -39,6 +39,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   const sticky = useApp((st) => st.stickyPrompt);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [help, setHelp] = useState(false);
+  // The queued prompt (by tab and text) the composer is editing.
+  const [editing, setEditing] = useState<{ tabId: number; prompt: string } | null>(null);
   // Ctrl+E per tab, until the turn's automatic state changes (as in the TUI).
   const [overrides, setOverrides] = useState<Record<number, { value: boolean; auto: boolean }>>({});
   const composer = useRef<ComposerHandle>(null);
@@ -191,8 +193,36 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     }
   };
 
+  // Up on an empty prompt, or a queued prompt's Edit, opens it in the
+  // composer. Enter saves it in place (empty removes it); Esc leaves it as it was.
+  const lastQueued = s?.queue.filter((q) => q.tabId === tab?.id).at(-1);
+  const editQueued = (tabId: number, prompt: string) => {
+    if (composer.current?.hasText()) return toast('Send or clear the prompt first', true);
+    setEditing({ tabId, prompt });
+    composer.current?.setText(prompt);
+  };
+  const cancelEdit = () => {
+    setEditing(null);
+    composer.current?.setText('');
+  };
+  const saveEdit = (text: string) => {
+    const { tabId, prompt } = editing!;
+    setEditing(null);
+    request(c.id, 'edit_queued', { tabId, prompt, text })
+      .then(() => {
+        if (!text.trim()) toast('Removed the queued prompt');
+      })
+      .catch((e) => {
+        // It left the queue (sent, or removed elsewhere) first: the edit stays in the prompt.
+        composer.current?.setText(text);
+        toast(errText(e), true);
+      });
+  };
+  const removeQueued = (tabId: number, prompt: string) => void request(c.id, 'edit_queued', { tabId, prompt, text: '' }).catch((e) => toast(errText(e), true));
+
   const send = (text: string, images: ImageAttachment[], followup: boolean) => {
     setHelp(false);
+    if (editing) return saveEdit(text);
     const local = /^!\s*\S/.test(text) ? null : localCommand(text);
     if (local) return runLocal(local.name, local.args);
     // Ctrl+Enter keeps the prompt in the current tab: on a running turn it is
@@ -230,6 +260,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     if (!s || c.status !== 'attached') return;
     if (e.key === 'Escape' && !s.question) {
       take();
+      if (editing) return cancelEdit();
       if (tab?.bash && tab.status === 'running') return void run('stop_bash', { tabId: tab.id });
       if (s.running !== null) return void run('interrupt');
       // Esc twice while idle: rewind, as in Claude Code.
@@ -374,7 +405,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
           {help ? (
             <HelpView commandCount={commands.length} />
           ) : s && tab ? (
-            <Transcript tab={tab} ctx={{ conn: c.id, tabId: tab.id, cwd: s.cwd, detail }} expanded={expanded} expandEarlier={expandEarlier} onToggle={toggleWork} pending={pending} pinned={Boolean(pinned)} />
+            <Transcript tab={tab} ctx={{ conn: c.id, tabId: tab.id, cwd: s.cwd, detail }} expanded={expanded} expandEarlier={expandEarlier} onToggle={toggleWork} pending={pending} pinned={Boolean(pinned)} queued={{ edit: (p) => editQueued(tab.id, p), remove: (p) => removeQueued(tab.id, p) }} />
           ) : s ? (
             <Welcome model={s.model} effort={s.effort} cwd={s.cwd} />
           ) : null}
@@ -412,6 +443,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
               running={s.running !== null}
               active={visible && !answering && !panel && !appPanelOpen && c.status === 'attached'}
               draft={c.draft}
+              onEditQueued={lastQueued && !editing ? () => editQueued(lastQueued.tabId, lastQueued.prompt) : undefined}
+              editing={editing !== null}
               onSubmit={send}
             />
           </div>

@@ -94,6 +94,8 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   const [plan, setPlan] = useState<string | undefined>(host.plan);
   // Remounting the prompt with new text (a rewind puts the prompt back).
   const [fill, setFill] = useState({ key: 0, text: draft ?? '' });
+  // The queued prompt (by tab and text) the prompt is editing.
+  const [editing, setEditing] = useState<{ tabId: number; prompt: string } | null>(null);
   const lastEsc = useRef(0);
 
   useEffect(() => setHistory(loadHistory(cwd)), [cwd]);
@@ -269,6 +271,37 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
 
   const active = state.tabs[state.active];
 
+  const remember = (text: string) => {
+    addHistory(cwd, text);
+    setHistory((h) => (h[h.length - 1] === text ? h : h.concat(text)));
+  };
+
+  // Up on an empty prompt opens the active tab's last queued prompt in the
+  // prompt. Enter saves it in place (empty removes it); Esc leaves it as it was.
+  const lastQueued = state.queue.filter((q) => q.tabId === active?.id).at(-1);
+  const editQueued = () => {
+    if (!lastQueued) return;
+    setEditing({ tabId: lastQueued.tabId, prompt: lastQueued.prompt });
+    setFill((f) => ({ key: f.key + 1, text: lastQueued.prompt }));
+  };
+  const cancelEdit = () => {
+    setEditing(null);
+    setFill((f) => ({ key: f.key + 1, text: '' }));
+  };
+  const saveEdit = (text: string) => {
+    const { tabId, prompt } = editing!;
+    setEditing(null);
+    try {
+      host.editQueued(tabId, prompt, text);
+    } catch (e) {
+      // It left the queue (sent, or removed elsewhere) first: the edit stays in the prompt.
+      setFill((f) => ({ key: f.key + 1, text }));
+      return flash(errText(e));
+    }
+    if (!text.trim()) return flash('Removed the queued prompt');
+    remember(text);
+  };
+
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
       if (selecting.current) return;
@@ -288,6 +321,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
     if (panel) return; // the panel has the keys
     if (key.escape && help) return setHelp(false);
     if (key.escape && !answering && !menuOpen) {
+      if (editing) return cancelEdit();
       if (active?.bash && active.status === 'running') return host.stopBash(active.id);
       if (running) return host.interrupt();
       // Esc twice while idle: rewind, as in Claude Code.
@@ -378,7 +412,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         ) : help ? (
           <HelpView commandCount={commands.length} />
         ) : active ? (
-          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} sticky={sticky} />
+          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} sticky={sticky} editing={editing?.tabId === active.id ? editing.prompt : undefined} />
         ) : (
           <Welcome model={state.model} effort={effort} plan={plan} cwd={cwd} width={columns} />
         )}
@@ -403,7 +437,11 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         )}
         <Text dimColor>{[turnStatus && bgCount, state.contextTokens ? `${state.contextTokens} tokens` : ''].filter(Boolean).join(' · ')}</Text>
       </Box>
-      <Text dimColor>{titledRule(columns, title)}</Text>
+      {editing ? (
+        <Text color="#E8C07D" wrap="truncate-end">{titledRule(columns, 'editing the queued prompt · enter saves · esc cancels')}</Text>
+      ) : (
+        <Text dimColor>{titledRule(columns, title)}</Text>
+      )}
       {answering && state.question && (
         <QuestionView question={state.question} onAnswer={onAnswer} onDeny={state.question.toolName === 'AskUserQuestion' ? undefined : onDeny} />
       )}
@@ -416,21 +454,23 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
           isActive={!answering && !panel}
           commands={commands}
           history={history}
+          onEditQueued={lastQueued && !editing ? editQueued : undefined}
+          editing={editing !== null}
           cwd={cwd}
           onMenuChange={setMenuOpen}
           onShortcutsChange={setShortcuts}
           onSelectionChange={onSelectionChange}
           onSubmit={(text, images, followup) => {
             setHelp(false);
-            addHistory(cwd, text);
-            setHistory((h) => (h[h.length - 1] === text ? h : h.concat(text)));
+            if (editing) return saveEdit(text);
+            remember(text);
             const local = /^!\s*\S/.test(text) ? null : localCommand(text);
             if (local) return runLocal(local.name, local.args);
             // Ctrl+Enter keeps the prompt in the current tab: on a running turn it
             // is sent at once (Claude Code's "send now"), otherwise it waits its turn.
             host.send(text, images, followup && !active?.bash ? active?.id : undefined);
           }}
-          placeholder={running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : '? for shortcuts'}
+          placeholder={editing ? 'Enter removes the queued prompt, Esc keeps it' : running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : '? for shortcuts'}
           suggestion={state.suggestion}
         />
       </Box>

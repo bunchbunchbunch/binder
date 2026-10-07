@@ -9,6 +9,7 @@ import { replayTranscript, summarize } from '../src/transcripts.js';
 import { sessionArtifacts } from '../src/artifacts.js';
 import { parseArgs } from '../src/cli.js';
 import { buildArgs } from '../src/claudeProcess.js';
+import { tabLines, type PendingPrompt } from '../src/ui/tabLines.js';
 
 const result = { type: 'result', subtype: 'success', is_error: false, duration_ms: 5, num_turns: 1 };
 
@@ -156,5 +157,33 @@ describe('forking', () => {
     expect((r as { sessionId: string }).sessionId).not.toBe(id);
     expect(parseArgs(['--fork-session'], '/x')).toHaveProperty('error');
     expect(buildArgs({ sessionId: 'new', resume: true, passthrough: [], forkFrom: 'old' })).toEqual(expect.arrayContaining(['--resume', 'old', '--fork-session', '--session-id', 'new']));
+  });
+});
+
+describe('queued prompt hints', () => {
+  const plain = (lines: string[]) => lines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''));
+  const lines = (status: 'queued' | 'done', pending: PendingPrompt[], editing?: string) =>
+    plain(tabLines({ id: 1, prompt: 'open', status, blocks: [], earlier: [] }, { width: 100, detail: false, expanded: false, renderText: () => [], pending, editing }).lines);
+  const UP = '↑ in an empty prompt to edit or remove it';
+  const EDITING = 'editing below · enter saves, or removes it if emptied · esc cancels';
+
+  it("goes under a new tab's queued prompt", () => {
+    expect(lines('queued', [])).toEqual(['│ open', '', 'queued, waiting for the current turn to finish', UP]);
+  });
+
+  it('goes under the last queued follow-up only, the one Up opens', () => {
+    const out = lines('done', [{ prompt: 'a', sending: false }, { prompt: 'b', sending: false }]);
+    expect(out.filter((l) => l === UP)).toHaveLength(1);
+    expect(out.slice(-2)).toEqual(['queued, sends when the current turn finishes (in this tab)', UP]);
+    // A new tab with a follow-up queued into it: the follow-up is last.
+    const both = lines('queued', [{ prompt: 'a', sending: false }]);
+    expect(both.indexOf(UP)).toBe(both.length - 1);
+  });
+
+  it('says how to save the one open in the prompt, and is not offered for a message being sent now', () => {
+    const out = lines('done', [{ prompt: 'a', sending: false }, { prompt: 'b', sending: false }], 'a');
+    expect(out[out.indexOf('│ a') + 2]).toBe(EDITING);
+    expect(out).not.toContain(UP);
+    expect(lines('done', [{ prompt: 'now', sending: true }])).not.toContain(UP);
   });
 });

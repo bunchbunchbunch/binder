@@ -16,6 +16,8 @@ const DIM: Style = { fg: '#7F848E' };
 const THINK: Style = { fg: '#7F848E', italic: true };
 const PROMPT: Style = { fg: '#7CC4FF', bold: true };
 const PROMPT_BAR: Style = { fg: '#4A6A8A' };
+// A key in a hint, blue as in the "?" shortcuts.
+const KEY: Style = { fg: '#7CC4FF' };
 const SUBAGENT_BAR: Style = { fg: '#5C6370' };
 // Heads a turn the child started on its own (background work finished).
 const AUTO: Style = { fg: '#E8C07D' };
@@ -139,6 +141,8 @@ export type TabLinesOptions = {
   pending?: PendingPrompt[];
   // The turn whose prompt the sticky header shows instead (see pinnedTurn).
   pinned?: Turn;
+  // The queued prompt of this tab open in the prompt for editing, if any.
+  editing?: string;
 };
 
 // `workAt` is the row of the work summary line (-1 when there is no work), so
@@ -156,7 +160,6 @@ function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean
   }
   const shown = expanded ? turn.blocks : response;
   for (const l of blocksLines(shown, width, detail, renderText)) out.push(l);
-  if (turn.status === 'queued') out.push(styled('queued, waiting for the current turn to finish', DIM));
   if (turn.status === 'interrupted') out.push(styled('interrupted', { fg: '#E8C07D' }));
   if (turn.result && turn.status !== 'interrupted' && turn.status !== 'superseded') {
     out.push(styled(`${turn.status === 'error' ? 'error · ' : ''}${fmtDuration(turn.result.durationMs)}`, DIM));
@@ -166,17 +169,36 @@ function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean
 
 // The tab's turns in order, then its pending follow-ups. `workAt` points at
 // the latest turn's work.
-export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = false, renderText, pending = [], pinned }: TabLinesOptions): { lines: string[]; workAt: number } {
+export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = false, renderText, pending = [], pinned, editing }: TabLinesOptions): { lines: string[]; workAt: number } {
   const out: string[] = [];
   for (const turn of tab.earlier) {
     turnLines(turn, width, detail, expandEarlier, renderText, out, pinned);
     if (out[out.length - 1] !== '') out.push('');
   }
   const workAt = turnLines(tab, width, detail, expanded, renderText, out, pinned);
+  // The tab's queued prompts: a new tab's own, then follow-ups. Up on an empty
+  // prompt opens the last one, so its note says how; the one open in the
+  // prompt says how to save it instead.
+  const queued = [...(tab.status === 'queued' ? [tab.prompt] : []), ...pending.filter((p) => !p.sending).map((p) => p.prompt)];
+  const hintAt = editing === undefined ? queued.length - 1 : queued.indexOf(editing);
+  let n = 0;
+  const note = (text: string) => {
+    out.push(styled(text, DIM));
+    if (n++ !== hintAt) return;
+    const key = (k: string) => styled(k, KEY);
+    const dim = (t: string) => styled(t, DIM);
+    out.push(
+      editing === undefined
+        ? key('↑') + dim(' in an empty prompt to edit or remove it')
+        : dim('editing below · ') + key('enter') + dim(' saves, or removes it if emptied · ') + key('esc') + dim(' cancels'),
+    );
+  };
+  if (tab.status === 'queued') note('queued, waiting for the current turn to finish');
   for (const p of pending) {
     if (out[out.length - 1] !== '') out.push('');
     for (const l of promptLines(p.prompt, width)) out.push(l);
-    out.push(styled(p.sending ? 'sending now…' : 'queued, sends when the current turn finishes (in this tab)', DIM));
+    if (p.sending) out.push(styled('sending now…', DIM));
+    else note('queued, sends when the current turn finishes (in this tab)');
   }
   return { lines: out, workAt };
 }

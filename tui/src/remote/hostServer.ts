@@ -265,6 +265,12 @@ export class HostServer {
         addHistory(host.cwd, text);
         return { tabId: host.send(text, images(m.images), typeof m.tabId === 'number' ? m.tabId : undefined) };
       }
+      case 'edit_queued': {
+        const text = str(m.text, 'text');
+        host.editQueued(Number(m.tabId), str(m.prompt, 'prompt'), text);
+        if (text.trim()) addHistory(host.cwd, text);
+        return;
+      }
       case 'interrupt':
         return host.interrupt();
       case 'stop_bash':

@@ -181,6 +181,54 @@ describe('store', () => {
   });
 });
 
+describe('editing a queued prompt', () => {
+  // Tab 1 running; tab 2 done with follow-up 'B' queued into it; tab 3 queued.
+  const busy = () => {
+    let s = reduce(initialState('sid'), { type: 'submit', prompt: 'one' });
+    s = reduce(s, { type: 'sent', tabId: 1 });
+    s = reduce(s, { type: 'submit', prompt: 'two' });
+    s = reduce(s, { type: 'followup', tabId: 2, prompt: 'B' });
+    return reduce(s, { type: 'submit', prompt: 'three' });
+  };
+
+  it("changes a new tab's prompt in place, and the tab's title with it", () => {
+    const s = reduce(busy(), { type: 'edit_queued', tabId: 3, prompt: 'three', text: 'THREE' });
+    expect(s.queue.map((q) => [q.tabId, q.prompt])).toEqual([[2, 'two'], [2, 'B'], [3, 'THREE']]);
+    expect(s.tabs.map((t) => t.prompt)).toEqual(['one', 'two', 'THREE']);
+  });
+
+  it('changes a follow-up in place, leaving its tab alone', () => {
+    const before = busy();
+    const s = reduce(before, { type: 'edit_queued', tabId: 2, prompt: 'B', text: 'BB' });
+    expect(s.queue.map((q) => [q.tabId, q.prompt, q.followup])).toEqual([[2, 'two', false], [2, 'BB', true], [3, 'three', false]]);
+    expect(s.tabs).toBe(before.tabs);
+  });
+
+  it('removes a follow-up', () => {
+    const s = reduce(busy(), { type: 'edit_queued', tabId: 2, prompt: 'B', text: '' });
+    expect(s.queue.map((q) => q.prompt)).toEqual(['two', 'three']);
+    expect(s.tabs).toHaveLength(3);
+  });
+
+  it("removes a new tab's prompt with its tab and what was queued into it, keeping the active tab in view", () => {
+    let s = reduce(busy(), { type: 'select', index: 2 });
+    s = reduce(s, { type: 'edit_queued', tabId: 2, prompt: 'two', text: '' });
+    expect(s.queue.map((q) => q.prompt)).toEqual(['three']);
+    expect(s.tabs.map((t) => t.id)).toEqual([1, 3]);
+    expect(s.active).toBe(1); // still tab 3
+    s = reduce(s, { type: 'edit_queued', tabId: 3, prompt: 'three', text: '' });
+    expect(s.tabs.map((t) => t.id)).toEqual([1]);
+    expect(s.active).toBe(0);
+    expect(s.queue).toEqual([]);
+  });
+
+  it('leaves the state alone once the prompt has been sent', () => {
+    const s = busy();
+    expect(reduce(s, { type: 'edit_queued', tabId: 1, prompt: 'one', text: 'x' })).toBe(s);
+    expect(reduce(s, { type: 'edit_queued', tabId: 3, prompt: 'not this', text: '' })).toBe(s);
+  });
+});
+
 // With --prompt-suggestions the child writes the next prompt it predicts
 // after a turn's result (shape recorded from the real binary).
 describe('prompt suggestions', () => {

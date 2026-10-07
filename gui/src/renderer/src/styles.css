@@ -494,6 +494,23 @@ kbd {
   text-align: right;
 }
 
+.queued-actions {
+  margin-left: 8px;
+}
+
+.queued-actions button {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+
+.queued-actions button:hover {
+  background: var(--bg-hover);
+}
+
 .prompt .rainbow {
   font-weight: 700;
 }
@@ -1163,6 +1180,12 @@ kbd {
 .composer:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.composer.editing:focus-within,
+.composer.editing {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--orange) 15%, transparent);
 }
 
 .composer.bash:focus-within,

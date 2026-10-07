@@ -23,6 +23,11 @@ type Props = {
   commands?: SlashCommand[];
   // Earlier prompts in this directory, oldest first, for Up/Down.
   history?: string[];
+  // Up on an empty prompt edits a queued prompt instead of recalling history
+  // (set while the tab has one).
+  onEditQueued?: () => void;
+  // A queued prompt is being edited: Enter on an empty prompt submits too (it removes it).
+  editing?: boolean;
   // Where relative paths complete from.
   cwd?: string;
   // The menu or the shortcuts opened or closed (App leaves Esc to them while open).
@@ -48,13 +53,14 @@ const THINK_NOTICE = 'Deeper reasoning requested for this turn';
 //   report it, see renderOptions.ts); Shift+Enter (same), Alt+Enter or a
 //   trailing backslash inserts a newline.
 //   Shift+arrows select; Option+arrows move by word; Home/End (Ctrl+A/E) line ends.
-//   Up/Down walk the prompt history from the first/last line.
+//   Up/Down walk the prompt history from the first/last line. Up on an empty
+//   prompt edits the tab's queued prompt first, when it has one.
 //   On an empty prompt, Tab or Right takes the suggested next prompt, as in Claude Code.
 //   Ctrl+V attaches the clipboard image as "[Image #n]", like Claude Code.
 //   Typing "/" opens the command menu and "@" a file menu: Up/Down pick, Tab
 //   or Enter takes the pick, Esc closes. Tab completes paths (and commands
 //   after "!"); with several matches it fills the common part, then lists them.
-export function PromptInput({ onSubmit, isActive, placeholder, suggestion, width, initialValue, commands = [], history = [], cwd = process.cwd(), onMenuChange, onShortcutsChange, onSelectionChange }: Props) {
+export function PromptInput({ onSubmit, isActive, placeholder, suggestion, width, initialValue, commands = [], history = [], onEditQueued, editing = false, cwd = process.cwd(), onMenuChange, onShortcutsChange, onSelectionChange }: Props) {
   const [e, setE] = useState<ed.Editor>(() => (initialValue ? ed.insert(ed.empty, initialValue) : ed.empty));
   const [images, setImages] = useState<Attachment[]>([]);
   const [pastes, setPastes] = useState<{ label: string; text: string }[]>([]);
@@ -148,7 +154,7 @@ export function PromptInput({ onSubmit, isActive, placeholder, suggestion, width
   usePaste(pasteText, { isActive });
 
   const submit = (state: ed.Editor, followup = false) => {
-    if (!state.value.trim()) return;
+    if (!state.value.trim() && !editing) return;
     // Only send images whose placeholder is still in the text.
     const kept = images.filter((img) => state.value.includes(`[Image #${img.id}]`)).map(({ id: _id, ...img }) => img);
     // Pasted text goes in place of its placeholder (split/join: no $ patterns).
@@ -250,6 +256,7 @@ export function PromptInput({ onSubmit, isActive, placeholder, suggestion, width
         const moved = ed.moveLine(e, key.upArrow ? -1 : 1, key.shift);
         if (moved) return setE(moved);
         if (key.shift) return;
+        if (key.upArrow && !e.value && !hist && onEditQueued) return onEditQueued();
         if (key.upArrow && (hist?.index ?? -1) + 1 < history.length) return recall((hist?.index ?? -1) + 1, hist?.draft ?? e.value);
         if (key.downArrow && hist) return recall(hist.index - 1, hist.draft);
         return;

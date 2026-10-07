@@ -162,6 +162,44 @@ test('Ctrl+Enter adds a follow-up to the tab; Esc twice rewinds it', async () =>
   await expect(page.locator('.composer textarea')).toHaveValue('Summarize it');
 });
 
+test('edits a queued prompt in place from Up or its Edit button, and removes one', async () => {
+  // The first prompt runs for about 4s (13 lines, 300ms apart) while the others wait.
+  run = await launch(tuiFixture('two-turns-stdin.jsonl'), { BINDER_FAKE_DELAY_MS: '300' });
+  const { page, project } = run;
+  await newSession(page, project);
+  const box = page.locator('.composer textarea');
+  const labels = page.locator('.tab .label');
+  for (const p of ['first prompt', 'second prompt', 'third prompt']) {
+    await page.keyboard.type(p);
+    await page.keyboard.press('Enter');
+  }
+  await expect(labels).toHaveText(['first prompt', 'second prompt', 'third prompt']);
+
+  // Up on the empty prompt opens tab 3's prompt; Esc leaves it queued as it was.
+  await page.keyboard.press('ArrowUp');
+  await expect(box).toHaveValue('third prompt');
+  await expect(page.locator('.composer.editing')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveValue('');
+  await expect(page.locator('.composer.editing')).toHaveCount(0);
+  await expect(page.locator('.tab.active .glyph')).toHaveClass(/queued/);
+
+  await page.locator('.queued-actions button', { hasText: 'Remove' }).click();
+  await expect(labels).toHaveText(['first prompt', 'second prompt']);
+
+  await page.locator('.tab', { hasText: 'second prompt' }).click();
+  await page.locator('.queued-actions button', { hasText: 'Edit' }).click();
+  await expect(box).toHaveValue('second prompt');
+  await expect(box).toBeFocused();
+  await page.keyboard.type(', edited');
+  await page.keyboard.press('Enter');
+  await expect(labels).toHaveText(['first prompt', 'second prompt, edited']);
+  await expect(box).toHaveValue('');
+  // It runs as edited once the first turn ends.
+  await expect(page.locator('.tab.active .glyph')).toHaveClass(/done/, { timeout: 20000 });
+  await expect(page.locator('.prompt')).toHaveText('second prompt, edited');
+});
+
 test('reads well in dark mode', async () => {
   run = await launch(SHOWCASE);
   const { app, page, project } = run;

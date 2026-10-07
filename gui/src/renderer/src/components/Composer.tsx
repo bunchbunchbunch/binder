@@ -8,14 +8,15 @@ import { Shortcuts } from './Shortcuts';
 // The prompt, with the TUI's keys:
 //   Enter sends in a new tab; Ctrl+Enter into the current one (send now on a
 //   running turn); Shift+Enter, Alt+Enter or a trailing \ make a newline.
-//   Up/Down on the first/last line walk this folder's prompt history.
+//   Up/Down on the first/last line walk this folder's prompt history. Up on
+//   an empty prompt edits the tab's queued prompt first, when it has one.
 //   "/" opens the command menu and "@" a file menu: Up/Down pick, Tab or
 //   Enter takes, Esc closes. Tab completes paths (after "!", commands).
 //   On an empty prompt, Tab or Right takes the suggested next prompt and
 //   "?" shows the shortcuts. Ctrl+V pastes an image or text; long pastes
 //   collapse to "[Pasted text #n +N lines]", as in Claude Code.
 
-export type ComposerHandle = { focus: () => void; setText: (text: string) => void };
+export type ComposerHandle = { focus: () => void; setText: (text: string) => void; hasText: () => boolean };
 
 type Props = {
   conn: string;
@@ -27,6 +28,11 @@ type Props = {
   active: boolean;
   // Text the prompt starts with (a session opened with a draft).
   draft?: string;
+  // Up on an empty prompt edits a queued prompt instead of recalling history
+  // (set while the tab has one).
+  onEditQueued?: () => void;
+  // A queued prompt is being edited: Enter on an empty prompt submits too (it removes it).
+  editing: boolean;
   onSubmit: (text: string, images: ImageAttachment[], followup: boolean) => void;
 };
 
@@ -47,7 +53,7 @@ function readImage(file: File): Promise<ImageAttachment> {
   });
 }
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ conn, cwd, commands, suggestion, running, active, draft = '', onSubmit }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ conn, cwd, commands, suggestion, running, active, draft = '', onEditQueued, editing, onSubmit }, ref) {
   const ta = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState(draft);
   const [cursor, setCursor] = useState(draft.length);
@@ -85,6 +91,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
       set(text);
       ta.current?.focus();
     },
+    hasText: () => value !== '',
   }));
 
   useEffect(() => {
@@ -203,12 +210,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
   };
 
   const submit = (text: string, followup: boolean) => {
-    if (!text.trim()) return;
+    if (!text.trim() && !editing) return;
     const kept = images.filter((img) => text.includes(`[Image #${img.id}]`)).map(({ mediaType, data }) => ({ mediaType, data }));
     // Pasted text goes in place of its placeholder (split/join: no $ patterns).
     const full = pastes.reduce((v, p) => v.split(p.label).join(p.text), text);
     onSubmit(full, kept, followup);
-    setHistory((h) => (h[h.length - 1] === full ? h : h.concat(full)));
+    if (full.trim()) setHistory((h) => (h[h.length - 1] === full ? h : h.concat(full)));
     set('');
     setImages([]);
     setPastes([]);
@@ -298,6 +305,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !mods && !e.shiftKey) {
       const before = value.slice(0, el.selectionStart);
       const after = value.slice(el.selectionEnd);
+      if (e.key === 'ArrowUp' && !value && !hist && onEditQueued) return handled(), onEditQueued();
       if (e.key === 'ArrowUp' && !before.includes('\n') && (hist?.index ?? -1) + 1 < history.length) return handled(), recall((hist?.index ?? -1) + 1, hist?.draft ?? value);
       if (e.key === 'ArrowDown' && !after.includes('\n') && hist) return handled(), recall(hist.index - 1, hist.draft);
       return;
@@ -336,12 +344,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
   const bash = value.startsWith('!');
   const think = /\bultrathink\b/i.test(value);
   const shownImages = images.filter((img) => value.includes(`[Image #${img.id}]`));
-  const placeholder = suggestion || (running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : 'Ask Claude anything. ? for shortcuts');
+  const placeholder = editing ? 'Enter removes the queued prompt, Esc keeps it' : suggestion || (running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : 'Ask Claude anything. ? for shortcuts');
   const hint = useMemo(() => {
+    if (editing) return 'editing the queued prompt · ⏎ saves · esc cancels';
     if (!value && suggestion) return 'Tab takes the suggestion';
     if (running) return '⏎ new tab · ⌃⏎ send into this one now';
     return '⏎ send in a new tab · ⌃⏎ into this tab · ⇧⏎ newline';
-  }, [value, suggestion, running]);
+  }, [value, suggestion, running, editing]);
 
   return (
     <>
@@ -366,7 +375,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
           ))}
         </div>
       )}
-      <div className={`composer${bash ? ' bash' : ''}`} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+      <div className={`composer${bash ? ' bash' : ''}${editing ? ' editing' : ''}`} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
         {shownImages.length > 0 && (
           <div className="attachments">
             {shownImages.map((img) => (
