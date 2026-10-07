@@ -63,7 +63,7 @@ export function main(argv = process.argv.slice(2)): void {
   const style = (s?: string) => MARKDOWN_STYLES.find((m) => m === s);
   setMarkdownStyle(style(process.env.BINDER_MD) ?? style(binderConfig().markdownStyle) ?? 'vivid');
   const app = render(
-    <App host={host} configDir={cfg} statusLineCommand={readStatusLineCommand(cfg)} draft={draft} stickyPrompt={binderConfig().stickyPrompt === true} onQuit={shutdown} />,
+    <App host={host} configDir={cfg} statusLineCommand={readStatusLineCommand(cfg)} draft={draft} stickyPrompt={binderConfig().stickyPrompt !== false} onQuit={shutdown} />,
     { ...RENDER_OPTIONS, stdin: filterInput(process.stdin, (chunk) => takeMouse(keypadToText(chunk))) },
   );
   // The wheel scrolls the tab (see mouse.ts). Turned off on any exit, or the

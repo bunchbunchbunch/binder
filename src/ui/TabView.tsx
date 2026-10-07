@@ -2,7 +2,7 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useBoxMetrics, useInput, type DOMElement } from 'ink';
 import type { Block, Tab } from '../store.js';
 import { renderMarkdown } from './markdown.js';
-import { stickyLines, tabLines, type PendingPrompt, type TextRenderer, type TurnHead } from './tabLines.js';
+import { pinnedTurn, stickyLines, tabLines, type PendingPrompt, type TextRenderer } from './tabLines.js';
 import { onWheel } from '../mouse.js';
 import { setBigViewport } from './lineAttrs.js';
 import { markdownStyle, type MarkdownStyle } from './md/theme.js';
@@ -55,7 +55,7 @@ function useTextRenderer(): TextRenderer {
 }
 
 // `mdStyle` is only read to redraw the tab when the markdown style changes.
-// `sticky`: once a turn's prompt scrolls out of view, its first rows stay at the top.
+// `sticky`: the tab's latest prompt stays at the top, above the rows that scroll.
 type TabViewProps = { tab: Tab; width: number; detail: boolean; scrollActive: boolean; questionPending: boolean; expandedOverride?: boolean; pending?: PendingPrompt[]; mdStyle?: MarkdownStyle; sticky?: boolean };
 
 function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expandedOverride, pending, sticky = false }: TabViewProps) {
@@ -64,6 +64,8 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
   const [requested, setRequested] = useState(0);
   // Follow the bottom while the turn streams, until the user scrolls up.
   const [follow, setFollow] = useState(true);
+  // Home shows the whole sticky prompt, until the next scroll.
+  const [full, setFull] = useState(false);
   const renderText = useTextRenderer();
   // Big headings in this viewport get their double-height rows (lineAttrs.ts).
   useEffect(() => {
@@ -75,6 +77,7 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
     if (tab.status !== 'running') return;
     // A new turn in this tab (after a respawn) starts following again.
     setFollow(true);
+    setFull(false);
   }, [tab.status]);
 
   // Work streams expanded while the turn runs; it collapses to a summary when
@@ -86,20 +89,15 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
   const expanded = expandedOverride ?? override ?? autoExpanded;
 
   const textWidth = Math.max(20, width - 2);
-  const { lines, workAt, heads } = tabLines(tab, { width: textWidth, detail, expanded, expandEarlier: override === true, renderText, pending });
-  const maxTop = Math.max(0, lines.length - viewHeight);
+  // The sticky header holds the tab's latest prompt in place of the
+  // transcript: its first 3 rows, or with Home as much as fits.
+  const headerRows = full ? viewHeight - 2 : Math.min(3, Math.floor(viewHeight / 4));
+  const pinned = sticky && headerRows >= 1 ? pinnedTurn(tab) : undefined;
+  const header = pinned ? stickyLines(pinned.prompt, textWidth, headerRows, !full) : [];
+  const { lines, workAt } = tabLines(tab, { width: textWidth, detail, expanded, expandEarlier: override === true, renderText, pending, pinned });
+  const rows = Math.max(0, viewHeight - header.length);
+  const maxTop = Math.max(0, lines.length - rows);
   const top = follow ? maxTop : Math.min(requested, maxTop);
-
-  // The sticky header, drawn over the top rows: the prompt of the turn that
-  // row `at` belongs to, once that prompt is scrolled past.
-  const headerRows = sticky ? Math.min(3, Math.floor(viewHeight / 4)) : 0;
-  const headerAt = (at: number): string[] => {
-    let cur: TurnHead | undefined;
-    for (const h of heads) if (h.at <= at) cur = h;
-    if (!cur || cur.at === at || headerRows < 1) return [];
-    return stickyLines(cur, textWidth, headerRows, cur === heads[0]);
-  };
-  const header = headerAt(top);
 
   // The wheel scrolls by lines. Steps that land before the next render add up.
   const pos = useRef({ top, maxTop });
@@ -111,30 +109,36 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
       pos.current = { ...pos.current, top: next };
       setRequested(next);
       setFollow(next >= pos.current.maxTop);
+      setFull(false);
     });
   }, [scrollActive]);
 
   useInput(
     (input, key) => {
-      const page = Math.max(1, viewHeight - 2 - header.length);
+      const page = Math.max(1, rows - 2);
       if (key.pageUp) {
+        setFull(false);
         setFollow(false);
         setRequested(Math.max(0, top - page));
       } else if (key.pageDown) {
+        setFull(false);
         const next = Math.min(maxTop, top + page);
         setRequested(next);
         if (next >= maxTop) setFollow(true);
       } else if (key.home && !key.ctrl) {
+        setFull(true);
         setFollow(false);
         setRequested(0);
       } else if (key.end && !key.ctrl) {
+        setFull(false);
         setFollow(true);
       } else if (key.ctrl && input === 'e') {
+        setFull(false);
         setOverride(!expanded);
         if (!expanded && workAt >= 0) {
-          // Expanding: bring the start of the work to the top of the view (under the header).
+          // Expanding: bring the start of the work to the top of the view.
           setFollow(false);
-          setRequested(Math.max(0, workAt - headerAt(workAt).length));
+          setRequested(workAt);
         } else {
           setFollow(true);
         }
@@ -145,8 +149,7 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
 
   // Only the rows on screen reach Ink. Before the first measurement the
   // height is unknown, so nothing is drawn for that one frame.
-  const visible = viewHeight > 0 ? lines.slice(top, top + viewHeight) : [];
-  visible.splice(0, header.length, ...header);
+  const visible = viewHeight > 0 ? [...header, ...lines.slice(top, top + rows)] : [];
   return (
     <Box ref={viewportRef} flexGrow={1} flexDirection="column" overflow="hidden" paddingX={1}>
       <Text wrap="truncate-end">{visible.join('\n')}</Text>

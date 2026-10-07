@@ -7,12 +7,14 @@ import type { Block, Tab, Turn } from '../src/store.js';
 
 const HOME = '\x1b[H';
 const PAGE_UP = '\x1b[5~';
+const PAGE_DOWN = '\x1b[6~';
 const CTRL_E = '\x05';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const plain = (frame = '') => frame.replace(/\x1b\[[0-9;]*m/g, '').replace(/\x1b\]8;;[^\x1b\x07]*(?:\x1b\\|\x07)/g, '');
 // The viewport's rows, without its one-column padding.
 const rows = (ui: { lastFrame: () => string | undefined }) => plain(ui.lastFrame()).split('\n').map((l) => l.replace(/^ /, '').trimEnd());
+const count = (ui: { lastFrame: () => string | undefined }, text: string) => plain(ui.lastFrame()).split(text).length - 1;
 
 async function until(check: () => boolean, ms = 3000) {
   const start = Date.now();
@@ -36,7 +38,7 @@ function mount(tab: Tab, sticky = true) {
 }
 
 describe('sticky prompt', () => {
-  it('pins the first rows of a long prompt over a long response, and Home shows it in full', async () => {
+  it('holds the first rows of a long prompt above the response, and Home shows it whole until the next scroll', async () => {
     const ui = mount(tabOf(turn('p1\np2\np3\np4\np5\np6', [answer('answer', 40)])));
     await until(() => rows(ui).some((l) => l.includes('answer 39')));
     const top = rows(ui).slice(0, 4);
@@ -45,36 +47,39 @@ describe('sticky prompt', () => {
     expect(rows(ui).at(-1)).toBe('1.2s');
 
     ui.stdin.write(HOME);
-    await until(() => rows(ui)[0] === '│ p1');
-    expect(rows(ui).slice(0, 7)).toEqual(['│ p1', '│ p2', '│ p3', '│ p4', '│ p5', '│ p6', '']);
-    expect(plain(ui.lastFrame())).not.toContain('╌');
+    await until(() => rows(ui)[5] === '│ p6');
+    expect(rows(ui).slice(0, 8)).toEqual(['│ p1', '│ p2', '│ p3', '│ p4', '│ p5', '│ p6', expect.stringMatching(/^╌+$/), 'answer 0']);
+
+    ui.stdin.write(PAGE_DOWN);
+    await until(() => rows(ui)[2] === '│ p3 …');
+    expect(rows(ui)[3]).toMatch(/\+3 lines · Home/);
     ui.unmount();
   });
 
-  it('pins a short prompt whole, with a plain rule', async () => {
-    const ui = mount(tabOf(turn('what is new?', [answer('answer', 40)])));
-    await until(() => rows(ui).some((l) => l.includes('answer 39')));
-    expect(rows(ui)[0]).toBe('│ what is new?');
+  it('holds the prompt from the start, with the response right under it, even when all of it fits', async () => {
+    const ui = mount(tabOf(turn('what is new?', [answer('answer', 3)])));
+    await until(() => rows(ui).some((l) => l.includes('answer 2')));
+    expect(rows(ui).slice(0, 3)).toEqual(['│ what is new?', expect.stringMatching(/^╌+$/), 'answer 0']);
+    expect(count(ui, 'what is new?')).toBe(1);
+    ui.unmount();
+  });
+
+  it('holds a prompt that has no response yet', async () => {
+    const ui = mount(tabOf({ prompt: 'just sent', status: 'running', blocks: [] }));
+    await until(() => rows(ui)[0] === '│ just sent');
     expect(rows(ui)[1]).toMatch(/^╌+$/);
     ui.unmount();
   });
 
-  it('leaves a response that fits on screen as it is', async () => {
-    const ui = mount(tabOf(turn('what is new?', [answer('answer', 3)])));
-    await until(() => rows(ui).some((l) => l.includes('answer 2')));
-    expect(rows(ui).slice(0, 3)).toEqual(['│ what is new?', '', 'answer 0']);
+  it('is off when asked', async () => {
+    const ui = mount(tabOf(turn('what is new?', [answer('answer', 40)])), false);
+    await until(() => rows(ui).some((l) => l.includes('answer 39')));
+    expect(plain(ui.lastFrame())).not.toContain('what is new?');
     expect(plain(ui.lastFrame())).not.toContain('╌');
     ui.unmount();
   });
 
-  it('is off unless asked for', async () => {
-    const ui = mount(tabOf(turn('what is new?', [answer('answer', 40)])), false);
-    await until(() => rows(ui).some((l) => l.includes('answer 39')));
-    expect(plain(ui.lastFrame())).not.toContain('what is new?');
-    ui.unmount();
-  });
-
-  it("shows the prompt of the turn on screen in a tab with follow-ups", async () => {
+  it('keeps the latest prompt in a tab with follow-ups, while earlier turns keep theirs in the transcript', async () => {
     const ui = mount(tabOf(turn('second ask', [answer('second', 30)]), [turn('first ask', [answer('first', 30)])]));
     await until(() => rows(ui).some((l) => l.includes('second 29')));
     expect(rows(ui)[0]).toBe('│ second ask');
@@ -84,8 +89,23 @@ describe('sticky prompt', () => {
       ui.stdin.write(PAGE_UP);
       await sleep(30);
     }
-    await until(() => rows(ui)[0] === '│ first ask');
-    expect(rows(ui).slice(2).some((l) => /^first \d+$/.test(l))).toBe(true);
+    await until(() => rows(ui).slice(2).some((l) => /^first \d+$/.test(l)));
+    expect(rows(ui)[0]).toBe('│ second ask');
+
+    ui.stdin.write(HOME);
+    await until(() => rows(ui)[2] === '│ first ask');
+    expect(rows(ui).slice(0, 2)).toEqual(['│ second ask', expect.stringMatching(/^╌+$/)]);
+    expect(count(ui, 'second ask')).toBe(1);
+    ui.unmount();
+  });
+
+  it('keeps the prompt that was sent when the child starts a turn on its own', async () => {
+    const auto: Turn = { ...turn('Background task finished: build', [answer('auto', 2)]), auto: true };
+    const ui = mount(tabOf(auto, [turn('run the build', [answer('build', 2)])]));
+    await until(() => rows(ui).some((l) => l.includes('auto 1')));
+    expect(rows(ui)[0]).toBe('│ run the build');
+    expect(rows(ui)).toContain('⏺ Background task finished: build');
+    expect(count(ui, 'run the build')).toBe(1);
     ui.unmount();
   });
 

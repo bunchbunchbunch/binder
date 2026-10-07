@@ -60,7 +60,7 @@ export type AppProps = {
   statusLineCommand?: string;
   /** Text the prompt starts with, unsent. */
   draft?: string;
-  /** Pin a turn's prompt to the top of the tab once it scrolls out (config.json stickyPrompt). */
+  /** Keep the tab's latest prompt under the tab bar (config.json stickyPrompt). */
   stickyPrompt?: boolean;
   onQuit: () => void;
 };

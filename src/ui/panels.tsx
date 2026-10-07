@@ -505,7 +505,7 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
 
   const items: PickerItem[] = [
     { key: 'mode', label: 'Permission mode', description: config.permissionMode ?? "Claude Code's default" },
-    { key: 'sticky', label: 'Sticky prompt', description: config.stickyPrompt === true ? 'on' : 'off' },
+    { key: 'sticky', label: 'Sticky prompt', description: config.stickyPrompt !== false ? 'on' : 'off' },
     { key: 'markdown', label: 'Markdown style', description: style },
     ...Object.entries(dirs).map(([folder, dir]) => ({ key: `dir:${folder}`, label: 'Config dir', description: `${folder} → ${dir}` })),
     { key: 'add', label: 'Add a config dir…', description: Object.keys(dirs).length ? undefined : 'for a second account: claude run in a folder you pick uses another config dir' },
@@ -514,7 +514,7 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
     setLast(item.key);
     if (item.key === 'mode') return setView({ kind: 'mode' });
     if (item.key === 'sticky') {
-      const on = config.stickyPrompt !== true;
+      const on = config.stickyPrompt === false;
       if (save({ stickyPrompt: on }, `Sticky prompt ${on ? 'on' : 'off'}`)) onSticky(on);
       return;
     }

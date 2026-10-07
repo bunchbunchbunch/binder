@@ -137,18 +137,18 @@ export type TabLinesOptions = {
   renderText: TextRenderer;
   // Follow-ups for this tab that have not started yet.
   pending?: PendingPrompt[];
+  // The turn whose prompt the sticky header shows instead (see pinnedTurn).
+  pinned?: Turn;
 };
-
-// A turn's prompt rows and the row they start at, for the sticky header.
-export type TurnHead = { at: number; lines: string[] };
 
 // `workAt` is the row of the work summary line (-1 when there is no work), so
 // expanding can scroll the work into view.
-function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean, renderText: TextRenderer, out: string[], heads: TurnHead[]): number {
-  const head = turn.auto ? wrap(styled(`⏺ ${turn.prompt}`, AUTO), width) : promptLines(turn.prompt, width);
-  heads.push({ at: out.length, lines: head });
-  for (const l of head) out.push(l);
-  out.push('');
+function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean, renderText: TextRenderer, out: string[], pinned?: Turn): number {
+  if (turn !== pinned) {
+    const head = turn.auto ? wrap(styled(`⏺ ${turn.prompt}`, AUTO), width) : promptLines(turn.prompt, width);
+    for (const l of head) out.push(l);
+    out.push('');
+  }
   const { work, response } = splitWork(turn.blocks);
   const workAt = work.length ? out.length : -1;
   if (work.length) {
@@ -165,29 +165,35 @@ function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean
 }
 
 // The tab's turns in order, then its pending follow-ups. `workAt` points at
-// the latest turn's work; `heads` has one entry per turn.
-export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = false, renderText, pending = [] }: TabLinesOptions): { lines: string[]; workAt: number; heads: TurnHead[] } {
+// the latest turn's work.
+export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = false, renderText, pending = [], pinned }: TabLinesOptions): { lines: string[]; workAt: number } {
   const out: string[] = [];
-  const heads: TurnHead[] = [];
   for (const turn of tab.earlier) {
-    turnLines(turn, width, detail, expandEarlier, renderText, out, heads);
+    turnLines(turn, width, detail, expandEarlier, renderText, out, pinned);
     if (out[out.length - 1] !== '') out.push('');
   }
-  const workAt = turnLines(tab, width, detail, expanded, renderText, out, heads);
+  const workAt = turnLines(tab, width, detail, expanded, renderText, out, pinned);
   for (const p of pending) {
     if (out[out.length - 1] !== '') out.push('');
     for (const l of promptLines(p.prompt, width)) out.push(l);
     out.push(styled(p.sending ? 'sending now…' : 'queued, sends when the current turn finishes (in this tab)', DIM));
   }
-  return { lines: out, workAt, heads };
+  return { lines: out, workAt };
 }
 
-// The sticky header: the first `rows` rows of a prompt, then a rule that says
-// how much of it is cut. The first turn's prompt is read in full with Home.
-export function stickyLines(head: TurnHead, width: number, rows: number, first: boolean): string[] {
-  const cut = head.lines.length - rows;
-  const shown = head.lines.slice(0, rows);
+// The prompt the sticky header holds: the tab's latest one sent, so not a
+// turn the child started on its own.
+export function pinnedTurn(tab: Tab): Turn | undefined {
+  return [...tab.earlier, tab].reverse().find((t) => !t.auto);
+}
+
+// The sticky header: the first `rows` rows of the prompt, then a rule that
+// says how much of it is cut, and that Home shows it whole.
+export function stickyLines(prompt: string, width: number, rows: number, home: boolean): string[] {
+  const lines = promptLines(prompt, width);
+  const cut = lines.length - rows;
+  const shown = lines.slice(0, rows);
   if (cut > 0) shown[rows - 1] = truncate(shown[rows - 1] + ' …', width);
-  const note = cut > 0 ? ` +${cut} line${cut === 1 ? '' : 's'}${first ? ' · Home' : ''} ╌` : '';
+  const note = cut > 0 ? ` +${cut} line${cut === 1 ? '' : 's'}${home ? ' · Home' : ''} ╌` : '';
   return [...shown, styled('╌'.repeat(Math.max(0, width - strWidth(note))) + note, DIM)];
 }

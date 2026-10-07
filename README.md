@@ -47,7 +47,7 @@ elsewhere). `/settings` shows and changes them, or edit the file:
 {
   "permissionMode": "bypassPermissions",
   "configDirs": { "~/work": "~/.claude-work" },
-  "stickyPrompt": true,
+  "stickyPrompt": false,
   "markdownStyle": "classic"
 }
 ```
@@ -57,10 +57,10 @@ elsewhere). `/settings` shows and changes them, or edit the file:
   work repos: claude run inside `~/work` gets `CLAUDE_CONFIG_DIR=~/.claude-work`. It applies
   only when `CLAUDE_CONFIG_DIR` is not set already, so a shell hook that sets it still wins;
   it covers launches that skip your shell, such as `binder serve` under launchd.
-- `stickyPrompt` keeps the prompt in view while you read its response: once a turn's prompt
-  scrolls out of the top of the tab, its first 3 lines stay pinned there, over the response,
-  with `+N lines` when it is longer. `Home` shows the whole prompt at the top of the tab. In
-  a tab with follow-ups, the pinned prompt is the one for the turn on screen. Off by default;
+- `stickyPrompt` keeps the prompt in view: once sent, it sits at the top of the tab, under
+  the tab bar, and the response scrolls below it. A longer prompt shows its first 3 lines and
+  `+N lines · Home`; `Home` shows it whole until you scroll. In a tab with follow-ups it is the
+  latest prompt you sent, and earlier ones stay in the transcript. On unless set to `false`;
   the Mac app reads it too.
 - `markdownStyle` is `vivid` (the default) or `classic`; see Output rendering. `BINDER_MD`
   overrides it, and `/md` switches for the running session only.

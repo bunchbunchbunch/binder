@@ -276,11 +276,11 @@ describe('/settings', () => {
       await t.wait(() => t.frame().includes('Sticky prompt') && t.frame().includes('plan'));
       await t.key(DOWN);
       await t.key(ENTER);
-      await t.wait(() => t.frame().includes('Sticky prompt on'));
+      await t.wait(() => t.frame().includes('Sticky prompt off'));
       await t.key(DOWN);
       await t.key(ENTER);
       await t.wait(() => t.frame().includes('Markdown: classic'));
-      expect(config()).toEqual({ permissionMode: 'plan', mine: true, stickyPrompt: true, markdownStyle: 'classic' });
+      expect(config()).toEqual({ permissionMode: 'plan', mine: true, stickyPrompt: false, markdownStyle: 'classic' });
 
       // Back to Claude Code's own default: the key goes.
       await t.key(UP);
@@ -312,7 +312,7 @@ describe('/settings', () => {
       await t.wait(() => t.frame().includes('Remove'));
       await t.key(ENTER);
       await t.wait(() => !config().configDirs);
-      expect(config()).toEqual({ mine: true, stickyPrompt: true, markdownStyle: 'classic' });
+      expect(config()).toEqual({ mine: true, stickyPrompt: false, markdownStyle: 'classic' });
       await t.key(ESC);
       await t.wait(() => !t.frame().includes('Sticky prompt'));
     } finally {
