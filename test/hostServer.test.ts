@@ -138,6 +138,18 @@ describe('host server', () => {
     expect(v.msgs[0]).toMatchObject({ t: 'info', sessionId: id, cwd: process.cwd(), running: false, pid: process.pid });
   });
 
+  it('serves the panels: MCP sign-in, Chrome status, and a rewind preview', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl');
+    const id = '00000000-0000-4000-8000-0000000000a7';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    expect((await v.request('mcp_authenticate', { server: 'notion' })).result).toEqual({ authUrl: 'https://auth.example/notion' });
+    expect((await v.request('mcp_clear_auth', { server: 'notion' })).ok).toBe(true);
+    expect((await v.request('chrome_status')).result).toMatchObject({ status: { installed: true, connected: false } });
+    expect((await v.request('rewind_preview', { uuid: 'u1' })).result).toEqual({ canRewind: true, files: 1, error: null });
+  });
+
   it('refuses a viewer whose roots do not hold the session, and a cd outside them', async () => {
     const stateDir = setup('two-turns-stdin.jsonl');
     const id = '00000000-0000-4000-8000-0000000000a4';

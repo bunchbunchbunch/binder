@@ -13,6 +13,7 @@ import { insideRoots } from './hostServer.js';
 import { readSessions } from '../sessions.js';
 import { listTranscripts } from '../transcripts.js';
 import { configDir, stateDir } from '../paths.js';
+import { logPath } from '../eventLog.js';
 
 // `binder serve`: the gateway (docs/remote-protocol.md). Holds one WebSocket to
 // the relay, runs a Noise IK handshake per client, admits only enrolled
@@ -33,7 +34,7 @@ const oneLine = (s: string) => s.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/
 const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 type HostInfo = { sessionId: string; cwd: string; title: string; running: boolean; pid: number };
-export type SessionRow = { id: string; cwd: string; title: string; live: boolean; running: boolean; lastUsedAt: string };
+export type SessionRow = { id: string; cwd: string; title: string; live: boolean; running: boolean; lastUsedAt: string; branch?: string };
 
 /** Asks a host socket what it runs; null when nothing answers. */
 export function hostInfo(sessionId: string, timeoutMs = 1500): Promise<HostInfo | null> {
@@ -79,16 +80,27 @@ function removeStale(sessionId: string): void {
   }
 }
 
+type ListOptions = {
+  // The Claude Code config dirs whose transcripts are listed.
+  configDirs?: string[];
+  // Leave out headless runs binder did not start (scripts and hooks that call `claude -p`), as /resume does.
+  interactiveOnly?: boolean;
+};
+
 /** Live hosts first, then what /resume would offer, newest first, inside the allowed roots. */
-export async function listSessions(roots: string[]): Promise<SessionRow[]> {
+export async function listSessions(roots: string[] | undefined, { configDirs = [configDir()], interactiveOnly = false }: ListOptions = {}): Promise<SessionRow[]> {
   const rows = new Map<string, SessionRow>();
-  for (const t of listTranscripts(configDir()).slice(0, 300)) {
-    rows.set(t.id, { id: t.id, cwd: t.cwd, title: oneLine(t.prompt).slice(0, 100), live: false, running: false, lastUsedAt: new Date(t.modified).toISOString() });
+  const transcripts = configDirs
+    .flatMap((d) => listTranscripts(d))
+    .filter((t) => !interactiveOnly || !t.entrypoint?.startsWith('sdk') || existsSync(logPath(t.id)))
+    .sort((a, b) => b.modified - a.modified);
+  for (const t of transcripts.slice(0, 300)) {
+    rows.set(t.id, { id: t.id, cwd: t.cwd, title: oneLine(t.prompt).slice(0, 100), live: false, running: false, lastUsedAt: new Date(t.modified).toISOString(), branch: t.branch });
   }
   for (const r of readSessions()) {
     const prev = rows.get(r.id);
     const last = prev && prev.lastUsedAt > r.lastUsedAt ? prev.lastUsedAt : r.lastUsedAt;
-    rows.set(r.id, { id: r.id, cwd: r.cwd, title: prev?.title || oneLine(r.firstPrompt ?? '').slice(0, 100), live: false, running: false, lastUsedAt: last });
+    rows.set(r.id, { id: r.id, cwd: r.cwd, title: prev?.title || oneLine(r.firstPrompt ?? '').slice(0, 100), live: false, running: false, lastUsedAt: last, branch: prev?.branch });
   }
   const live = await Promise.all(socketSessionIds().map(async (id) => [id, await hostInfo(id)] as const));
   for (const [id, info] of live) {
@@ -97,7 +109,7 @@ export async function listSessions(roots: string[]): Promise<SessionRow[]> {
       continue;
     }
     const prev = rows.get(id);
-    rows.set(id, { id, cwd: info.cwd, title: info.title || prev?.title || '', live: true, running: info.running, lastUsedAt: new Date().toISOString() });
+    rows.set(id, { id, cwd: info.cwd, title: info.title || prev?.title || '', live: true, running: info.running, lastUsedAt: new Date().toISOString(), branch: prev?.branch });
   }
   return [...rows.values()]
     .filter((r) => r.cwd && insideRoots(r.cwd, roots))

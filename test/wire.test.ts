@@ -64,12 +64,20 @@ describe('wire patches', () => {
     replayWithPatches('two-turns-stdin.jsonl', 1, ['one', 'two']);
   });
 
+  it('carry the suggested next prompt and the background tasks', () => {
+    const { state } = replayWithPatches('single-turn-partial.jsonl', 5, ['Reply with just: ok']);
+    const suggested = reduce(state, { type: 'event', event: { type: 'prompt_suggestion', suggestion: 'write tests', uuid: 'u1', session_id: 's1' } as ClaudeEvent });
+    expect(diff({ state, cwd: '/w' }, { state: suggested, cwd: '/w' })!.meta).toEqual({ suggestion: 'write tests' });
+    const bg = reduce(suggested, { type: 'event', event: { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'sleep 8' }], session_id: 's1' } as unknown as ClaudeEvent });
+    expect(diff({ state: suggested, cwd: '/w' }, { state: bg, cwd: '/w' })!.meta).toEqual({ backgroundTasks: [{ id: 'b1', type: 'local_bash', description: 'sleep 8' }] });
+  });
+
   it('carry a question and its answer', () => {
     let state = initialState('s1');
     const before: Source = { state, cwd: '/w' };
-    state = reduce(state, { type: 'question', question: { requestId: 'r1', toolName: 'Bash', toolInput: { command: 'rm -rf build' }, questions: [{ question: 'Allow Bash?', options: [{ label: 'Allow' }, { label: 'Deny' }] }] } });
+    state = reduce(state, { type: 'question', question: { requestId: 'r1', toolName: 'Bash', toolInput: { command: 'rm -rf build' }, reason: 'Outside the project', questions: [{ question: 'Allow Bash?', options: [{ label: 'Allow' }, { label: 'Deny' }] }] } });
     const p = diff(before, { state, cwd: '/w' })!;
-    expect(p.meta?.question).toMatchObject({ requestId: 'r1', kind: 'permission', toolName: 'Bash', toolInput: { command: 'rm -rf build' } });
+    expect(p.meta?.question).toMatchObject({ requestId: 'r1', kind: 'permission', toolName: 'Bash', toolInput: { command: 'rm -rf build' }, reason: 'Outside the project' });
     const after = reduce(state, { type: 'question_answered' });
     expect(diff({ state, cwd: '/w' }, { state: after, cwd: '/w' })!.meta).toEqual({ question: null });
   });

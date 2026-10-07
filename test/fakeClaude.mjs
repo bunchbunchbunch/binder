@@ -101,6 +101,8 @@ const CONTROL = {
     return {};
   },
   mcp_reconnect: () => ({}),
+  mcp_authenticate: (r) => ({ authUrl: `https://auth.example/${r.serverName}` }),
+  mcp_clear_auth: () => ({}),
   get_chrome_dialog: () => ({ allowed: true, subscriber: true, installed: true, connected: false, enabled_by_default: false, urls: { install: 'https://claude.ai/chrome', reconnect: 'https://clau.de/chrome/reconnect', permissions: 'https://clau.de/chrome/permissions' } }),
   rewind_files: (r) => (r.dry_run ? { canRewind: true, filesChanged: ['/tmp/a.txt'], insertions: 0, deletions: 1 } : { canRewind: true }),
   rewind_conversation: (r) => ({ rewound: true, targetMessageUuid: r.target_message_uuid, prefillText: prompts.get(r.target_message_uuid) ?? '' }),

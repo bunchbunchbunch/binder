@@ -28,6 +28,8 @@ export type WireQuestion = {
   kind: 'ask' | 'permission';
   toolName?: string;
   toolInput?: unknown;
+  // Why a permission prompt was raised, as the child explains it.
+  reason?: string;
   questions: Question['questions'];
 };
 
@@ -47,6 +49,10 @@ export type WireMeta = {
   question: WireQuestion | null;
   childExit: { code: number | null; stderr: string[] } | null;
   effort: string | null;
+  // The next prompt Claude Code predicts after a turn, until anything is sent.
+  suggestion: string | null;
+  // Background shells and agents still running.
+  backgroundTasks: { id: string; type: string; description: string }[];
 };
 
 export type WireState = WireMeta & { tabs: WireTab[] };
@@ -106,6 +112,7 @@ function wireQuestion(q: Question | undefined): WireQuestion | null {
     kind: permission ? 'permission' : 'ask',
     toolName: q.toolName,
     ...(permission && { toolInput: cutStrings(q.toolInput ?? {}, INPUT_STRING_MAX) }),
+    ...(permission && q.reason && { reason: q.reason }),
     questions: q.questions,
   };
 }
@@ -128,6 +135,8 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   question: [(s) => s.state.question, (s) => wireQuestion(s.state.question)],
   childExit: [(s) => s.state.childExit, (s) => s.state.childExit ?? null],
   effort: [(s) => s.effort, (s) => s.effort ?? null],
+  suggestion: [(s) => s.state.suggestion, (s) => s.state.suggestion ?? null],
+  backgroundTasks: [(s) => s.state.backgroundTasks, (s) => s.state.backgroundTasks],
 };
 
 export function wireState(src: Source): WireState {

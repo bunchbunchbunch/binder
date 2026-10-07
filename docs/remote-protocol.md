@@ -102,6 +102,7 @@ paused, or this client revoked).
 | `answer` | `requestId`, `answers` | `{}`; AskUserQuestion: `answers` maps question text to the chosen label(s) (comma-separated for multi-select) |
 | `allow` / `deny` | `requestId` | `{}`; a permission prompt |
 | `rewind_targets` | | `{targets: [{uuid, prompt, tabId}]}` newest first |
+| `rewind_preview` | `uuid` | `{canRewind, files, error}`: whether the code can be restored to before that prompt, and how many files it would change |
 | `rewind` | `uuid`, `mode` (`both`, `conversation`, `code`) | `{prefill?}`: the prompt to put back in the composer |
 | `clear` | | `{sessionId}` |
 | `fork` | `title?` | `{sessionId}` |
@@ -113,7 +114,10 @@ paused, or this client revoked).
 | `mcp_status` | | `{servers: [{name, status, error?}]}` |
 | `mcp_toggle` | `server`, `enabled` | `{}` |
 | `mcp_reconnect` | `server` | `{}` |
+| `mcp_authenticate` | `server` | `{authUrl}`: the page that signs in to the server (null when none) |
+| `mcp_clear_auth` | `server` | `{}` |
 | `chrome` | `on` | `{}`; restarts claude with or without Claude in Chrome |
+| `chrome_status` | | `{status}`: Claude in Chrome's state (`installed`, `connected`, `paired_browser`, `urls`, ...) as Claude Code reports it |
 | `artifacts` | | `{artifacts: [{url, title, tabId}]}` |
 | `history` | | `{prompts: string[]}` oldest first, at most 200 |
 | `complete` | `partial`, `command?` | `{items: string[]}`: paths in the session folder, or command names |
@@ -154,10 +158,13 @@ snapshot, then patches at most every 120 ms while something changes.
 `state` fields: `sessionId`, `cwd`, `model`, `permissionMode`, `usage`, `contextTokens`,
 `running` (tab id or null), `activity`, `interrupting`, `canSteer`, `queue`
 (`[{tabId, prompt, followup}]`), `steer` (`{tabId, prompt}` or null), `question`,
-`childExit` (`{code, stderr}` or null), `tabs`.
+`childExit` (`{code, stderr}` or null), `effort`, `suggestion` (the next prompt Claude Code
+predicts after a turn, or null), `backgroundTasks` (`[{id, type, description}]`, shells and
+agents still running), `tabs`.
 
-`question` is null or `{requestId, kind, toolName, toolInput?, questions}`, where `kind`
-is `ask` (AskUserQuestion) or `permission` (allow or deny `toolName` with `toolInput`),
+`question` is null or `{requestId, kind, toolName, toolInput?, reason?, questions}`, where `kind`
+is `ask` (AskUserQuestion) or `permission` (allow or deny `toolName` with `toolInput`; `reason`
+is why Claude Code asks, when it says),
 and `questions` is `[{question, header?, multiSelect?, options: [{label, description?}]}]`.
 
 A tab: `{id, prompt, status, blocks, result?, uuid?, bash?, earlier}`, where `earlier`

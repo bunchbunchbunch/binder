@@ -227,3 +227,30 @@ describe('gateway end to end', () => {
     expect(p.msgs[0]).toMatchObject({ t: 'closed' });
   });
 });
+
+describe('binder sessions', () => {
+  // A transcript as Claude Code writes it: enough of its first line to summarize.
+  function transcript(configDir: string, id: string, prompt: string, entrypoint: string) {
+    const dir = join(configDir, 'projects', '-private-tmp');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${id}.jsonl`), JSON.stringify({ type: 'user', cwd: '/private/tmp', gitBranch: 'main', entrypoint, message: { content: prompt } }) + '\n');
+  }
+
+  it('lists the sessions /resume offers from every config dir, as JSON', () => {
+    const dir = mkdtempSync('/tmp/bs-');
+    const main = join(dir, 'claude');
+    const work = join(dir, 'claude-work');
+    transcript(main, '00000000-0000-4000-8000-0000000000b1', 'fix the parser', 'cli');
+    transcript(main, '00000000-0000-4000-8000-0000000000b2', 'a hook run', 'sdk-cli');
+    transcript(work, '00000000-0000-4000-8000-0000000000b3', 'review the PR', 'cli');
+    const config = join(dir, 'config.json');
+    writeFileSync(config, JSON.stringify({ configDirs: { [join(dir, 'w')]: work } }));
+    const out = execFileSync(process.execPath, [join(ROOT, 'bin/binder.mjs'), 'sessions'], {
+      encoding: 'utf8',
+      env: { ...process.env, BINDER_STATE_DIR: join(dir, 's'), CLAUDE_CONFIG_DIR: main, BINDER_CONFIG: config },
+    });
+    const rows = JSON.parse(out) as { id: string; title: string; cwd: string; branch?: string; live: boolean }[];
+    expect(rows.map((r) => r.title).sort()).toEqual(['fix the parser', 'review the PR']);
+    expect(rows[0]).toMatchObject({ cwd: '/private/tmp', branch: 'main', live: false });
+  });
+});

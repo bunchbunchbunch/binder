@@ -8,7 +8,7 @@ if (process.env.NODE_ENV === undefined) {
   process.env.BINDER_SET_NODE_ENV = '1';
 }
 // The commands without a terminal UI skip loading Ink and React.
-if (['host', 'serve', 'remote'].includes(process.argv[2])) {
+if (['host', 'serve', 'sessions', 'remote'].includes(process.argv[2])) {
   const { remoteMain } = await import('../dist/remote/cli.js');
   await remoteMain(process.argv.slice(2));
 } else {

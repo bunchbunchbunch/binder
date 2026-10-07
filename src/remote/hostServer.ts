@@ -313,6 +313,18 @@ export class HostServer {
         return void (await host.session.request('mcp_toggle', { serverName: str(m.server, 'server'), enabled: Boolean(m.enabled) }));
       case 'mcp_reconnect':
         return void (await host.session.request('mcp_reconnect', { serverName: str(m.server, 'server') }, 60000));
+      case 'mcp_authenticate': {
+        const r = await host.session.request('mcp_authenticate', { serverName: str(m.server, 'server') }, 60000);
+        return { authUrl: typeof r.authUrl === 'string' ? r.authUrl : null };
+      }
+      case 'mcp_clear_auth':
+        return void (await host.session.request('mcp_clear_auth', { serverName: str(m.server, 'server') }));
+      case 'chrome_status':
+        return { status: await host.session.request('get_chrome_dialog') };
+      case 'rewind_preview': {
+        const r = await host.session.request('rewind_files', { user_message_id: str(m.uuid, 'uuid'), dry_run: true });
+        return { canRewind: r.canRewind !== false, files: Array.isArray(r.filesChanged) ? r.filesChanged.length : 0, error: typeof r.error === 'string' ? r.error : null };
+      }
       case 'chrome':
         return { message: host.setChrome(Boolean(m.on)) };
       case 'artifacts':
