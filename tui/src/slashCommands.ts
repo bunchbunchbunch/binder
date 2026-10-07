@@ -23,13 +23,17 @@ const LOCAL: Array<SlashCommand & { name: LocalCommandName }> = [
   { name: 'settings', description: "Binder's settings (config.json): permission mode, sticky prompt, markdown style, config dirs" },
 ];
 
-// The child's commands plus binder's own, which replace any of the same name.
-// Names starting with "__" are internal and hidden, as in Claude Code.
-export function mergeCommands(child: SlashCommand[]): SlashCommand[] {
+// Binder's commands a Codex session cannot run: Codex keeps no file
+// checkpoints to rewind to, and has no Claude in Chrome.
+export const CODEX_UNSUPPORTED: LocalCommandName[] = ['rewind', 'chrome'];
+
+// The child's commands plus binder's own (less `hide`), which replace any of
+// the same name. Names starting with "__" are internal and hidden, as in Claude Code.
+export function mergeCommands(child: SlashCommand[], hide: LocalCommandName[] = []): SlashCommand[] {
   const local = new Set(LOCAL.flatMap((c) => [c.name, ...(c.aliases ?? [])]));
   return child
     .filter((c) => !local.has(c.name) && !c.name.startsWith('__'))
-    .concat(LOCAL)
+    .concat(LOCAL.filter((c) => !hide.includes(c.name)))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

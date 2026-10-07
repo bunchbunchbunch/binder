@@ -75,7 +75,8 @@ export type RateLimitEvent = {
     status: string;
     rateLimitType?: string;
     resetsAt?: number;
-    unifiedWindows?: { five_hour?: RateLimitWindow; seven_day?: RateLimitWindow };
+    // thirty_day: a Codex free plan's only window.
+    unifiedWindows?: { five_hour?: RateLimitWindow; seven_day?: RateLimitWindow; thirty_day?: RateLimitWindow };
   };
 };
 

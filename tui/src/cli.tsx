@@ -4,15 +4,13 @@ import { App } from './ui/App.js';
 import { RENDER_OPTIONS } from './renderOptions.js';
 import { filterInput, keypadToText } from './keypad.js';
 import { MOUSE_OFF, MOUSE_ON, takeMouse } from './mouse.js';
-import { Session } from './session.js';
 import { SessionHost } from './host.js';
 import { HostServer } from './remote/hostServer.js';
 import { liveElsewhere } from './remote/sockets.js';
 import { upsertSession } from './sessions.js';
-import { childEnv, configDir } from './paths.js';
 import { binderConfig } from './config.js';
 import { readStatusLineCommand } from './statusline.js';
-import { USAGE, initialStateFor, parseArgs } from './args.js';
+import { USAGE, initialStateFor, launchConfigDir, parseArgs, sessionFor } from './args.js';
 import { stampFrames } from './ui/lineAttrs.js';
 import { MARKDOWN_STYLES, setMarkdownStyle } from './ui/md/theme.js';
 
@@ -25,20 +23,20 @@ export function main(argv = process.argv.slice(2)): void {
     process.stderr.write(parsed.error.endsWith('\n') ? parsed.error : parsed.error + '\n');
     process.exit(parsed.error === USAGE ? 0 : 1);
   }
-  const { sessionId, resume, draft, forkFrom, passthrough } = parsed;
+  const { sessionId, draft } = parsed;
   const other = liveElsewhere(sessionId);
   if (other) {
     process.stderr.write(`Session ${sessionId} is already open in another binder (pid ${other}).\n`);
     process.exit(1);
   }
-  const cfg = configDir(childEnv(cwd));
+  const cfg = launchConfigDir(parsed, cwd);
   const initial = initialStateFor(parsed, cwd, cfg);
 
-  const session = new Session({ sessionId, resume, cwd, passthrough, forkFrom });
+  const session = sessionFor(parsed, cwd);
   const host = new SessionHost(session, initial, cwd, cfg);
   // Remote viewers attach through this socket; without it binder still works locally.
   const server = new HostServer(host);
-  upsertSession({ id: sessionId, cwd, configDir: cfg });
+  upsertSession({ id: sessionId, cwd, configDir: cfg, agent: session.agent });
   session.start();
   server.listen().catch(() => {});
 

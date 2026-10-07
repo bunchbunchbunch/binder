@@ -8,11 +8,13 @@ import { dirname, join } from 'node:path';
 //                   CLAUDE_CONFIG_DIR is not set already
 //   stickyPrompt    keep the tab's latest prompt under the tab bar; on unless false
 //   markdownStyle   how responses render: vivid (the default) or classic
+//   agent           what new sessions run: claude (the default) or codex
 export type BinderConfig = {
   permissionMode?: string;
   configDirs?: Record<string, string>;
   stickyPrompt?: boolean;
   markdownStyle?: string;
+  agent?: 'claude' | 'codex';
 };
 
 export const configPath = () => process.env.BINDER_CONFIG || join(homedir(), '.config', 'binder', 'config.json');

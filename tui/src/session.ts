@@ -26,7 +26,10 @@ export type PermissionRequest = {
   reason?: string;
 };
 
-type SessionEvents = {
+// Which CLI runs the session.
+export type Agent = 'claude' | 'codex';
+
+export type SessionEvents = {
   event: [ClaudeEvent];
   permission: [PermissionRequest];
   exit: [{ code: number | null; stderr: string[] }];
@@ -53,7 +56,30 @@ export type SwitchOptions = {
 
 type PendingRequest = { resolve: (r: Record<string, unknown>) => void; reject: (e: Error) => void };
 
-export class Session extends EventEmitter<SessionEvents> {
+// What the host, the panels and the remote server use of a session, whichever
+// agent runs it. Panels ask through request() with Claude Code's control
+// request names; a Codex session answers the ones it can.
+export interface AgentSession extends EventEmitter<SessionEvents> {
+  readonly agent: Agent;
+  readonly sessionId: string;
+  readonly cwd: string;
+  start(): void;
+  request(subtype: string, fields?: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>;
+  respawn(): void;
+  switchTo(sessionId: string, opts: SwitchOptions): void;
+  movedTo(cwd: string): void;
+  logLocal(marker: LocalMarker): void;
+  sendPrompt(prompt: string, tabId: number, images?: ImageAttachment[], followup?: boolean, context?: string): string;
+  steer(prompt: string, tabId: number, images?: ImageAttachment[]): string;
+  interrupt(): void;
+  answerQuestion(req: PermissionRequest, answers: Record<string, string>): void;
+  allow(req: PermissionRequest): void;
+  deny(req: PermissionRequest, message?: string): void;
+  close(): Promise<void>;
+}
+
+export class Session extends EventEmitter<SessionEvents> implements AgentSession {
+  readonly agent = 'claude';
   proc: ClaudeProcess | null = null;
   private id: string;
   private resume: boolean;

@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import type { Session, PermissionRequest, SwitchOptions } from './session.js';
+import type { AgentSession, PermissionRequest, SwitchOptions } from './session.js';
 import type { ClaudeEvent } from './events.js';
 import type { ImageAttachment } from './claudeProcess.js';
 import { firstPrompt, initialState as emptyState, nextToSend, reduce, type Action, type QueuedPrompt, type Question, type State } from './store.js';
-import { upsertSession } from './sessions.js';
+import { codexSessions, upsertSession } from './sessions.js';
 import { appendLocal, logPath, replay } from './eventLog.js';
-import { mergeCommands, type SlashCommand } from './slashCommands.js';
+import { CODEX_UNSUPPORTED, mergeCommands, type SlashCommand } from './slashCommands.js';
 import { runBash } from './bash.js';
 import { listTranscripts, replayTranscript, type SessionSummary } from './transcripts.js';
 import { childEnv, configDir as configDirFor } from './paths.js';
@@ -44,7 +44,7 @@ export type RewindMode = 'both' | 'conversation' | 'code';
  */
 export class SessionHost extends EventEmitter<HostEvents> {
   private current: State;
-  commands: SlashCommand[] = mergeCommands([]);
+  commands: SlashCommand[];
   effort: string | undefined;
   // The account's plan, e.g. "Claude Max".
   plan: string | undefined;
@@ -56,7 +56,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
   private flushTimer: NodeJS.Timeout | null = null;
 
   constructor(
-    readonly session: Session,
+    readonly session: AgentSession,
     initial: State,
     cwd: string,
     readonly configDir: string,
@@ -65,6 +65,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.setMaxListeners(50);
     this.current = initial;
     this.dir = cwd;
+    this.commands = mergeCommands([], this.unsupported);
     session.on('event', (e) => {
       this.batch.push(e);
       this.flushTimer ??= setTimeout(this.flush, EVENT_BATCH_MS);
@@ -89,7 +90,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
       this.dispatch({ type: 'child_exit', code: e.code, stderr: e.stderr });
     });
     session.on('commands', (list) => {
-      this.commands = mergeCommands(list);
+      this.commands = mergeCommands(list, this.unsupported);
       this.emit('commands', this.commands);
     });
     session.on('plan', (plan) => {
@@ -121,6 +122,11 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.on('change', fn);
     return () => this.off('change', fn);
   };
+
+  // Binder's commands this session's agent cannot run.
+  private get unsupported() {
+    return this.session.agent === 'codex' ? CODEX_UNSUPPORTED : [];
+  }
 
   get busy(): boolean {
     const s = this.current;
@@ -248,7 +254,9 @@ export class SessionHost extends EventEmitter<HostEvents> {
   }
 
   // Whether claude run in `dir` would use the same account (config dir) as here.
+  // Codex has one account (CODEX_HOME), not one per folder.
   private sameAccount(dir: string): boolean {
+    if (this.session.agent === 'codex') return true;
     return configDirFor(childEnv(dir)) === configDirFor(childEnv(this.dir));
   }
 
@@ -267,7 +275,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.session.switchTo(id, opts);
     this.dispatch({ type: 'reset', state: next });
     if (opts.cwd) this.moveTo(opts.cwd);
-    upsertSession({ id, cwd: opts.cwd ?? this.dir, configDir: this.configDir });
+    upsertSession({ id, cwd: opts.cwd ?? this.dir, configDir: this.configDir, agent: this.session.agent });
     this.emit('session', id);
   }
 
@@ -288,9 +296,10 @@ export class SessionHost extends EventEmitter<HostEvents> {
     return `Resumed ${s.id.slice(0, 8)}${dir ? ` in ${dir}` : ''}`;
   }
 
-  /** The session (by id or id prefix) /resume would pick, from Claude Code's transcripts. */
+  /** The session (by id or id prefix) /resume would pick, from Claude Code's transcripts or binder's Codex sessions. */
   findSession(prefix: string): SessionSummary | undefined {
-    return listTranscripts(this.configDir).find((s) => s.id.startsWith(prefix) && s.id !== this.sessionId);
+    const all = this.session.agent === 'codex' ? codexSessions() : listTranscripts(this.configDir);
+    return all.find((s) => s.id.startsWith(prefix) && s.id !== this.sessionId);
   }
 
   fork(title: string): string {
@@ -355,6 +364,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
 
   // Claude in Chrome is decided when claude starts, so this restarts it on the same session.
   setChrome(on: boolean): string {
+    if (this.session.agent === 'codex') throw new Error('/chrome is not available in a Codex session');
     this.requireIdle('/chrome');
     this.lastSent = null;
     this.session.switchTo(this.sessionId, { resume: true, extraArgs: [on ? '--chrome' : '--no-chrome'] });

@@ -28,7 +28,9 @@ binder --session-id <id>   start a new session with this id (a launcher can link
 binder --draft <text>      start with <text> in the prompt, unsent
 binder -r <id> --fork-session
                            continue a session as a new one; the original stays as it was
+binder --codex             start a Codex session instead (see Codex)
 binder -- <claude args>    pass flags to claude, e.g. binder -- --model opus
+binder --codex -- <args>   --model, --permission-mode, or codex app-server flags (-c key=value)
 ```
 
 On quit, binder prints `Resume with: binder <id>`. Resuming a session binder never ran
@@ -64,11 +66,47 @@ elsewhere). `/settings` shows and changes them, or edit the file:
   the Mac app reads it too.
 - `markdownStyle` is `vivid` (the default) or `classic`; see Output rendering. `BINDER_MD`
   overrides it, and `/md` switches for the running session only.
+- `agent` is `claude` (the default) or `codex`: what new sessions run, including ones started
+  from the phone. A session keeps the agent it started with.
 
 `/settings` saves to the file in place (a symlink into a dotfiles repo stays a symlink) and
 keeps keys it does not know. Sticky prompt and markdown style change at once; a running
 binder keeps the permission mode and config dirs it started with, so they apply to sessions
 opened from then on.
+
+## Codex
+
+`binder --codex` runs Codex instead of Claude Code, through `codex app-server`. Install the
+Codex CLI and run `codex login` first; a ChatGPT account (the free plan works) or an API key
+will do. A session keeps its agent: `binder <id>`, `-c`, `/resume` and the phone reopen a
+Codex session as Codex. `binder --codex -r <thread-id>` opens a Codex thread binder never
+ran, without its earlier tabs.
+
+Tabs, the queue, `Ctrl+Enter`, `Esc`, `!command`, images, the status bar, the event log and
+remote viewers work as they do for Claude Code. What differs:
+
+- **Tools.** Codex's shell commands show as `Bash`, its file edits as `Patch` with their
+  diff, its plan as a checklist, and its reasoning summaries as thinking.
+- **Approvals.** The Allow / Deny picker answers Codex's command and file-change approvals.
+- **Permission mode.** `permissionMode` (or `--permission-mode` after `--`) becomes an
+  approval policy and sandbox, below. Without one, `~/.codex/config.toml` decides.
+- **Commands.** `/model`, `/effort`, `/cd`, `/clear`, `/fork` and `/resume` work; `/resume`
+  lists binder's Codex sessions. `/mcp` shows status only. `/rewind` and `/chrome` are not
+  available: Codex keeps no file checkpoints. The menu offers binder's commands only.
+- **Usage.** The bar names Codex's windows by length: `5h`, `7d`, or the free plan's `30d`.
+- **Flags.** After `--`, `--model` (`-m`) and `--permission-mode` are binder's; the rest go
+  to `codex app-server` (`-c key=value`, `--enable <feature>`).
+
+| `permissionMode` | Approval policy | Sandbox |
+|------------------|-----------------|---------|
+| `bypassPermissions` | `never` | `danger-full-access` |
+| `dontAsk` | `never` | `workspace-write` |
+| `acceptEdits`, `auto` | `on-request` | `workspace-write` |
+| `manual`, `default` | `untrusted` | `workspace-write` |
+| `plan` | `on-request` | `read-only` |
+
+Codex marks `app-server` experimental and renames parts of it between releases. Binder is
+tested against Codex 0.160.1, the version `fixtures/codex/` was recorded with.
 
 ## Keys
 
@@ -267,8 +305,16 @@ row model:
 - `src/statusline.ts` runs the `statusLine.command` from the active config dir's
   `settings.json` with a payload built from `rate_limit_event` (utilization × 100 =
   `used_percentage`), so the bar matches a normal `claude` session.
-- `~/.local/state/bindertui/sessions.json` indexes sessions for `binder -c`; `BINDER_STATE_DIR` and
-  `BINDER_CLAUDE_BIN` override the state directory and binary (tests use both).
+- `src/codex/` runs a Codex session. `rpc.ts` speaks `codex app-server`'s JSON-RPC over
+  stdio; `translate.ts` turns its notifications into the stream-json events the reducer
+  reads, so the tabs, the event log and remote viewers need no Codex code; `session.ts` sends
+  prompts as `turn/start`, `Ctrl+Enter` as `turn/steer` and `Esc` as `turn/interrupt`, puts
+  approvals in the Allow / Deny picker, and answers the panels' control requests from
+  `model/list`, `mcpServerStatus/list` and per-turn overrides.
+- `~/.local/state/bindertui/sessions.json` indexes sessions for `binder -c`, with each one's
+  agent and, for Codex, its thread id (Codex names threads itself). `BINDER_STATE_DIR`,
+  `BINDER_CLAUDE_BIN` and `BINDER_CODEX_BIN` override the state directory and binaries (tests
+  use them).
 
 ## Tests
 
@@ -280,6 +326,11 @@ npm run typecheck
 `fixtures/*.jsonl` are real captured streams. `test/manual/` has scripts that hit the
 real binary with `--model haiku`: `twoTurns.ts`, `askAndInterrupt.ts`, and `drive.py`,
 which drives the full TUI in a pseudo-terminal (`DRIVE_MODE=resume|ask|interrupt`).
+
+`test/fakeCodex.mjs` replays `fixtures/codex/*.jsonl`: real `codex app-server` sessions,
+both directions, recorded and scrubbed by `npx tsx test/manual/recordCodex.ts <scenario>`.
+Most scenarios cost one prompt of the logged-in account's quota. Record them again after
+upgrading Codex.
 
 ## License
 

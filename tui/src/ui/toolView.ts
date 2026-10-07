@@ -73,6 +73,20 @@ function renderDiff(oldText: string, newText: string, w: number): string[] {
   return out;
 }
 
+// A unified diff (a Codex fileChange), drawn like renderDiff. Hunks after the
+// first are set apart by ⋯; a new file's diff may be its plain content.
+function renderUnifiedDiff(diff: string, kind: string, w: number): string[] {
+  if (!diff.trim()) return [];
+  const lines = diff.replace(/\n$/, '').split('\n');
+  const plain = kind === 'add' && !lines.some((l) => /^(@@|[+-])/.test(l));
+  return lines.flatMap((l, i) => {
+    if (plain || l.startsWith('+')) return [styled(truncate('+ ' + (plain ? l : l.slice(1)), w), { ...ADD, ...ADD_BG })];
+    if (l.startsWith('-')) return [styled(truncate('- ' + l.slice(1), w), { ...DEL, ...DEL_BG })];
+    if (l.startsWith('@@')) return i === 0 ? [] : [styled('  ⋯', MUTED)];
+    return [styled(truncate('  ' + l.replace(/^ /, ''), w), MUTED)];
+  });
+}
+
 export function renderTool(block: ToolBlock, w: number): ToolRendering {
   const a = args(block);
   const name = block.name;
@@ -93,6 +107,15 @@ export function renderTool(block: ToolBlock, w: number): ToolRendering {
       const body = code.map((l) => styled('+ ', ADD) + truncate(l, w - 2));
       if (block.result?.isError) body.push(...resultLines(block, w));
       return { title: `Write ${styled(shortPath(path), PATH)} ${styled(`${lines.length} lines`, MUTED)}`, body, preview: 6 };
+    }
+    case 'Patch': {
+      const changes = Array.isArray(a.changes) ? (a.changes as Array<{ path: string; kind?: string; diff?: string }>) : [];
+      const many = changes.length > 1;
+      const label = (c: { path: string; kind?: string }) => styled(shortPath(c.path), PATH) + (c.kind === 'add' ? styled(' (new)', MUTED) : c.kind === 'delete' ? styled(' (deleted)', MUTED) : '');
+      const body = changes.flatMap((c) => [...(many ? [label(c)] : []), ...renderUnifiedDiff(c.diff ?? '', c.kind ?? 'update', w)]);
+      if (block.result?.isError) body.push(...resultLines(block, w));
+      const title = changes.length ? `Patch ${many ? styled(`${changes.length} files`, MUTED) : label(changes[0])}` : 'Patch';
+      return { title, body, preview: 12 };
     }
     case 'Read': {
       const path = str(a.file_path);

@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stateDir } from './paths.js';
+import type { Agent } from './session.js';
+import type { SessionSummary } from './transcripts.js';
+import { logPath } from './eventLog.js';
 
 export type SessionRecord = {
   id: string;
@@ -9,6 +12,10 @@ export type SessionRecord = {
   createdAt: string;
   lastUsedAt: string;
   firstPrompt?: string;
+  // Absent for Claude Code sessions, which predate the field.
+  agent?: Agent;
+  // A Codex session's thread, which Codex names itself (binder's id is its own).
+  threadId?: string;
 };
 
 function indexPath(): string {
@@ -26,7 +33,7 @@ export function readSessions(): SessionRecord[] {
   }
 }
 
-export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'configDir'> & { firstPrompt?: string }): void {
+export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'configDir'> & Partial<Pick<SessionRecord, 'firstPrompt' | 'agent' | 'threadId'>>): void {
   const now = new Date().toISOString();
   const all = readSessions();
   const existing = all.find((s) => s.id === update.id);
@@ -35,6 +42,8 @@ export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'config
     existing.cwd = update.cwd;
     existing.configDir = update.configDir;
     if (update.firstPrompt && !existing.firstPrompt) existing.firstPrompt = update.firstPrompt;
+    if (update.agent) existing.agent = update.agent;
+    if (update.threadId) existing.threadId = update.threadId;
   } else {
     all.push({ ...update, createdAt: now, lastUsedAt: now });
   }
@@ -45,4 +54,16 @@ export function latestSessionForCwd(cwd: string): SessionRecord | undefined {
   return readSessions()
     .filter((s) => s.cwd === cwd)
     .sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt))[0];
+}
+
+export function findSession(id: string): SessionRecord | undefined {
+  return readSessions().find((s) => s.id === id);
+}
+
+/** Binder's own Codex sessions, newest first, for /resume in a Codex session (each has an event log to replay). */
+export function codexSessions(): SessionSummary[] {
+  return readSessions()
+    .filter((s) => s.agent === 'codex' && s.firstPrompt)
+    .map((s) => ({ id: s.id, path: logPath(s.id), cwd: s.cwd, prompt: s.firstPrompt!, modified: Date.parse(s.lastUsedAt) }))
+    .sort((a, b) => b.modified - a.modified);
 }

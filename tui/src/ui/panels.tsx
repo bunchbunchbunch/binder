@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Session } from '../session.js';
+import type { AgentSession } from '../session.js';
 import type { Tab, Turn } from '../store.js';
 import { Picker, type PickerItem } from './Picker.js';
 import { openExternal, copyText } from '../openUrl.js';
 import { sessionArtifacts } from '../artifacts.js';
 import { currentBranch, listTranscripts, worktreePaths, type SessionSummary } from '../transcripts.js';
 import { logPath } from '../eventLog.js';
+import { codexSessions } from '../sessions.js';
 import { configPath, readConfig, saveConfig, type BinderConfig } from '../config.js';
 import { completePath } from '../complete.js';
 import { expandHome } from '../paths.js';
@@ -16,13 +17,13 @@ import { homedir } from 'node:os';
 // binder's own panels, shown in place of the transcript: /model, /effort,
 // /mcp, /chrome, /rewind, /artifacts, /resume, /settings, and a yes/no confirm.
 
-type Common = { session: Session; flash: (msg: string) => void; close: () => void };
+type Common = { session: AgentSession; flash: (msg: string) => void; close: () => void };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Model = { value: string; resolvedModel?: string; displayName: string; description?: string; supportedEffortLevels?: string[] };
 
-function useModels(session: Session, onError: (msg: string) => void): Model[] | null {
+function useModels(session: AgentSession, onError: (msg: string) => void): Model[] | null {
   const [models, setModels] = useState<Model[] | null>(null);
   useEffect(() => {
     session
@@ -79,7 +80,7 @@ export function EffortPanel({ session, flash, close, model, current, onEffort }:
   return <Picker title="Effort" subtitle={error || (models ? 'For this session' : 'loading…')} items={items} onSelect={pick} onCancel={close} initial={initial} />;
 }
 
-export function setEffort(session: Session, level: string): Promise<unknown> {
+export function setEffort(session: AgentSession, level: string): Promise<unknown> {
   return session.request('apply_flag_settings', { settings: { effortLevel: level } });
 }
 
@@ -316,12 +317,16 @@ function ago(ms: number): string {
   return `${Math.round(m / 1440)}d ago`;
 }
 
-export function ResumePanel({ close, cwd, configDir, currentId, onResume }: Common & { cwd: string; configDir: string; currentId: string; onResume: (s: SessionSummary) => void }) {
+export function ResumePanel({ session, close, cwd, configDir, currentId, onResume }: Common & { cwd: string; configDir: string; currentId: string; onResume: (s: SessionSummary) => void }) {
   // Sessions someone worked in: interactive Claude Code and binder's own, not
-  // other headless runs (scripts, hooks that call `claude -p`).
+  // other headless runs (scripts, hooks that call `claude -p`). A Codex
+  // session lists binder's Codex sessions.
   const all = useMemo(
-    () => listTranscripts(configDir).filter((s) => s.id !== currentId && (!s.entrypoint?.startsWith('sdk') || existsSync(logPath(s.id)))),
-    [configDir, currentId],
+    () =>
+      session.agent === 'codex'
+        ? codexSessions().filter((s) => s.id !== currentId)
+        : listTranscripts(configDir).filter((s) => s.id !== currentId && (!s.entrypoint?.startsWith('sdk') || existsSync(logPath(s.id)))),
+    [session, configDir, currentId],
   );
   const trees = useMemo(() => worktreePaths(cwd), [cwd]);
   const branch = useMemo(() => currentBranch(cwd), [cwd]);

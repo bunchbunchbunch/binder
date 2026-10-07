@@ -226,6 +226,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   };
 
   const runLocal = (name: LocalCommandName, args: string) => {
+    if (!commands.some((c) => c.name === name)) return flash(`/${name} is not available in a ${session.agent === 'codex' ? 'Codex' : 'Claude Code'} session`);
     switch (name) {
       case 'help':
         return setHelp(true);
@@ -383,7 +384,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         )}
         {state.childExit && (
           <Box paddingX={1} flexDirection="column">
-            <Text color="red">claude exited (code {String(state.childExit.code)}). Press Ctrl+R to restart and resume.</Text>
+            <Text color="red">{session.agent} exited (code {String(state.childExit.code)}). Press Ctrl+R to restart and resume.</Text>
             {state.childExit.stderr.slice(-5).map((l, i) => <Text key={i} dimColor>{l}</Text>)}
           </Box>
         )}

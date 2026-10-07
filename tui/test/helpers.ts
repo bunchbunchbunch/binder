@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const FAKE_BIN = join(here, 'fakeClaude.mjs');
+export const FAKE_CODEX = join(here, 'fakeCodex.mjs');
 export const FIXTURES = join(here, '..', 'fixtures');
 
 export function fakeEnv(fixture: string, extra: Record<string, string> = {}) {

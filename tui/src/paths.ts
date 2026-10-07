@@ -15,6 +15,11 @@ export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 }
 
+// Codex's home: its login, config.toml and session files.
+export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.CODEX_HOME || join(homedir(), '.codex');
+}
+
 export const expandHome = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir()));
 
 // The environment for the claude child: the user's own, minus the NODE_ENV

@@ -1,8 +1,7 @@
-import { Session } from '../session.js';
 import { SessionHost } from '../host.js';
 import { upsertSession } from '../sessions.js';
-import { childEnv, configDir } from '../paths.js';
-import { USAGE, initialStateFor, parseArgs } from '../args.js';
+import { configDir } from '../paths.js';
+import { USAGE, initialStateFor, launchConfigDir, parseArgs, sessionFor } from '../args.js';
 import { HostServer } from './hostServer.js';
 import { liveElsewhere } from './sockets.js';
 import { expandHome, remoteCommand } from './config.js';
@@ -27,11 +26,11 @@ async function hostMain(argv: string[]): Promise<void> {
     process.stderr.write(`Session ${parsed.sessionId} is already open in another binder (pid ${other}).\n`);
     process.exit(1);
   }
-  const cfg = configDir(childEnv(cwd));
-  const session = new Session({ sessionId: parsed.sessionId, resume: parsed.resume, cwd, passthrough: parsed.passthrough, forkFrom: parsed.forkFrom });
+  const cfg = launchConfigDir(parsed, cwd);
+  const session = sessionFor(parsed, cwd);
   const host = new SessionHost(session, initialStateFor(parsed, cwd, cfg), cwd, cfg);
   const server = new HostServer(host);
-  upsertSession({ id: parsed.sessionId, cwd, configDir: cfg });
+  upsertSession({ id: parsed.sessionId, cwd, configDir: cfg, agent: session.agent });
   session.start();
   await server.listen();
   process.stdout.write(`${new Date().toISOString()} hosting ${parsed.sessionId} in ${cwd} (pid ${process.pid})\n`);

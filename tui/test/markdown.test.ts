@@ -142,6 +142,14 @@ describe('tool views', () => {
     expect(strip(bash.title)).toBe('Bash ls -la  List');
     expect(bash.body.map(strip)).toEqual(['a', 'b']);
   });
+  it('renders a Codex Patch as its unified diff', () => {
+    const one = renderTool(tool('Patch', { file_path: '/x/a.txt', changes: [{ path: '/x/a.txt', kind: 'update', diff: '@@ -1,2 +1,2 @@\n keep\n-hello\n+goodbye\n@@ -9 +9 @@\n-x\n+y\n' }] }, ''), 60);
+    expect(strip(one.title)).toBe('Patch /x/a.txt');
+    expect(one.body.map(strip)).toEqual(['  keep', '- hello', '+ goodbye', '  ⋯', '- x', '+ y']);
+    const two = renderTool(tool('Patch', { changes: [{ path: '/x/new.txt', kind: 'add', diff: 'line\n' }, { path: '/x/old.txt', kind: 'delete', diff: '' }] }, ''), 60);
+    expect(strip(two.title)).toBe('Patch 2 files');
+    expect(two.body.map(strip)).toEqual(['/x/new.txt (new)', '+ line', '/x/old.txt (deleted)']);
+  });
   it('renders TodoWrite as a checklist and Read as a one-liner', () => {
     const todo = renderTool(tool('TodoWrite', { todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }, { content: 'c', status: 'pending' }] }, 'ok'), 60);
     expect(strip(todo.title)).toBe('Todos 1/3 done');

@@ -24,8 +24,10 @@ export function readStatusLineCommand(configDir: string): string | undefined {
 
 // "claude-haiku-4-5-20251001" -> "Haiku 4.5", "claude-fable-5-1" -> "Fable 5.1",
 // and a bare alias like "opus" -> "Opus" until the init event names the real model.
+// Codex's "gpt-6-luna" -> "GPT-6-Luna", as Codex's model list names it.
 export function modelDisplayName(modelId: string | undefined): string {
   if (!modelId) return '';
+  if (/^gpt-/.test(modelId)) return modelId.replace(/^gpt/, 'GPT').replace(/-([a-z])/g, (_, c: string) => '-' + c.toUpperCase());
   const parts = modelId.replace(/^claude-/, '').split('-');
   const family = parts.shift() ?? '';
   const version = parts.filter((p) => /^\d{1,2}$/.test(p)).join('.');
@@ -46,8 +48,10 @@ export function buildPayload(input: StatusInput): Record<string, unknown> {
   const rate_limits: Record<string, unknown> = {};
   const five = window(input.usage?.five_hour);
   const week = window(input.usage?.seven_day);
+  const month = window(input.usage?.thirty_day);
   if (five) rate_limits.five_hour = five;
   if (week) rate_limits.seven_day = week;
+  if (month) rate_limits.thirty_day = month;
   return {
     session_id: input.sessionId,
     model: { id: input.model ?? '', display_name: modelDisplayName(input.model) },
@@ -92,9 +96,9 @@ export function fallbackStatusLine(configDir: string, input: StatusInput): strin
   const parts = [dir, modelDisplayName(input.model) || '…'];
   if (configDir !== join(homedir(), '.claude')) parts.unshift(configName(configDir));
   const u = input.usage;
-  if (u?.five_hour || u?.seven_day) {
+  if (u?.five_hour || u?.seven_day || u?.thirty_day) {
     const seg = (label: string, w?: { utilization: number }) => (w ? `${label} ${Math.round(w.utilization * 100)}%` : '');
-    parts.push([seg('5h', u.five_hour), seg('7d', u.seven_day)].filter(Boolean).join(' '));
+    parts.push([seg('5h', u.five_hour), seg('7d', u.seven_day), seg('30d', u.thirty_day)].filter(Boolean).join(' '));
   }
   return parts.join(' │ ');
 }
