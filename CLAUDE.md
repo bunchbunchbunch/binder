@@ -1,4 +1,10 @@
-# bindertui
+# binder
+
+## Layout
+
+- `tui/` is the `binder` command (npm package `bindertui`): the terminal app, the session host, `binder serve`, and the relay.
+- `gui/` is the Mac app (Electron). It runs the TUI's `binder` from PATH, and its e2e tests run `../tui` (build the TUI first).
+- Each folder is its own npm package; run npm commands inside it. Protocol changes touch both, plus `tui/docs/remote-protocol.md`.
 
 ## Before every commit: check for secrets and personal information
 

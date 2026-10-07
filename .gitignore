@@ -1,3 +1,9 @@
 node_modules/
-dist/
+.DS_Store
 .playwright-mcp/
+tui/dist/
+gui/out/
+gui/release/
+gui/test-results/
+gui/playwright-report/
+gui/e2e/screenshots/
