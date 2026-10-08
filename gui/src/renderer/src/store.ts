@@ -24,8 +24,8 @@ export type Conn = {
   activeTab: number | null;
   // Text for the prompt when it first shows (a session opened with a draft).
   draft?: string;
-  // For the sidebar's fields (lib/sidebarText.ts): when the running turn
-  // started, how long the last one took, whether one ended while you were
+  // For the turn clock and the sidebar's fields (lib/sidebarText.ts): when
+  // the running turn started, how long the last one took, whether one ended while you were
   // elsewhere, and what the main process supplies.
   runningSince: number | null;
   lastTurnMs: number | null;
@@ -98,15 +98,18 @@ function keepTab(activeTab: number | null, s: WireState): number | null {
   return s.tabs.at(-1)?.id ?? null;
 }
 
-// The sidebar's turn clock and ✅: a turn that starts resets the clock, and
-// one that ends records its length and, unless you are looking at it, stays
-// unseen until you do.
+// The turn clock and ✅: a turn that starts resets the clock, and one that
+// ends records its length and, unless you are looking at it, stays unseen
+// until you do. The host says when its turn started, so the clock keeps
+// counting across a relaunch; with an older host it starts when the app sees
+// the turn.
 function turnClock(c: Conn, s: WireState): Partial<Conn> {
-  if (!c.state) return { runningSince: s.running === null ? null : Date.now(), lastTurnMs: s.tabs.at(-1)?.result?.durationMs ?? null };
+  const since = (now: number) => (s.running === null ? null : s.runningSince ?? now);
+  if (!c.state) return { runningSince: since(Date.now()), lastTurnMs: s.tabs.at(-1)?.result?.durationMs ?? null };
   const was = c.state.running;
   if (s.running === was) return {};
   const now = Date.now();
-  const out: Partial<Conn> = { runningSince: s.running === null ? null : now, unseen: false };
+  const out: Partial<Conn> = { runningSince: since(now), unseen: false };
   if (was !== null) out.lastTurnMs = s.tabs.find((t) => t.id === was)?.result?.durationMs ?? (c.runningSince === null ? null : now - c.runningSince);
   if (was !== null && s.running === null) out.unseen = !(state.active === c.id && document.hasFocus());
   return out;

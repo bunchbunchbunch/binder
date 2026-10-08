@@ -63,11 +63,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   const expandEarlier = Boolean(o && o.auto === auto && o.value);
   const busy = Boolean(s && (s.running !== null || s.queue.length > 0 || s.steer));
 
-  // When the running turn started, for the status row's timer.
+  // The status row's timer (from c.runningSince) and background tasks' timers.
   const runningId = s?.running ?? null;
-  const started = useRef<{ id: number | null; at: number }>({ id: null, at: 0 });
-  if (started.current.id !== runningId) started.current = { id: runningId, at: Date.now() };
-  // And background tasks' timers.
   const ticking = runningId !== null || Boolean(s?.backgroundTasks?.length);
   const [, tick] = useState(0);
   useEffect(() => {
@@ -345,7 +342,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   const answering = Boolean(s?.question);
   const turnStatus =
     runningTab && s && !answering
-      ? `${turnVerb(runningTab.blocks, s.activity, s.interrupting)}… (${elapsed(Date.now() - started.current.at)} · esc to interrupt)${runningTab.id !== tab?.id ? ` · tab ${runningTab.id}` : ''}`
+      ? `${turnVerb(runningTab.blocks, s.activity, s.interrupting)}… (${elapsed(Date.now() - (c.runningSince ?? Date.now()))} · esc to interrupt)${runningTab.id !== tab?.id ? ` · tab ${runningTab.id}` : ''}`
       : '';
   const commands = useMemo(() => visibleCommands(c.commands), [c.commands]);
 

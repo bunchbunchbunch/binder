@@ -157,7 +157,8 @@ snapshot, then patches at most every 120 ms while something changes.
 `detached`.
 
 `state` fields: `sessionId`, `cwd`, `model`, `permissionMode`, `usage`, `contextTokens`,
-`running` (tab id or null), `activity`, `interrupting`, `canSteer`, `queue`
+`running` (tab id or null), `runningSince` (when the running turn started, in ms since the
+epoch, or null), `activity`, `interrupting`, `canSteer`, `queue`
 (`[{tabId, prompt, followup}]`), `steer` (`{tabId, prompt}` or null), `question`,
 `childExit` (`{code, stderr}` or null), `effort`, `suggestion` (the next prompt Claude Code
 predicts after a turn, or null), `backgroundTasks` (`[{id, type, description, tabId?,

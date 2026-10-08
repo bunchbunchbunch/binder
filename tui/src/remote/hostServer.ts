@@ -95,7 +95,7 @@ export class HostServer {
   }
 
   private source(): Source {
-    return { state: this.host.state, cwd: this.host.cwd, effort: this.host.effort };
+    return { state: this.host.state, cwd: this.host.cwd, effort: this.host.effort, runningSince: this.host.runningSince };
   }
 
   /** Starts serving the host's current session. Throws if another live binder holds it. */

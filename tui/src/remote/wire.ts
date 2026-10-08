@@ -41,6 +41,8 @@ export type WireMeta = {
   usage: State['usage'] | null;
   contextTokens: number | null;
   running: number | null;
+  // When the running turn started (ms since the epoch).
+  runningSince: number | null;
   activity: string;
   interrupting: boolean;
   canSteer: boolean;
@@ -68,7 +70,7 @@ export type TabOp =
 export type Patch = { t: 'patch'; meta?: Partial<WireMeta>; tabs?: TabOp[] };
 
 /** What a diff compares: the reducer state plus the host's own facts. */
-export type Source = { state: State; cwd: string; effort?: string };
+export type Source = { state: State; cwd: string; effort?: string; runningSince?: number };
 
 // Long strings in a tool's input (file contents, big commands) are cut.
 function cutStrings(v: unknown, max: number): unknown {
@@ -127,6 +129,7 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   usage: [(s) => s.state.usage, (s) => s.state.usage ?? null],
   contextTokens: [(s) => s.state.contextTokens, (s) => s.state.contextTokens ?? null],
   running: [(s) => s.state.running, (s) => s.state.running],
+  runningSince: [(s) => s.runningSince, (s) => s.runningSince ?? null],
   activity: [(s) => s.state.activity, (s) => s.state.activity],
   interrupting: [(s) => s.state.interrupting, (s) => s.state.interrupting],
   canSteer: [(s) => s.state.canSteer, (s) => s.state.canSteer],

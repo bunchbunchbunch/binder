@@ -171,6 +171,22 @@ test('brings open sessions back after a relaunch; ⌘W closes one and ⌘K reope
   await expect(page.locator('.composer textarea')).toBeFocused();
 });
 
+test("a running turn's clock keeps counting across a relaunch", async () => {
+  // Slow enough that the turn outlasts the relaunch.
+  run = await launch(SHOWCASE, { BINDER_FAKE_DELAY_MS: '300' });
+  await newSession(run.page, run.project);
+  await run.page.keyboard.type('Fix the table alignment');
+  await run.page.keyboard.press('Enter');
+  await expect(run.page.locator('.activity .now')).toContainText('(3s', { timeout: 20000 });
+  await run.quitApp();
+  run = await launch(SHOWCASE, {}, { reuse: run.tmp });
+  const now = run.page.locator('.activity .now');
+  await expect(now).toContainText('esc to interrupt', { timeout: 20000 });
+  // Its first reading counts from when the turn started, not from the relaunch.
+  const seconds = Number((await now.textContent())!.match(/\((\d+)s/)![1]);
+  expect(seconds).toBeGreaterThanOrEqual(3);
+});
+
 test('Ctrl+Enter adds a follow-up to the tab; Esc twice rewinds it', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;

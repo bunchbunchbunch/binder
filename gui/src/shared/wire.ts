@@ -60,6 +60,8 @@ export type WireMeta = {
   // Newer hosts only; older ones leave these out.
   suggestion?: string | null;
   backgroundTasks?: BackgroundTask[];
+  // When the running turn started (ms), so the clock survives the app quitting.
+  runningSince?: number | null;
 };
 
 // A background shell or agent still running. tabId is the tab whose turn

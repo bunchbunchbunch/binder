@@ -25,7 +25,7 @@ export type SessionFacts = {
   problem: boolean;
   // A turn finished while you were elsewhere, and you have not looked since.
   unseen: boolean;
-  // When the running turn started (as this window saw it), and how long the last one took.
+  // When the running turn started, and how long the last one took.
   runningSince: number | null;
   lastTurnMs: number | null;
   branch?: string;

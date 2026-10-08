@@ -145,6 +145,27 @@ describe('host server', () => {
     expect(await v.request('edit_queued', { tabId: 1, prompt: 'first prompt', text: 'too late' })).toMatchObject({ ok: false, error: 'That prompt is no longer queued' });
   });
 
+  it('tells a viewer that attaches mid-turn when the turn started', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl', { BINDER_FAKE_DELAY_MS: '100' });
+    const id = '00000000-0000-4000-8000-0000000000a9';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    expect(v.state!.runningSince).toBeNull();
+    const sent = Date.now();
+    await v.request('send', { text: 'first prompt' });
+    await until(() => v.state!.runningSince !== null);
+    const since = v.state!.runningSince!;
+    expect(since).toBeGreaterThanOrEqual(sent);
+    await sleep(150);
+    const late = viewer(id);
+    await until(() => late.state !== null);
+    expect(late.state!.running).toBe(1);
+    expect(late.state!.runningSince).toBe(since);
+    await until(() => v.state!.running === null);
+    expect(v.state!.runningSince).toBeNull();
+  });
+
   it('answers info without attaching', async () => {
     const stateDir = setup('two-turns-stdin.jsonl');
     const id = '00000000-0000-4000-8000-0000000000a3';

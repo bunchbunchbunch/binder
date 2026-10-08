@@ -48,6 +48,9 @@ export class SessionHost extends EventEmitter<HostEvents> {
   effort: string | undefined;
   // The account's plan, e.g. "Claude Max".
   plan: string | undefined;
+  // When the running turn started (ms), so a viewer that attaches mid-turn
+  // shows how long it has really run.
+  runningSince: number | undefined;
   private dir: string;
   private pending: PermissionRequest | null = null;
   private lastSent: QueuedPrompt | null = null;
@@ -142,6 +145,8 @@ export class SessionHost extends EventEmitter<HostEvents> {
     const next = reduce(prev, action);
     if (next === prev) return;
     this.current = next;
+    // Before pump(): a queued prompt it sends starts a turn of its own.
+    if (next.running !== prev.running) this.runningSince = next.running === null ? undefined : Date.now();
     if (next.usage && next.usage !== prev.usage) saveCachedUsage(this.configDir, next.usage);
     this.pump();
     this.emit('change');
