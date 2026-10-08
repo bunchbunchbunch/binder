@@ -1,8 +1,8 @@
 # Binder for Mac
 
-A Mac app for [binder](../README.md): the same Claude Code sessions in tabs, with responses
-rendered as real documents (heading sizes, tables, highlighted code, task lists) and the TUI's
-keys. Everything runs from the keyboard; the mouse works too.
+A Mac app for [binder](../README.md): the same Claude Code and Codex sessions in tabs, with
+responses rendered as real documents (heading sizes, tables, highlighted code, task lists) and
+the TUI's keys. Everything runs from the keyboard; the mouse works too.
 
 The app is a viewer. Each session runs in a binder session host (`binder host`), and the app
 attaches to it over the host's unix socket, the same protocol the phone client uses
@@ -18,7 +18,8 @@ nobody attached exits after 15 idle minutes).
   your login shell, so it works when started from the Dock. `BINDER_BIN` (the path to the TUI's
   `bin/binder.mjs`) overrides the lookup.
 - Your binder setup applies unchanged: `~/.config/binder/config.json` (`permissionMode`,
-  `configDirs` for a second account, `stickyPrompt`), and everything Claude Code reads.
+  `configDirs` for a second account, `stickyPrompt`, and `agent`: `"codex"` starts new
+  sessions as Codex), and everything Claude Code and Codex read.
   Settings (`⌘,`) changes that file. The app also reads `appearance`, `sidebar` and `panes`
   there (see [Settings](#settings), [Sidebar text](#sidebar-text) and
   [Panes](#panes-and-the-control-socket)).

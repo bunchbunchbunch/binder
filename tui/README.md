@@ -1,13 +1,14 @@
 # BinderTUI
 
-One headless Claude Code session, in tabs.
+One headless Claude Code or Codex session, in tabs.
 
 `binder` runs the real `claude` binary in the background (`claude -p` with stream-json in and
 out) and shows one conversation as tabs: each prompt and its response is a tab. The
 session id persists, so quitting and relaunching restores the tabs and continues the
 conversation. All existing Claude Code configuration applies unchanged: account routing
 via `CLAUDE_CONFIG_DIR`, hooks, plugins, MCP servers, CLAUDE.md, skills, and the status
-line script from `settings.json`.
+line script from `settings.json`. `binder --codex` runs Codex the same way; see
+[Codex](#codex).
 
 ## Install
 

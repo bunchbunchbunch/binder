@@ -1,12 +1,13 @@
 # Binder
 
-Claude Code sessions in tabs: each prompt and its response is a tab.
+Claude Code and Codex sessions in tabs: each prompt and its response is a tab.
 
-Binder runs the real `claude` binary headless and keeps each session in a host process
-(`binder host`). The terminal app and the Mac app are both views of that host, so you can
-watch and drive one session from either, or both at once, and a session keeps running when
-you close them. All of your Claude Code configuration applies unchanged: hooks, plugins, MCP
-servers, CLAUDE.md, skills, and the status line.
+Binder runs the real `claude` or `codex` binary headless and keeps each session in a host
+process (`binder host`). The terminal app and the Mac app are both views of that host, so you
+can watch and drive one session from either, or both at once, and a session keeps running
+when you close them. All of your Claude Code configuration applies unchanged: hooks, plugins,
+MCP servers, CLAUDE.md, skills, and the status line. Codex reads its own setup in `~/.codex`
+as usual.
 
 | Folder | What it is |
 |--------|------------|
@@ -19,6 +20,8 @@ first even if you only plan to use the app.
 ## Requirements
 
 - Claude Code installed and logged in, with `claude` on your PATH.
+- For Codex sessions, the Codex CLI on your PATH and logged in (`codex login`): a ChatGPT
+  account, the free plan included, or an API key.
 - Node 20 or newer for the TUI, Node 22 or newer for the Mac app.
 - For the Mac app: macOS on Apple silicon.
 
@@ -38,6 +41,7 @@ Then, from any project folder:
 binder                # start a new session here
 binder -c             # continue the latest session started here
 binder <session-id>   # resume a session
+binder --codex        # start a Codex session here
 ```
 
 `?` on an empty prompt lists the keys, and `/help` explains them. After pulling changes, run
@@ -61,10 +65,20 @@ Open Binder from Applications or the Dock. It finds `node` and `binder` through 
 shell, so it works without a terminal. `npm run dev` runs it with hot reload instead.
 [gui/README.md](gui/README.md) covers the layout, keys, settings, and panes.
 
+## Codex
+
+`binder --codex` starts a Codex session in the terminal app. `"agent": "codex"` in
+`config.json` makes Codex what every new session runs, including ones the Mac app and the
+phone start. A session keeps the agent it started with, so resuming a Codex session reopens
+it as Codex. Tabs, the queue, `Ctrl+Enter`, `Esc`, bash mode, images, the status bar and
+remote viewers work as they do for Claude Code; [tui/README.md](tui/README.md#codex) lists
+what differs, such as `/rewind` and `/chrome` being unavailable.
+
 ## Configuration
 
 Both apps read `~/.config/binder/config.json` (permission mode, config dirs for a second
 account, sticky prompt). `/settings` in the TUI and `⌘,` in the app show and change it.
+Its `agent` key (`claude` or `codex`) picks what new sessions run; set that one in the file.
 Sessions, logs and sockets live in `~/.local/state/bindertui/`.
 
 ## Development
