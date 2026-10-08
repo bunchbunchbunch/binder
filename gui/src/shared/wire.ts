@@ -59,8 +59,12 @@ export type WireMeta = {
   effort: string | null;
   // Newer hosts only; older ones leave these out.
   suggestion?: string | null;
-  backgroundTasks?: { id: string; type: string; description: string }[];
+  backgroundTasks?: BackgroundTask[];
 };
+
+// A background shell or agent still running. tabId is the tab whose turn
+// started it, startedAt when (ms), progress an agent's latest step.
+export type BackgroundTask = { id: string; type: string; description: string; tabId?: number; startedAt?: number; progress?: string };
 
 export type WireState = WireMeta & { tabs: WireTab[] };
 

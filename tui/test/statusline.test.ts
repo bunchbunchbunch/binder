@@ -73,6 +73,7 @@ describe('tab layout', () => {
     expect(elapsed(900)).toBe('0s');
     expect(elapsed(12_400)).toBe('12s');
     expect(elapsed(125_000)).toBe('2m 5s');
+    expect(elapsed(43_384_000)).toBe('12h 3m');
   });
 });
 

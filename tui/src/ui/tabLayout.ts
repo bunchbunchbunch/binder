@@ -36,7 +36,8 @@ export function turnVerb(blocks: Block[], activity: string, interrupting: boolea
 
 export function elapsed(ms: number): string {
   const s = Math.floor(ms / 1000);
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  if (s < 60) return `${s}s`;
+  return s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`;
 }
 
 // Which tabs fit in `width` columns, keeping the active one visible.

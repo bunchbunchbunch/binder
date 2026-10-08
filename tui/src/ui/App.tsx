@@ -15,6 +15,7 @@ import type { PendingPrompt } from './tabLines.js';
 import { PromptInput } from './PromptInput.js';
 import { QuestionView } from './QuestionView.js';
 import { StatusBar } from './StatusBar.js';
+import { BackgroundTasks } from './BackgroundTasks.js';
 import { HelpView } from './HelpView.js';
 import { Shortcuts } from './Shortcuts.js';
 import { Welcome } from './Welcome.js';
@@ -126,6 +127,13 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
     const t = setInterval(() => setFrame((f) => f + 1), 100);
     return () => clearInterval(t);
   }, [running]);
+  // Background tasks' timers, while no spinner redraws.
+  const background = state.backgroundTasks.length > 0;
+  useEffect(() => {
+    if (running || !background) return;
+    const t = setInterval(() => setFrame((f) => f + 1), 1000);
+    return () => clearInterval(t);
+  }, [running, background]);
 
   // Status bar: the user's own statusline command, refreshed on changes and every 30s.
   const refreshStatus = useCallback(() => {
@@ -386,10 +394,6 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
     runningTab && !answering
       ? `${SPINNER[frame % SPINNER.length]} ${turnVerb(runningTab.blocks, state.activity, state.interrupting)}… (${elapsed(Date.now() - turnStart.current.at)} · esc to interrupt)`
       : '';
-  // Background shells and agents still running, like Claude Code's panel under
-  // the prompt: named when the row is free, counted beside a running turn.
-  const bg = state.backgroundTasks;
-  const bgCount = bg.length ? `${bg.length} background ${bg.length > 1 ? 'tasks' : 'task'}` : '';
   // Ctrl+Enter follow-ups for the active tab that have not started yet.
   const activeId = active?.id;
   const pendingFollowups = useMemo(() => {
@@ -430,13 +434,10 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         )}
       </Box>
       <Box justifyContent="space-between" height={1} paddingLeft={1}>
-        {turnStatus || !bg.length ? (
-          <Text color="#E8C07D" wrap="truncate-end">{turnStatus}</Text>
-        ) : (
-          <Text color="#7CC4FF" wrap="truncate-end">{`◷ ${bgCount}: ${bg.map((t) => t.description).join(', ')}`}</Text>
-        )}
-        <Text dimColor>{[turnStatus && bgCount, state.contextTokens ? `${state.contextTokens} tokens` : ''].filter(Boolean).join(' · ')}</Text>
+        <Text color="#E8C07D" wrap="truncate-end">{turnStatus}</Text>
+        <Text dimColor>{state.contextTokens ? `${state.contextTokens} tokens` : ''}</Text>
       </Box>
+      <BackgroundTasks tasks={state.backgroundTasks} />
       {editing ? (
         <Text color="#E8C07D" wrap="truncate-end">{titledRule(columns, 'editing the queued prompt · enter saves · esc cancels')}</Text>
       ) : (

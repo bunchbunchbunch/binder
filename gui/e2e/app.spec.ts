@@ -117,6 +117,20 @@ test('⌘/ and Help > Binder Guide open the guide; Esc closes it', async () => {
   await expect(guide).toHaveCount(0);
 });
 
+test('lists running background tasks under the status row', async () => {
+  run = await launch(tuiFixture('background-bash.jsonl'));
+  const { page, project } = run;
+  await newSession(page, project);
+  await page.keyboard.type('Start the background job');
+  await page.keyboard.press('Enter');
+  const task = page.locator('.bg-task');
+  await expect(task).toHaveCount(1, { timeout: 20000 });
+  await expect(task.locator('.what')).toHaveText('◷ sleep 8; echo BG_DONE');
+  // Its kind, the tab that started it, and how long it has run (since the fixture was recorded).
+  await expect(task.locator('.meta')).toHaveText(/^shell · tab 1 · \d+h \d+m$/);
+  await page.screenshot({ path: shot('background') });
+});
+
 test('runs a bash command in its own tab', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;

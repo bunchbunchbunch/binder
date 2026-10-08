@@ -4,6 +4,7 @@ import { localCommand, visibleCommands, type LocalCommandName } from '../lib/com
 import { elapsed, plural, shortPath } from '../lib/format';
 import { turnVerb } from '../lib/work';
 import { closeConn, errText, getState, openSession, reopen, request, setActiveTab, setState, toast, useApp, type Conn } from '../store';
+import type { BackgroundTask } from '@shared/wire';
 import { ConfirmPanel } from './Picker';
 import { ArtifactsPanel, ChromePanel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, RewindPanel } from '../panels/SessionPanels';
 import { Composer, type ComposerHandle } from './Composer';
@@ -66,12 +67,14 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   const runningId = s?.running ?? null;
   const started = useRef<{ id: number | null; at: number }>({ id: null, at: 0 });
   if (started.current.id !== runningId) started.current = { id: runningId, at: Date.now() };
+  // And background tasks' timers.
+  const ticking = runningId !== null || Boolean(s?.backgroundTasks?.length);
   const [, tick] = useState(0);
   useEffect(() => {
-    if (runningId === null) return;
+    if (!ticking) return;
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
-  }, [runningId]);
+  }, [ticking]);
 
   // Follow the bottom while output streams, until the user scrolls up.
   const toBottom = () => {
@@ -344,8 +347,6 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     runningTab && s && !answering
       ? `${turnVerb(runningTab.blocks, s.activity, s.interrupting)}… (${elapsed(Date.now() - started.current.at)} · esc to interrupt)${runningTab.id !== tab?.id ? ` · tab ${runningTab.id}` : ''}`
       : '';
-  const bg = s?.backgroundTasks ?? [];
-  const bgCount = bg.length ? plural(bg.length, 'background task') : '';
   const commands = useMemo(() => visibleCommands(c.commands), [c.commands]);
 
   return (
@@ -414,15 +415,12 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
       {s && (
         <div className="dock">
           <div className="activity">
-            {turnStatus || !bg.length ? (
-              <span className="now">
-                {turnStatus && <span className="spin">✻</span>} {turnStatus}
-              </span>
-            ) : (
-              <span className="bg">{`◷ ${bgCount}: ${bg.map((t) => t.description).join(', ')}`}</span>
-            )}
-            <span className="side">{[turnStatus && bgCount, s.queue.length ? `${s.queue.length} queued` : ''].filter(Boolean).join(' · ')}</span>
+            <span className="now">
+              {turnStatus && <span className="spin">✻</span>} {turnStatus}
+            </span>
+            <span className="side">{s.queue.length ? `${s.queue.length} queued` : ''}</span>
           </div>
+          {s.backgroundTasks?.length ? <BackgroundTasks tasks={s.backgroundTasks} /> : null}
           {s.question && (
             <QuestionCard
               key={s.question.requestId}
@@ -453,6 +451,32 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
         </div>
       )}
       {panel && renderPanel(panel)}
+    </div>
+  );
+}
+
+// Background shells and agents still running, one row each under the status
+// row: what each is doing, and its kind, tab and running time, so one that
+// hangs is plain to see.
+const BG_ROWS = 4;
+
+const taskKind = (type: string) => (type === 'local_bash' ? 'shell' : type.replace(/^local_/, '').replace(/_/g, ' '));
+
+function BackgroundTasks({ tasks }: { tasks: BackgroundTask[] }) {
+  const shown = tasks.length > BG_ROWS ? tasks.slice(0, BG_ROWS - 1) : tasks;
+  const now = Date.now();
+  return (
+    <div className="bg-tasks">
+      {shown.map((t) => (
+        <div key={t.id} className="bg-task">
+          <span className="what">
+            ◷ {t.description}
+            {t.progress && <span className="step"> · {t.progress}</span>}
+          </span>
+          <span className="meta">{[taskKind(t.type), t.tabId !== undefined && `tab ${t.tabId}`, t.startedAt !== undefined && elapsed(Math.max(0, now - t.startedAt))].filter(Boolean).join(' · ')}</span>
+        </div>
+      ))}
+      {shown.length < tasks.length && <div className="bg-task more">+{plural(tasks.length - shown.length, 'more background task')}</div>}
     </div>
   );
 }

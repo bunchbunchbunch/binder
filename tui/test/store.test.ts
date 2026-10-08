@@ -300,7 +300,8 @@ describe('background work', () => {
   it('shows the turn the child starts when a background shell finishes, in the tab that launched it', () => {
     const idle = drive('background-bash.jsonl', (e) => e.type === 'result');
     expect(idle.running).toBeNull();
-    expect(idle.backgroundTasks).toEqual([{ id: 'bifp3kil2', type: 'local_bash', description: 'sleep 8; echo BG_DONE' }]);
+    // Dated by the message that started it, and placed in the tab whose turn did.
+    expect(idle.backgroundTasks).toEqual([{ id: 'bifp3kil2', type: 'local_bash', description: 'sleep 8; echo BG_DONE', tabId: 1, startedAt: Date.parse('2026-10-05T15:38:22.275Z') }]);
 
     const s = drive('background-bash.jsonl');
     expect(s.tabs).toHaveLength(1);
@@ -331,19 +332,30 @@ describe('background work', () => {
   it("a prompt sent as background work finishes runs in its own tab, with the child's turn taken in", () => {
     const s = drive('background-race.jsonl');
     expect(s.tabs.map((t) => [t.id, t.earlier.length, t.status, !!t.auto])).toEqual([
-      [1, 0, 'done', false],
+      [1, 1, 'done', true],
       [2, 0, 'done', false],
     ]);
+    expect(tabText(s.tabs[0])).toBe('*Its result went to the turn in tab 2.*');
     expect(tabText(s.tabs[1])).toBe('PONG');
     expect(s.running).toBeNull();
     expect(s.unstarted).toBeUndefined();
   });
 
-  it('work that finishes during a turn is taken into that turn', () => {
+  it("work that finishes during another tab's turn is taken into that turn, and the tab that launched it says so", () => {
     const s = drive('background-midturn.jsonl');
-    expect(s.tabs.flatMap((t) => [t, ...t.earlier]).some((t) => t.auto)).toBe(false);
     expect(tabText(s.tabs[1])).toBe('FG_DONE');
+    expect(s.tabs[1].auto).toBeUndefined();
+    expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: sleep 8; echo BG_DONE', status: 'done' });
+    expect(tabText(s.tabs[0])).toBe('*Its result went to the turn in tab 2.*');
+    expect(s.tabs[0].earlier.map((t) => t.result?.text)).toEqual(['started']);
     expect(s.notices).toEqual([]);
+  });
+
+  it("names an agent's latest step while it runs", () => {
+    const s = drive('background-agent.jsonl', (e) => e.subtype === 'task_progress');
+    expect(s.backgroundTasks).toEqual([
+      { id: 'a643afef3b88add10', type: 'local_agent', description: 'slow echo', tabId: 1, startedAt: Date.parse('2026-10-05T15:38:22.640Z'), progress: 'Running Sleep for 6 seconds, then print AGENT_DONE' },
+    ]);
   });
 
   it("holds the queue until a sent prompt starts, and reopens its tab when the child's own turn closed it first", () => {
@@ -365,5 +377,50 @@ describe('background work', () => {
     expect(tabText(s.tabs[0])).toBe('background report\nA answered');
     expect(s.tabs[0]).toMatchObject({ status: 'done', result: { text: 'A answered' } });
     expect(nextToSend(s)?.tabId).toBe(2);
+  });
+
+  describe('where finished work goes', () => {
+    const ev = (e: object) => ({ type: 'event' as const, event: e as ClaudeEvent });
+    const init = ev({ type: 'system', subtype: 'init', cwd: '/', model: 'm', permissionMode: 'default' });
+    const call = (id: string, name: string, input: object) =>
+      ev({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] }, parent_tool_use_id: null });
+    const toolResult = (id: string) => ev({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] }, parent_tool_use_id: null });
+    const say = (text: string) => ev({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] }, parent_tool_use_id: null });
+    const result = (numTurns = 1) => ev({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, num_turns: numTurns });
+    const finished = (toolId: string, summary: string) => ev({ type: 'system', subtype: 'task_notification', task_id: `t-${toolId}`, tool_use_id: toolId, status: 'completed', summary });
+    const prompt = (s: State, tabId: number) => reduce(reduce(s, { type: 'submit', prompt: `prompt ${tabId}`, tabId }), { type: 'sent', tabId });
+    const run = (s: State, actions: ReturnType<typeof ev>[]) => actions.reduce(reduce, s);
+
+    // Tab 1 starts a background agent and its turn ends; tab 2's turn is running.
+    function agentThenTab2(): State {
+      let s = run(prompt(initialState('sid'), 1), [init, call('agent1', 'Agent', { description: 'Research', run_in_background: true }), toolResult('agent1'), say('launched'), result()]);
+      s = run(prompt(s, 2), [init, call('bash2', 'Bash', { command: 'make' })]);
+      return s;
+    }
+
+    it("puts an agent's report in the tab that launched it when another tab's turn takes it in", () => {
+      const s = run(agentThenTab2(), [finished('agent1', '## Findings\nAll good.'), finished('bash2', 'make'), toolResult('bash2'), say('built'), result()]);
+      expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: Research', status: 'done' });
+      expect(tabText(s.tabs[0])).toBe('*Its result went to the turn in tab 2.*\n\n## Findings\nAll good.');
+      // Tab 2's own foreground call leaves no note.
+      expect(s.tabs[1]).toMatchObject({ status: 'done', earlier: [] });
+      expect(s.tabs[1].auto).toBeUndefined();
+    });
+
+    it("sends work that finishes after the running turn's last tool result to the child's own turn, in the tab that launched it", () => {
+      let s = run(agentThenTab2(), [toolResult('bash2'), finished('agent1', 'report'), say('built'), result()]);
+      expect(s.tabs[0].auto).toBeUndefined();
+      s = run(s, [init, say('Here is what the research found.'), result()]);
+      expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: Research', status: 'done' });
+      expect(tabText(s.tabs[0])).toBe('Here is what the research found.');
+      expect(tabText(s.tabs[1])).toBe('built');
+    });
+
+    it('leaves no trace of a turn the child starts with nothing left to do', () => {
+      const before = run(agentThenTab2(), [finished('agent1', 'report'), toolResult('bash2'), say('built'), result()]);
+      const s = run(before, [init, result(0)]);
+      expect(s.tabs).toEqual(before.tabs);
+      expect(s.running).toBeNull();
+    });
   });
 });

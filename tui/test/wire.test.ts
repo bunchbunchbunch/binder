@@ -69,7 +69,9 @@ describe('wire patches', () => {
     const suggested = reduce(state, { type: 'event', event: { type: 'prompt_suggestion', suggestion: 'write tests', uuid: 'u1', session_id: 's1' } as ClaudeEvent });
     expect(diff({ state, cwd: '/w' }, { state: suggested, cwd: '/w' })!.meta).toEqual({ suggestion: 'write tests' });
     const bg = reduce(suggested, { type: 'event', event: { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'sleep 8' }], session_id: 's1' } as unknown as ClaudeEvent });
-    expect(diff({ state: suggested, cwd: '/w' }, { state: bg, cwd: '/w' })!.meta).toEqual({ backgroundTasks: [{ id: 'b1', type: 'local_bash', description: 'sleep 8' }] });
+    // Dated by the latest message, which started it.
+    expect(diff({ state: suggested, cwd: '/w' }, { state: bg, cwd: '/w' })!.meta).toEqual({ backgroundTasks: [{ id: 'b1', type: 'local_bash', description: 'sleep 8', startedAt: state.messageAt }] });
+    expect(state.messageAt).toEqual(expect.any(Number));
   });
 
   it('carry a question and its answer', () => {

@@ -205,19 +205,25 @@ describe('App with background work', () => {
     return s;
   }
 
-  it('names running background tasks in the status row, then shows the turn the child starts when they finish', async () => {
+  it('lists running background tasks under the status row, then shows the turn the child starts when they finish', async () => {
     const cwd = process.cwd();
     const session = new Session({ sessionId: 'sid', resume: false, cwd, passthrough: [] });
     const idle = mount(session, 'sid', cwd, played('background-bash.jsonl', 1)).ui;
-    expect(plainFrame(idle)).toContain('◷ 1 background task: sleep 8; echo BG_DONE');
+    // Its kind, the tab that started it, and how long it has run (since the fixture was recorded).
+    expect(plainFrame(idle)).toMatch(/◷ sleep 8; echo BG_DONE +shell · tab 1 · \d+h \d+m/);
     idle.unmount();
+
+    const progress = { type: 'system', subtype: 'task_progress', task_id: 'bifp3kil2', description: 'Running the tests' } as unknown as ClaudeEvent;
+    const busy = mount(session, 'sid', cwd, reduce(played('background-bash.jsonl', 1), { type: 'event', event: progress })).ui;
+    expect(plainFrame(busy)).toContain('◷ sleep 8; echo BG_DONE · Running the tests');
+    busy.unmount();
 
     const after = mount(session, 'sid', cwd, played('background-bash.jsonl', 2)).ui;
     await until(() => plainFrame(after).includes('Background task finished'), 8000, () => after.lastFrame());
     const frame = plainFrame(after);
     expect(frame).toContain('⏺ Background task finished: sleep 8; echo BG_DONE');
     expect(frame).toMatch(/Background task finished[\s\S]*BG_DONE/);
-    expect(frame).not.toContain('background task:');
+    expect(frame).not.toContain('◷');
     after.unmount();
   });
 });

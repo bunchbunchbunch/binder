@@ -286,12 +286,18 @@ row model:
   turn begins. A tab holds its latest turn plus the turns before it (`earlier`).
 - Background shells and agents outlive the turn that started them. A subagent's messages
   go to the Agent call named by their `parent_tool_use_id`, in whatever tab or earlier turn
-  holds it. When background work finishes while no turn is running, the child starts a
-  turn of its own (`task_notification`, then `init` with no prompt of ours running); it
-  goes into the tab that launched the work, headed by what finished. A sent prompt counts
-  as in flight until its `command_lifecycle` `started`, so nothing else is sent while the
-  child might be busy with such a turn. `background_tasks_changed` lists what is still
-  running for the status row.
+  holds it. Work that finishes (`task_notification`) waits for a turn to take it in: the
+  running turn's next request, which follows a tool result, or else a turn the child starts
+  of its own (`init` with no prompt of ours running). That turn goes into the tab that
+  launched the work, headed by what finished. When another tab's turn takes it in, the tab
+  that launched it gets a turn of binder's own saying where the result went, with an
+  agent's report. A turn of the child's own that runs nothing (`num_turns` 0, because an
+  earlier turn took the work in) is dropped. A sent prompt counts as in flight until its
+  `command_lifecycle` `started`, so nothing else is sent while the child might be busy with
+  such a turn. `background_tasks_changed` lists what is still running, one row each under
+  the status row, with the tab that started it (`task_started`), how long it has run (from
+  the timestamp of the message that started it) and an agent's latest step
+  (`task_progress`).
 - Every prompt is sent with a uuid, which `/rewind` targets. Binder's panels talk to the
   child over the same control protocol the Agent SDK uses (`src/session.ts` `request()`):
   `initialize` (command list), `list_models` / `set_model`, `apply_flag_settings` (effort),

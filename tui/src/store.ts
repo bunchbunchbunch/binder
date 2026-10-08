@@ -51,6 +51,22 @@ export type QueuedPrompt = { tabId: number; prompt: string; images: ImageAttachm
 
 export type Usage = NonNullable<RateLimitEvent['rate_limit_info']['unifiedWindows']>;
 
+// A background shell or agent still running (background_tasks_changed).
+export type BackgroundTask = {
+  id: string;
+  type: string;
+  description: string;
+  // The tab whose turn started it.
+  tabId?: number;
+  // When it started (ms), from the timestamp of the message that started it.
+  startedAt?: number;
+  // An agent's latest step, e.g. "Searching for …" (task_progress).
+  progress?: string;
+};
+
+// Background work that finished, until a turn takes in its result.
+type Notice = { toolUseId: string; status: string; summary?: string };
+
 export type Question = {
   requestId: string;
   toolUseId?: string;
@@ -98,11 +114,15 @@ export type State = {
   // it started (command_lifecycle). Nothing else is sent meanwhile: the child
   // may be busy with a turn of its own. Only tracked when it reports lifecycle.
   unstarted?: string;
-  // Background tasks that finished while no turn was running: what a turn the
-  // child then starts on its own is about.
-  notices: { toolUseId: string; status: string }[];
+  // Background tasks that finished and that no turn has taken in yet: what a
+  // turn the child then starts on its own is about.
+  notices: Notice[];
   // Background shells and agents still running (background_tasks_changed).
-  backgroundTasks: { id: string; type: string; description: string }[];
+  backgroundTasks: BackgroundTask[];
+  // The tool call that started each task not yet finished, by task id.
+  taskCalls: Record<string, string>;
+  // When the latest message was written (ms), to date background tasks.
+  messageAt?: number;
   // The next prompt Claude Code predicts after a turn, until anything is sent.
   suggestion?: string;
 };
@@ -148,6 +168,7 @@ export function initialState(sessionId: string): State {
     bashContext: [],
     notices: [],
     backgroundTasks: [],
+    taskCalls: {},
   };
 }
 
@@ -277,27 +298,71 @@ function lastRun(state: State): Tab | undefined {
   return state.tabs.filter((t) => !t.bash).reduce<Tab | undefined>((last, t) => (!last || (t.seq ?? -1) >= (last.seq ?? -1) ? t : last), undefined);
 }
 
-// A turn the child started with no prompt of ours running: it is reporting
-// background work that finished. It goes into the tab that launched the work
-// (else the tab that ran last), headed by what finished.
-function startAutoTurn(state: State): State {
-  const finished = state.notices.flatMap((n) => {
-    const at = launchedBy(state, n.toolUseId);
-    return at ? [{ ...at, status: n.status }] : [];
-  });
+// Heads a turn about background work that finished: what finished, and how
+// unless it completed.
+function finishedPrompt(finished: { call: ToolBlock; status: string }[]): string {
   const names = finished.map(({ call, status }) => {
     const input = (call.input ?? {}) as { description?: unknown; command?: unknown };
     const name = String(input.description || input.command || call.name);
     return status === 'completed' ? name : `${name} (${status})`;
   });
-  const prompt = names.length ? `Background ${names.length > 1 ? 'tasks' : 'task'} finished: ${names.join(', ')}` : 'Background work finished';
-  const owner = finished[finished.length - 1]?.tab ?? lastRun(state);
-  const next = { ...state, notices: [], streamIndex: {}, seq: state.seq + 1 };
-  if (!owner) {
-    const tab: Tab = { id: nextTabId(state), prompt, status: 'running', blocks: [], earlier: [], auto: true, seq: state.seq };
-    return { ...addTab(next, tab), running: tab.id };
+  return names.length ? `Background ${names.length > 1 ? 'tasks' : 'task'} finished: ${names.join(', ')}` : 'Background work finished';
+}
+
+// The turn in tab `tabId` took in the background work that finished. A tab
+// that launched some of it gets a turn of binder's own saying where its
+// result went, with an agent's report, since its own turn has long ended.
+function takeIn(state: State, tabId: number): State {
+  if (!state.notices.length) return state;
+  let s: State = { ...state, notices: [] };
+  for (const n of state.notices) {
+    const at = launchedBy(s, n.toolUseId);
+    if (!at || at.tab.id === tabId) continue;
+    const report = (at.call.name === 'Agent' || at.call.name === 'Task') && n.summary ? `\n\n${n.summary}` : '';
+    const text = `*Its result went to the turn in tab ${tabId}.*${report}`;
+    const note: Tab = { ...startTurn(at.tab, finishedPrompt([{ call: at.call, status: n.status }])), status: 'done', blocks: [{ kind: 'text', text, final: true }], auto: true, seq: s.seq };
+    s = { ...replaceTab(s, note), seq: s.seq + 1 };
   }
-  return { ...replaceTab(next, { ...startTurn(owner, prompt), auto: true, seq: state.seq }), running: owner.id };
+  return s;
+}
+
+// A turn the child started with no prompt of ours running: it is reporting
+// background work that finished. It goes into the tab that launched the work
+// (else the tab that ran last), headed by what finished there.
+function startAutoTurn(state: State): State {
+  const finished = state.notices.flatMap((n) => {
+    const at = launchedBy(state, n.toolUseId);
+    return at ? [{ ...at, status: n.status }] : [];
+  });
+  const owner = finished[finished.length - 1]?.tab ?? lastRun(state);
+  const prompt = finishedPrompt(finished.filter((f) => f.tab === owner));
+  const next = { ...(owner ? takeIn(state, owner.id) : state), notices: [], streamIndex: {} };
+  const seq = next.seq;
+  if (!owner) {
+    const tab: Tab = { id: nextTabId(state), prompt, status: 'running', blocks: [], earlier: [], auto: true, seq };
+    return { ...addTab({ ...next, seq: seq + 1 }, tab), running: tab.id };
+  }
+  return { ...replaceTab(next, { ...startTurn(owner, prompt), auto: true, seq }), running: owner.id, seq: seq + 1 };
+}
+
+// The tab without its latest turn: its last earlier turn is the latest again,
+// or the tab goes when it has none.
+function dropLatest(state: State, tab: Tab): State {
+  const last = tab.earlier[tab.earlier.length - 1];
+  if (last) return replaceTab(state, { ...last, id: tab.id, earlier: tab.earlier.slice(0, -1) });
+  const at = state.tabs.indexOf(tab);
+  const tabs = state.tabs.filter((t) => t !== tab);
+  return { ...state, tabs, active: state.active > at ? state.active - 1 : Math.min(state.active, tabs.length - 1) };
+}
+
+// Each task's tab, once the tool call that started it is known.
+function placeTasks(state: State, tasks: BackgroundTask[]): BackgroundTask[] {
+  return tasks.map((t) => {
+    const call = state.taskCalls[t.id];
+    if (t.tabId !== undefined || call === undefined) return t;
+    const tab = state.tabs.find((tab) => [tab, ...tab.earlier].some((turn) => hasTool(turn.blocks, call)));
+    return tab ? { ...t, tabId: tab.id } : t;
+  });
 }
 
 function applyStream(tab: Tab, state: State, ev: StreamEvent): { tab: Tab; streamIndex: Record<number, number> } {
@@ -341,7 +406,7 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
     const next = { ...state, model: ev.model, cwd: ev.cwd, permissionMode: ev.permissionMode, canSteer, suggestion: undefined };
     // Every turn starts with an init. With no prompt of ours running, the turn
     // is the child's own, reporting background work that finished.
-    return state.running === null ? startAutoTurn(next) : { ...next, notices: [] };
+    return state.running === null ? startAutoTurn(next) : takeIn(next, state.running);
   }
   if (ev.type === 'command_lifecycle') {
     const { command_uuid: uuid, state: phase } = ev as CommandLifecycleEvent;
@@ -387,13 +452,30 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
     }
     if (sub === 'background_tasks_changed') {
       const tasks = (ev as { tasks?: { task_id: string; task_type?: string; description?: string }[] }).tasks ?? [];
-      return { ...state, backgroundTasks: tasks.map((t) => ({ id: t.task_id, type: t.task_type ?? '', description: t.description ?? '' })) };
+      const before = new Map(state.backgroundTasks.map((t) => [t.id, t]));
+      const list = tasks.map((t) => ({ startedAt: state.messageAt, ...before.get(t.task_id), id: t.task_id, type: t.task_type ?? '', description: t.description ?? '' }));
+      return { ...state, backgroundTasks: placeTasks(state, list) };
     }
-    // A running turn takes in whatever finishes during it. Work that finishes
-    // while idle makes the child start a turn of its own about it.
-    if (sub === 'task_notification' && state.running === null) {
-      const n = ev as { tool_use_id?: string; status?: string };
-      if (n.tool_use_id) return { ...state, notices: state.notices.concat({ toolUseId: n.tool_use_id, status: n.status ?? 'completed' }) };
+    if (sub === 'task_started') {
+      const t = ev as { task_id?: string; tool_use_id?: string };
+      if (!t.task_id || !t.tool_use_id) return state;
+      const next = { ...state, taskCalls: { ...state.taskCalls, [t.task_id]: t.tool_use_id } };
+      return state.backgroundTasks.some((b) => b.id === t.task_id) ? { ...next, backgroundTasks: placeTasks(next, next.backgroundTasks) } : next;
+    }
+    if (sub === 'task_progress') {
+      const p = ev as { task_id?: string; description?: string };
+      const task = state.backgroundTasks.find((t) => t.id === p.task_id);
+      const progress = p.description && p.description !== task?.description ? p.description : undefined;
+      if (!task || progress === task.progress) return state;
+      return { ...state, backgroundTasks: state.backgroundTasks.map((t) => (t === task ? { ...t, progress } : t)) };
+    }
+    // What finishes waits for a turn to take it in: the running turn's next
+    // request, else a turn the child starts on its own about it.
+    if (sub === 'task_notification') {
+      const n = ev as { task_id?: string; tool_use_id?: string; status?: string; summary?: string };
+      const { [n.task_id ?? '']: _done, ...taskCalls } = state.taskCalls;
+      const next = { ...state, taskCalls };
+      return n.tool_use_id ? { ...next, notices: next.notices.concat({ toolUseId: n.tool_use_id, status: n.status ?? 'completed', summary: n.summary }) } : next;
     }
     return state;
   }
@@ -403,6 +485,8 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
   if (ev.type === 'assistant' || ev.type === 'user') {
     const msg = (ev as { message: { content: ContentBlock[] | string; usage?: Record<string, number> } }).message;
     if (!msg || typeof msg.content === 'string') return state;
+    const at = Date.parse(String((ev as { timestamp?: unknown }).timestamp));
+    if (!Number.isNaN(at)) state = { ...state, messageAt: at };
     const apply = (blocks: Block[]) =>
       ev.type === 'assistant' ? finalizeBlocks(blocks, msg.content as ContentBlock[]) : attachToolResults(blocks, msg.content as ContentBlock[]);
     // A subagent's messages go to the call that spawned it, wherever it is.
@@ -414,7 +498,11 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
       const total = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
       if (total > 0) state = { ...state, contextTokens: total };
     }
-    return replaceTab(state, { ...tab, blocks: apply(tab.blocks) });
+    const next = replaceTab(state, { ...tab, blocks: apply(tab.blocks) });
+    // Tool results go back to the model with whatever finished meanwhile,
+    // unless the turn is being stopped.
+    const toModel = ev.type === 'user' && !state.interrupting && (msg.content as ContentBlock[]).some((c) => c.type === 'tool_result');
+    return toModel ? takeIn(next, tab.id) : next;
   }
 
   const tab = runningTab(state);
@@ -428,6 +516,10 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
 
   if (ev.type === 'result') {
     const r = ev as { is_error: boolean; duration_ms: number; total_cost_usd?: number; num_turns: number; result?: string; subtype?: string };
+    const idle = { running: null, interrupting: false, activity: '', streamIndex: {}, question: undefined };
+    // A turn the child started for work an earlier turn already took in: it
+    // ran nothing, so it leaves no trace.
+    if (tab.auto && !r.is_error && r.num_turns === 0 && !tab.blocks.length) return { ...dropLatest(state, tab), ...idle };
     // A turn stopped to make way for a Ctrl+Enter follow-up ends in an error result.
     const steered = state.steer?.tabId === tab.id && r.is_error;
     const status: TabStatus = state.interrupting ? 'interrupted' : steered ? 'superseded' : r.is_error ? 'error' : 'done';
@@ -442,7 +534,7 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
       blocks,
       result: { durationMs: r.duration_ms, costUsd: r.total_cost_usd ?? 0, numTurns: r.num_turns, isError: r.is_error, text: r.result },
     };
-    return { ...replaceTab(state, done), running: null, interrupting: false, activity: '', streamIndex: {}, question: undefined };
+    return { ...replaceTab(state, done), ...idle };
   }
 
   return state;
@@ -560,6 +652,7 @@ export function reduce(state: State, action: Action): State {
         activity: '',
         notices: [],
         backgroundTasks: [], // they ran inside the child
+        taskCalls: {},
         childExit: { code: action.code, stderr: action.stderr },
       };
     }

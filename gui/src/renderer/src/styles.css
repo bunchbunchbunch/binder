@@ -1158,12 +1158,37 @@ kbd {
   text-overflow: ellipsis;
 }
 
-.activity .bg {
-  color: var(--accent);
-}
-
 .activity .side {
   color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.bg-tasks {
+  font-size: 12.5px;
+  padding: 0 4px 6px;
+}
+
+.bg-task {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  line-height: 1.7;
+}
+
+.bg-task .what {
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bg-task .step,
+.bg-task .meta,
+.bg-task.more {
+  color: var(--text-faint);
+}
+
+.bg-task .meta {
   white-space: nowrap;
 }
 

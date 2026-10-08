@@ -82,5 +82,5 @@ export function replay(sessionId: string): State {
   }
   // Background work ended with the child that ran it. A suggestion is for
   // the moment it was made, so a resumed session starts without one, as in Claude Code.
-  return { ...state, bashContext: [], notices: [], backgroundTasks: [], suggestion: undefined };
+  return { ...state, bashContext: [], notices: [], backgroundTasks: [], taskCalls: {}, suggestion: undefined };
 }

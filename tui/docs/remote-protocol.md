@@ -160,8 +160,9 @@ snapshot, then patches at most every 120 ms while something changes.
 `running` (tab id or null), `activity`, `interrupting`, `canSteer`, `queue`
 (`[{tabId, prompt, followup}]`), `steer` (`{tabId, prompt}` or null), `question`,
 `childExit` (`{code, stderr}` or null), `effort`, `suggestion` (the next prompt Claude Code
-predicts after a turn, or null), `backgroundTasks` (`[{id, type, description}]`, shells and
-agents still running), `tabs`.
+predicts after a turn, or null), `backgroundTasks` (`[{id, type, description, tabId?,
+startedAt?, progress?}]`, shells and agents still running: the tab whose turn started each,
+when it started in ms since the epoch, and an agent's latest step), `tabs`.
 
 `question` is null or `{requestId, kind, toolName, toolInput?, reason?, questions}`, where `kind`
 is `ask` (AskUserQuestion) or `permission` (allow or deny `toolName` with `toolInput`; `reason`

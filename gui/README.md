@@ -54,8 +54,9 @@ icon from the TUI's pixel logo.
   transcript scrolls below it (its first 3 lines, with `+N lines` when it is longer); `Home` or
   a click shows it whole until the next scroll. `"stickyPrompt": false` in config.json turns
   this off.
-- **Prompt:** with a status row above it (`Thinking… (12s · esc to interrupt)`, background
-  tasks) and a status bar under it (folder, model and effort, permission mode, context size, and
+- **Prompt:** with a status row above it (`Thinking… (12s · esc to interrupt)`), a row for
+  each background task (what it is doing, its kind, the tab that started it, and how long it
+  has run) and a status bar under it (folder, model and effort, permission mode, context size, and
   the 5-hour and 7-day usage).
 - Open sessions come back on the next launch: live ones reattach, and the one on screen is
   resumed if its host had exited.
