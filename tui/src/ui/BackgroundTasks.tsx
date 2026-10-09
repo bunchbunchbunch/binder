@@ -8,10 +8,11 @@ import { elapsed } from './tabLayout.js';
 // hangs is plain to see.
 const MAX_ROWS = 3;
 
-const kind = (type: string) => (type === 'local_bash' ? 'shell' : type.replace(/^local_/, '').replace(/_/g, ' '));
+export const taskKind = (type: string) => (type === 'local_bash' ? 'shell' : type.replace(/^local_/, '').replace(/_/g, ' '));
 
-function taskMeta(t: BackgroundTask, now: number): string {
-  return [kind(t.type), t.tabId !== undefined && `tab ${t.tabId}`, t.startedAt !== undefined && elapsed(Math.max(0, now - t.startedAt))].filter(Boolean).join(' · ');
+// "agent · tab 1 · 12h 3m"
+export function taskMeta(t: BackgroundTask, now: number): string {
+  return [taskKind(t.type), t.tabId !== undefined && `tab ${t.tabId}`, t.startedAt !== undefined && elapsed(Math.max(0, now - t.startedAt))].filter(Boolean).join(' · ');
 }
 
 export function BackgroundTasks({ tasks }: { tasks: BackgroundTask[] }) {
@@ -30,7 +31,7 @@ export function BackgroundTasks({ tasks }: { tasks: BackgroundTask[] }) {
           </Box>
         </Box>
       ))}
-      {shown.length < tasks.length && <Text dimColor>{`   +${tasks.length - shown.length} more background tasks`}</Text>}
+      {shown.length < tasks.length && <Text dimColor>{`   +${tasks.length - shown.length} more background tasks · /tasks`}</Text>}
     </>
   );
 }

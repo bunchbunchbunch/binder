@@ -128,7 +128,8 @@ function promptLines(prompt: string, w: number): string[] {
   return lines;
 }
 
-export type PendingPrompt = { prompt: string; sending: boolean };
+// `auto`: binder's own follow-up about background work another tab's turn took in.
+export type PendingPrompt = { prompt: string; sending: boolean; auto?: boolean };
 
 export type TabLinesOptions = {
   width: number;
@@ -179,7 +180,7 @@ export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = fa
   // The tab's queued prompts: a new tab's own, then follow-ups. Up on an empty
   // prompt opens the last one, so its note says how; the one open in the
   // prompt says how to save it instead.
-  const queued = [...(tab.status === 'queued' ? [tab.prompt] : []), ...pending.filter((p) => !p.sending).map((p) => p.prompt)];
+  const queued = [...(tab.status === 'queued' ? [tab.prompt] : []), ...pending.filter((p) => !p.sending && !p.auto).map((p) => p.prompt)];
   const hintAt = editing === undefined ? queued.length - 1 : queued.indexOf(editing);
   let n = 0;
   const note = (text: string) => {
@@ -196,6 +197,11 @@ export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = fa
   if (tab.status === 'queued') note('queued, waiting for the current turn to finish');
   for (const p of pending) {
     if (out[out.length - 1] !== '') out.push('');
+    if (p.auto) {
+      for (const l of wrap(styled(`⏺ ${p.prompt}`, AUTO), width)) out.push(l);
+      out.push(styled('Claude carries on with it here once the current turn ends', DIM));
+      continue;
+    }
     for (const l of promptLines(p.prompt, width)) out.push(l);
     if (p.sending) out.push(styled('sending now…', DIM));
     else note('queued, sends when the current turn finishes (in this tab)');

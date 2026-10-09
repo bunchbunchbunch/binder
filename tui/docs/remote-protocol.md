@@ -100,6 +100,9 @@ paused, or this client revoked).
 | `edit_queued` | `tabId`, `prompt`, `text` | `{}`. The prompt still in `queue` for tab `tabId` whose text is `prompt` becomes `text`, keeping its place and images. An empty `text` removes it; for the prompt that opens a new tab, the tab goes too, with anything queued into it. Refused once the prompt is no longer queued (sent, or removed) |
 | `interrupt` | | `{}` |
 | `stop_bash` | `tabId` | `{}` |
+| `stop_task` | `taskId` | `{}`; stops a background shell or agent (an id from `backgroundTasks`). Nothing follows up on its end |
+| `task_output` | `taskId` | `{output, totalBytes, truncated}`: the end of a background shell's or monitor's output, at most its last 8 KiB, escape sequences included. Refused for an agent |
+| `background` | | `{}`; the running turn's foreground commands and agents carry on in the background (Claude Code's `Ctrl+B`) |
 | `answer` | `requestId`, `answers` | `{}`; AskUserQuestion: `answers` maps question text to the chosen label(s) (comma-separated for multi-select) |
 | `allow` / `deny` | `requestId` | `{}`; a permission prompt |
 | `rewind_targets` | | `{targets: [{uuid, prompt, tabId}]}` newest first |
@@ -161,19 +164,23 @@ snapshot, then patches at most every 120 ms while something changes.
 `state` fields: `sessionId`, `cwd`, `model`, `permissionMode`, `usage`, `contextTokens`,
 `running` (tab id or null), `runningSince` (when the running turn started, in ms since the
 epoch, or null), `activity`, `interrupting`, `canSteer`, `queue`
-(`[{tabId, prompt, followup}]`), `steer` (`{tabId, prompt}` or null), `question`,
+(`[{tabId, prompt, followup, auto?}]`; `auto` marks binder's own follow-up about background
+work another tab's turn took in, which the user cannot edit), `steer` (`{tabId, prompt}` or null), `question`,
 `childExit` (`{code, stderr}` or null), `effort`, `suggestion` (the next prompt Claude Code
-predicts after a turn, or null), `backgroundTasks` (`[{id, type, description, tabId?,
-startedAt?, progress?}]`, shells and agents still running: the tab whose turn started each,
-when it started in ms since the epoch, and an agent's latest step), `tabs`.
+predicts after a turn, or null), `backgroundTasks` (`[{id, type, description, toolUseId?,
+tabId?, startedAt?, progress?}]`, shells and agents still running: the tool call that
+started each and the tab whose turn made it, when it started in ms since the epoch, and an
+agent's latest step), `tabs`.
 
 `question` is null or `{requestId, kind, toolName, toolInput?, reason?, questions}`, where `kind`
 is `ask` (AskUserQuestion) or `permission` (allow or deny `toolName` with `toolInput`; `reason`
 is why Claude Code asks, when it says),
 and `questions` is `[{question, header?, multiSelect?, options: [{label, description?}]}]`.
 
-A tab: `{id, prompt, status, blocks, result?, uuid?, bash?, earlier}`, where `earlier`
-holds the tab's previous turns, each `{prompt, status, blocks, result?, uuid?, bash?}`.
+A tab: `{id, prompt, status, blocks, result?, uuid?, bash?, auto?, earlier}`, where `earlier`
+holds the tab's previous turns, each `{prompt, status, blocks, result?, uuid?, bash?, auto?}`.
+`auto` marks a turn about background work that finished, started by Claude Code or by
+binder; its `prompt` is a heading (`Background task finished: …`), not the user's.
 `status` is `queued`, `running`, `done`, `error`, `interrupted` or `superseded`. A block is
 one of:
 
@@ -196,5 +203,5 @@ operations, applied in order:
 |------|--------|--------|
 | `set` | `tab` | add or replace the whole tab (tabs stay sorted by id) |
 | `remove` | `id` | drop the tab |
-| `blocks` | `id`, `from`, `blocks`, `fields` | replace the tab's blocks from index `from` on, then copy `fields` (`prompt`, `status`, `result`, `uuid`, `bash`) onto the tab |
+| `blocks` | `id`, `from`, `blocks`, `fields` | replace the tab's blocks from index `from` on, then copy `fields` (`prompt`, `status`, `result`, `uuid`, `bash`, `auto`) onto the tab |
 | `append` | `id`, `index`, `text`, `fields` | append `text` to the text or thinking block at `index`, then copy `fields` |

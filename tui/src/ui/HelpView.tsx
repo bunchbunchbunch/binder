@@ -19,6 +19,7 @@ const KEYS: Array<[string, string]> = [
   ['Ctrl+]', 'open the latest artifact'],
   ['Ctrl+E', 'expand / collapse the work behind a response'],
   ['Ctrl+O', 'full tool output, thinking, and subagent detail'],
+  ['Ctrl+B', 'move the running command or agent to the background (/tasks lists them)'],
   ['Ctrl+V', 'paste the clipboard: an image, or its text'],
   ['Ctrl+C (text selected)', 'copy the selection'],
   ['Ctrl+C twice', 'quit'],

@@ -20,6 +20,7 @@ const SHORTCUTS: Shortcut[] = [
   ['double tap esc', 'to rewind'],
   ['ctrl + e', 'to expand the work'],
   ['ctrl + o', 'for full detail'],
+  ['ctrl + b', 'to run in background'],
   ['ctrl + l', 'to pick a model'],
   ['ctrl + p', 'to cycle models'],
   ['shift + tab', 'to cycle effort'],

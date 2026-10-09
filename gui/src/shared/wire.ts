@@ -20,7 +20,8 @@ export type WireBlock = TextBlock | ToolBlock;
 export type TabStatus = 'queued' | 'running' | 'done' | 'error' | 'interrupted' | 'superseded';
 export type TurnResult = { durationMs: number; costUsd: number; numTurns: number; isError: boolean; text?: string };
 
-export type WireTurn = { prompt: string; status: TabStatus; blocks: WireBlock[]; result?: TurnResult; uuid?: string; bash?: boolean };
+// `auto`: a turn Claude Code or binder started about background work, headed by what finished.
+export type WireTurn = { prompt: string; status: TabStatus; blocks: WireBlock[]; result?: TurnResult; uuid?: string; bash?: boolean; auto?: boolean };
 export type WireTab = WireTurn & { id: number; earlier: WireTurn[] };
 
 export type QuestionItem = {
@@ -52,7 +53,8 @@ export type WireMeta = {
   activity: string;
   interrupting: boolean;
   canSteer: boolean;
-  queue: { tabId: number; prompt: string; followup: boolean }[];
+  // `auto`: binder's own follow-up about background work, not the user's.
+  queue: { tabId: number; prompt: string; followup: boolean; auto?: boolean }[];
   steer: { tabId: number; prompt: string } | null;
   question: WireQuestion | null;
   childExit: { code: number | null; stderr: string[] } | null;
@@ -64,13 +66,14 @@ export type WireMeta = {
   runningSince?: number | null;
 };
 
-// A background shell or agent still running. tabId is the tab whose turn
-// started it, startedAt when (ms), progress an agent's latest step.
-export type BackgroundTask = { id: string; type: string; description: string; tabId?: number; startedAt?: number; progress?: string };
+// A background shell or agent still running. toolUseId is the call that
+// started it and tabId the tab whose turn made it, startedAt when (ms),
+// progress an agent's latest step.
+export type BackgroundTask = { id: string; type: string; description: string; toolUseId?: string; tabId?: number; startedAt?: number; progress?: string };
 
 export type WireState = WireMeta & { tabs: WireTab[] };
 
-type TabFields = { prompt: string; status: TabStatus; result: TurnResult | null; uuid: string | null; bash: boolean };
+type TabFields = { prompt: string; status: TabStatus; result: TurnResult | null; uuid: string | null; bash: boolean; auto?: boolean };
 
 export type TabOp =
   | { op: 'set'; tab: WireTab }
@@ -103,7 +106,7 @@ export function applyPatch(s: WireState, p: Patch): WireState {
       tabs = tabs.map((t) => {
         if (t.id !== op.id) return t;
         const f = op.fields;
-        const fields = { prompt: f.prompt, status: f.status, result: f.result ?? undefined, uuid: f.uuid ?? undefined, bash: f.bash || undefined };
+        const fields = { prompt: f.prompt, status: f.status, result: f.result ?? undefined, uuid: f.uuid ?? undefined, bash: f.bash || undefined, auto: f.auto || undefined };
         if (op.op === 'blocks') return { ...t, ...fields, blocks: t.blocks.slice(0, op.from).concat(op.blocks) };
         const blocks = t.blocks.map((b, i) => (i === op.index && b.kind !== 'tool_use' ? { ...b, text: b.text + op.text } : b));
         return { ...t, ...fields, blocks };

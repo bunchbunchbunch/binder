@@ -8,7 +8,8 @@ import { Blocks, type BlockCtx } from './Blocks';
 // response lands, unless expanded), the response, and follow-ups waiting
 // to be sent into this tab.
 
-export type PendingPrompt = { prompt: string; sending: boolean };
+// `auto`: binder's own follow-up about background work another tab's turn took in.
+export type PendingPrompt = { prompt: string; sending: boolean; auto?: boolean };
 
 // Edit (in the prompt below) and Remove for a prompt of this tab still in the queue.
 export type QueueControls = { edit: (prompt: string) => void; remove: (prompt: string) => void };
@@ -49,10 +50,14 @@ function Turn({ turn, expanded, onToggle, ctx, latest, pinned, queued }: { turn:
   const split = lastToolIndex(turn.blocks) + 1;
   return (
     <div className="turn" data-turn data-latest={latest || undefined}>
-      {!pinned && (
-        <div className={`prompt${turn.bash ? ' bash' : ''}`}>
-          <PromptText text={turn.prompt} />
-        </div>
+      {turn.auto ? (
+        <div className="auto-head">⏺ {turn.prompt}</div>
+      ) : (
+        !pinned && (
+          <div className={`prompt${turn.bash ? ' bash' : ''}`}>
+            <PromptText text={turn.prompt} />
+          </div>
+        )
       )}
       {work.length > 0 && (
         <button className={`work-toggle${expanded ? ' open' : ''}`} onClick={onToggle} data-work={latest || undefined}>
@@ -97,8 +102,8 @@ type Props = {
   expandEarlier: boolean;
   onToggle: () => void;
   pending: PendingPrompt[];
-  // The latest prompt is in the sticky header (config.json stickyPrompt).
-  pinned: boolean;
+  // The turn whose prompt the sticky header holds (config.json stickyPrompt).
+  pinned: WireTurn | null;
   queued: QueueControls;
 };
 
@@ -106,26 +111,33 @@ function TranscriptImpl({ tab, ctx, expanded, expandEarlier, onToggle, pending, 
   return (
     <div className="transcript">
       {tab.earlier.map((turn, i) => (
-        <Turn key={i} turn={turn} expanded={expandEarlier} onToggle={onToggle} ctx={ctx} latest={false} />
+        <Turn key={i} turn={turn} expanded={expandEarlier} onToggle={onToggle} ctx={ctx} latest={false} pinned={turn === pinned} />
       ))}
-      <Turn turn={tab} expanded={expanded} onToggle={onToggle} ctx={ctx} latest pinned={pinned} queued={queued} />
-      {pending.map((p, i) => (
-        <div key={i} className="turn">
-          <div className="prompt pending">
-            <PromptText text={p.prompt} />
+      <Turn turn={tab} expanded={expanded} onToggle={onToggle} ctx={ctx} latest pinned={tab === pinned} queued={queued} />
+      {pending.map((p, i) =>
+        p.auto ? (
+          <div key={i} className="turn">
+            <div className="auto-head pending">⏺ {p.prompt}</div>
+            <div className="turn-note">Claude carries on with it here once the current turn ends</div>
           </div>
-          <div className="turn-note pending-note">
-            {p.sending ? (
-              'Sending now…'
-            ) : (
-              <>
-                Queued; sends into this tab when the current turn finishes
-                <QueuedActions prompt={p.prompt} queued={queued} />
-              </>
-            )}
+        ) : (
+          <div key={i} className="turn">
+            <div className="prompt pending">
+              <PromptText text={p.prompt} />
+            </div>
+            <div className="turn-note pending-note">
+              {p.sending ? (
+                'Sending now…'
+              ) : (
+                <>
+                  Queued; sends into this tab when the current turn finishes
+                  <QueuedActions prompt={p.prompt} queued={queued} />
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        ),
+      )}
     </div>
   );
 }

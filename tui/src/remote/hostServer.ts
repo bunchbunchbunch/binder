@@ -275,6 +275,12 @@ export class HostServer {
         return host.interrupt();
       case 'stop_bash':
         return host.stopBash(Number(m.tabId));
+      case 'stop_task':
+        return void (await host.stopTask(str(m.taskId, 'taskId')));
+      case 'task_output':
+        return await host.taskOutput(str(m.taskId, 'taskId'));
+      case 'background':
+        return void (await host.background());
       case 'answer':
         return host.answer(str(m.requestId, 'requestId'), (m.answers ?? {}) as Record<string, string>);
       case 'allow':

@@ -145,6 +145,45 @@ test('lists running background tasks under the status row', async () => {
   // Its kind, the tab that started it, and how long it has run (since the fixture was recorded).
   await expect(task.locator('.meta')).toHaveText(/^shell · tab 1 · \d+h \d+m$/);
   await page.screenshot({ path: shot('background') });
+
+  // A click shows its output in /tasks; x stops it.
+  await task.click();
+  const picker = page.locator('.picker');
+  await expect(picker.locator('.picker-title')).toHaveText('Background tasks');
+  await expect(picker.locator('.task-output')).toContainText('output of bifp3kil2');
+  await expect(picker.locator('.task-detail-head')).toContainText('Output · last 8 KB of 20 KB');
+  await page.screenshot({ path: shot('tasks-panel') });
+  await page.keyboard.press('x');
+  await expect(page.locator('.toast')).toHaveText('Stopped sleep 8; echo BG_DONE');
+  await expect(picker.locator('.picker-empty')).toHaveText('No background tasks running');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.bg-task')).toHaveCount(0);
+});
+
+test("Ctrl+B moves the running command to the background; the tab that launched finished work carries on with it", async () => {
+  run = await launch(tuiFixture('background-midturn.jsonl'), { BINDER_FAKE_DELAY_MS: '120' });
+  const { page, project } = run;
+  await newSession(page, project);
+  await page.keyboard.type('Start the background job');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.bg-task')).toHaveCount(1, { timeout: 20000 });
+  await expect(page.locator('.activity .now')).toHaveText('', { timeout: 20000 });
+  await page.keyboard.type('Run the foreground job');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.activity .now')).toContainText('⌃B to run in background', { timeout: 20000 });
+  await page.keyboard.press('Control+b');
+  await expect(page.locator('.toast')).toHaveText('Running in the background');
+  // Tab 1's shell finished during tab 2's turn: tab 1 gets a turn of its own about it.
+  await page.keyboard.press('Control+ArrowLeft');
+  await expect(page.locator('.tab.active .num')).toHaveText('1');
+  await expect(page.locator('.transcript .auto-head.pending')).toHaveText('⏺ Background task finished: sleep 8; echo BG_DONE', { timeout: 20000 });
+  await expect(page.locator('.transcript')).toContainText('Claude carries on with it here once the current turn ends');
+  await page.screenshot({ path: shot('background-followup') });
+  // Once tab 2's turn ends it is sent, and runs in tab 1 (this fake has no reply left for it).
+  await expect(page.locator('.transcript .auto-head:not(.pending)')).toHaveText('⏺ Background task finished: sleep 8; echo BG_DONE', { timeout: 20000 });
+  await expect(page.locator('.transcript .auto-head.pending')).toHaveCount(0);
+  // The sticky header keeps the prompt the user sent.
+  await expect(page.locator('.sticky-prompt')).toContainText('Start the background job');
 });
 
 test('runs a bash command in its own tab', async () => {

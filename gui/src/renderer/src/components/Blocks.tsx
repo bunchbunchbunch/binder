@@ -103,6 +103,12 @@ function firstStringArg(a: Record<string, unknown>): string | undefined {
   return Object.values(a).find((v): v is string => typeof v === 'string');
 }
 
+/** A tool call in one line, "Bash npm test", as an agent's steps in /tasks show it. */
+export function toolLine(block: ToolBlock, cwd: string): string {
+  const v = describe(block, cwd);
+  return [v.name, v.arg?.text].filter(Boolean).join(' ');
+}
+
 function describe(block: ToolBlock, cwd: string): View {
   const a = args(block);
   const out = outputRows(block);

@@ -140,6 +140,7 @@ tested against Codex 0.160.1, the version `fixtures/codex/` was recorded with.
 | `Ctrl+]` | open the latest artifact published in this session |
 | `Ctrl+E` | expand / collapse the work (thinking and tool calls) behind a response |
 | `Ctrl+O` | toggle full tool output, thinking, and subagent detail |
+| `Ctrl+B` | move the running command or agent to the background, as in Claude Code. The status row says when there is one: `ctrl+b to run in background` |
 | `Ctrl+R` | restart the child after it exits unexpectedly |
 | `Ctrl+C` twice | quit |
 
@@ -147,6 +148,15 @@ While a turn runs, its work streams in full, and a row above the prompt shows wh
 doing and for how long (`Thinking… (12s · esc to interrupt)`, `Running Bash…`). When the
 response arrives, or the model asks a question, the work folds into a one-line summary
 above the response; `Ctrl+E` unfolds it.
+
+Background shells and agents (a command or agent Claude starts in the background, or one
+moved there with `Ctrl+B`) get a row each under the status row: what it is doing, its kind,
+the tab that started it, and how long it has run, so one that hangs shows. `/tasks` lists
+them with the highlighted one's output. When one finishes while no turn runs, Claude replies
+in the tab that started it. When it finishes during another tab's turn, Claude sees the
+result in that turn; once it ends, binder sends a follow-up into the tab that started the
+task, so Claude carries on with it there (`⏺ Background task finished: …`). A task stopped by
+another turn gets only a note there, and one you stop gets nothing.
 
 AskUserQuestion prompts render as a picker: arrows or a number select, `Space` toggles
 in multi-select, `Enter` confirms, "Other" lets you type a free answer.
@@ -178,6 +188,7 @@ session or directory the child is on, or they need a picker:
 | `/mcp` | MCP servers and their status; pick one to authenticate (opens the sign-in page), reconnect, enable or disable it, or clear its authentication |
 | `/chrome` | Claude in Chrome: extension status, enable or disable it for this session (restarts claude with `--chrome`), and links to reconnect or manage permissions |
 | `/artifacts` | artifacts published in this session: `Enter`/`o` opens one, `c` copies its link |
+| `/tasks` (`/bashes`) | background shells and agents, with the highlighted one's output (a shell's last lines, read every second; an agent's latest steps): `Enter` goes to the tab that started it, `x` stops it |
 | `/settings` | binder's `config.json`: permission mode for new sessions, sticky prompt, markdown style, and config dirs (add one by typing its folder and config dir, `Tab` completes; `Enter` on one removes it) |
 | `/exit` (`/quit`) | quit |
 
@@ -293,15 +304,19 @@ row model:
   holds it. Work that finishes (`task_notification`) waits for a turn to take it in: the
   running turn's next request, which follows a tool result, or else a turn the child starts
   of its own (`init` with no prompt of ours running). That turn goes into the tab that
-  launched the work, headed by what finished. When another tab's turn takes it in, the tab
-  that launched it gets a turn of binder's own saying where the result went, with an
-  agent's report. A turn of the child's own that runs nothing (`num_turns` 0, because an
-  earlier turn took the work in) is dropped. A sent prompt counts as in flight until its
+  launched the work, headed by what finished. When another tab's turn takes it in, binder
+  queues a follow-up of its own into the tab that launched it (one per tab, naming all that
+  finished), asking the model to carry on there; its log marker holds only the heading, and
+  replay leaves out one never sent. Work stopped during another tab's turn gets a note
+  there instead, and work the user stopped (`stop_task`, logged as `hc_stop_task`) gets
+  nothing. A turn of the child's own that runs nothing (`num_turns` 0, because an earlier
+  turn took the work in) is dropped. A sent prompt counts as in flight until its
   `command_lifecycle` `started`, so nothing else is sent while the child might be busy with
   such a turn. `background_tasks_changed` lists what is still running, one row each under
   the status row, with the tab that started it (`task_started`), how long it has run (from
   the timestamp of the message that started it) and an agent's latest step
-  (`task_progress`).
+  (`task_progress`). `/tasks` reads a shell's output with `get_task_output`, and `Ctrl+B`
+  sends `background_tasks`.
 - Every prompt is sent with a uuid, which `/rewind` targets. Binder's panels talk to the
   child over the same control protocol the Agent SDK uses (`src/session.ts` `request()`):
   `initialize` (command list), `list_models` / `set_model`, `apply_flag_settings` (effort),

@@ -24,13 +24,15 @@ type Props = {
   empty?: string;
   // The picker has the keyboard (its session is on screen, under no other panel).
   active?: boolean;
+  // Under the list: more about the highlighted item.
+  detail?: (item: PickerItem | undefined) => ReactNode;
 };
 
 // A centered list over the session, for binder's panels (/model, /resume,
 // /mcp, ...): Up/Down (PgUp/PgDn) move, Enter picks, Esc closes. While active
 // it takes these keys wherever focus is (typing goes to its search box); the
 // mouse works too.
-export function Picker({ title, items, onSelect, onCancel, search, hint, subtitle, onKey, initial = 0, empty = 'Nothing here', active = true }: Props) {
+export function Picker({ title, items, onSelect, onCancel, search, hint, subtitle, onKey, initial = 0, empty = 'Nothing here', active = true, detail }: Props) {
   const [cursor, setCursor] = useState(initial);
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -112,6 +114,7 @@ export function Picker({ title, items, onSelect, onCancel, search, hint, subtitl
             <div className="picker-empty">{empty}</div>
           )}
         </div>
+        {detail?.(item)}
         <div className="picker-hint">{hint ?? '↑↓ move · ⏎ select · esc close'}</div>
       </div>
     </div>

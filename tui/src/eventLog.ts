@@ -11,14 +11,19 @@ import { initialState, reduce, type State } from './store.js';
 
 // `kind` is absent for a prompt that opened its tab, 'followup' for one sent
 // into an existing tab after its turn ended, 'steer' for one sent mid-turn.
+// `auto` marks binder's own follow-up about background work: its `prompt` is
+// the turn's heading (what the model read is not logged), and the replayed
+// events queue it again, so replay only sends it.
 // (The 'hc_prompt' type predates the rename and stays for existing logs.)
-export type PromptMarker = { type: 'hc_prompt'; prompt: string; tabId: number; kind?: 'followup' | 'steer'; uuid?: string };
+export type PromptMarker = { type: 'hc_prompt'; prompt: string; tabId: number; kind?: 'followup' | 'steer'; uuid?: string; auto?: true };
 
-// Binder's own entries: a `!command` it ran (start, then its output), and a rewind.
+// Binder's own entries: a `!command` it ran (start, then its output), a
+// rewind, and a background task the user stopped.
 export type LocalMarker =
   | { type: 'hc_bash'; tabId: number; command: string }
   | { type: 'hc_bash_done'; tabId: number; output: string; exitCode: number | null }
-  | { type: 'hc_rewind'; uuid: string };
+  | { type: 'hc_rewind'; uuid: string }
+  | { type: 'hc_stop_task'; taskId: string };
 
 export function logPath(sessionId: string): string {
   return join(stateDir(), `${sessionId}.events.jsonl`);
@@ -51,9 +56,11 @@ export function replay(sessionId: string): State {
       const m = e as unknown as PromptMarker;
       if (m.kind === 'steer') {
         state = reduce(state, { type: 'steer', tabId: m.tabId, prompt: m.prompt, uuid: m.uuid ?? '' });
+      } else if (m.auto) {
+        state = reduce(state, { type: 'sent', tabId: m.tabId, uuid: m.uuid, auto: true });
       } else if (m.kind === 'followup') {
         state = reduce(state, { type: 'followup', tabId: m.tabId, prompt: m.prompt });
-        state = reduce(state, { type: 'sent', tabId: m.tabId, uuid: m.uuid });
+        state = reduce(state, { type: 'sent', tabId: m.tabId, uuid: m.uuid, auto: false });
       } else {
         state = reduce(state, { type: 'submit', prompt: m.prompt, tabId: m.tabId });
         state = reduce(state, { type: 'sent', tabId: m.tabId, uuid: m.uuid });
@@ -66,6 +73,8 @@ export function replay(sessionId: string): State {
       state = reduce(state, { type: 'bash_done', tabId: m.tabId, output: m.output, exitCode: m.exitCode });
     } else if (e.type === 'hc_rewind') {
       state = reduce(state, { type: 'rewind', uuid: (e as unknown as { uuid: string }).uuid });
+    } else if (e.type === 'hc_stop_task') {
+      state = reduce(state, { type: 'task_stopping', taskId: (e as unknown as { taskId: string }).taskId });
     } else {
       state = reduce(state, { type: 'event', event: e });
     }
@@ -80,7 +89,8 @@ export function replay(sessionId: string): State {
   for (const tab of state.tabs) {
     if (tab.bash && tab.status === 'running') state = reduce(state, { type: 'bash_done', tabId: tab.id, output: '', exitCode: null });
   }
-  // Background work ended with the child that ran it. A suggestion is for
-  // the moment it was made, so a resumed session starts without one, as in Claude Code.
-  return { ...state, bashContext: [], notices: [], backgroundTasks: [], taskCalls: {}, suggestion: undefined };
+  // Background work ended with the child that ran it, and binder's follow-ups
+  // about it are moot. A suggestion is for the moment it was made, so a
+  // resumed session starts without one, as in Claude Code.
+  return { ...state, bashContext: [], notices: [], backgroundTasks: [], taskCalls: {}, stopping: [], queue: state.queue.filter((q) => !q.auto), suggestion: undefined };
 }

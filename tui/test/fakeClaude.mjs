@@ -12,7 +12,8 @@
 // A user message with a uuid gets command_lifecycle frames, and a send_now
 // interrupt cuts the running turn short with an aborted result, as the real
 // binary does for Ctrl+Enter. Control requests binder sends for its panels
-// (initialize, list_models, mcp_status, rewind_*, set_cwd, ...) get canned answers.
+// (initialize, list_models, mcp_status, rewind_*, set_cwd, get_task_output,
+// stop_task, ...) get canned answers.
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -107,6 +108,15 @@ const CONTROL = {
   rewind_files: (r) => (r.dry_run ? { canRewind: true, filesChanged: ['/tmp/a.txt'], insertions: 0, deletions: 1 } : { canRewind: true }),
   rewind_conversation: (r) => ({ rewound: true, targetMessageUuid: r.target_message_uuid, prefillText: prompts.get(r.target_message_uuid) ?? '' }),
   set_cwd: (r) => (r.trust_accepted ? { status: 'ok', changed: true } : { status: 'needs_trust', directory: r.path, trust_root: r.path }),
+  get_task_output: (r) => ({ output: `tick 1\ntick 2\noutput of ${r.task_id}\n`, total_bytes: 20480, truncated: true }),
+  // The real binary then reports the task stopped; this fake only ever runs one.
+  stop_task: (r) => {
+    setTimeout(() => {
+      emit({ type: 'system', subtype: 'task_notification', task_id: r.task_id, status: 'stopped', summary: 'stopped' });
+      emit({ type: 'system', subtype: 'background_tasks_changed', tasks: [] });
+    }, 10);
+    return {};
+  },
 };
 
 // What `initialize` reports, shaped like the real binary's list.

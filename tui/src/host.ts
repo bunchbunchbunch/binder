@@ -170,8 +170,8 @@ export class SessionHost extends EventEmitter<HostEvents> {
     const next = nextToSend(this.current);
     if (!next || this.lastSent === next) return;
     this.lastSent = next;
-    const uuid = this.session.sendPrompt(next.prompt, next.tabId, next.images, next.followup, this.current.bashContext.join('\n'));
-    this.dispatch({ type: 'sent', tabId: next.tabId, uuid });
+    const uuid = this.session.sendPrompt(next.prompt, next.tabId, next.images, next.followup, this.current.bashContext.join('\n'), next.auto?.text);
+    this.dispatch({ type: 'sent', tabId: next.tabId, uuid, auto: Boolean(next.auto) });
     upsertSession({ id: this.sessionId, cwd: this.dir, configDir: this.configDir, firstPrompt: next.prompt });
   }
 
@@ -235,6 +235,25 @@ export class SessionHost extends EventEmitter<HostEvents> {
     if (this.current.running === null) return;
     this.dispatch({ type: 'interrupt_requested' });
     this.session.interrupt();
+  }
+
+  /** Stops a background shell or agent (stop_task). Its end then needs no follow-up. */
+  async stopTask(taskId: string): Promise<void> {
+    this.dispatch({ type: 'task_stopping', taskId });
+    this.session.logLocal({ type: 'hc_stop_task', taskId });
+    await this.session.request('stop_task', { task_id: taskId });
+  }
+
+  /** The end of a background shell's or monitor's output, at most its last 8 KiB (get_task_output). */
+  async taskOutput(taskId: string): Promise<{ output: string; totalBytes: number; truncated: boolean }> {
+    const r = await this.session.request('get_task_output', { task_id: taskId });
+    return { output: String(r.output ?? ''), totalBytes: Number(r.total_bytes ?? 0), truncated: r.truncated === true };
+  }
+
+  /** Ctrl+B: the running turn's foreground commands and agents carry on in the background (background_tasks). */
+  async background(): Promise<void> {
+    if (this.current.running === null) return;
+    await this.session.request('background_tasks');
   }
 
   private openQuestion(requestId: string): PermissionRequest {

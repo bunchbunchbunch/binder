@@ -4,7 +4,7 @@
 
 export type SlashCommand = { name: string; description: string; argumentHint?: string; aliases?: string[] };
 
-export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'markdown' | 'settings';
+export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'tasks' | 'markdown' | 'settings';
 
 const LOCAL: Array<SlashCommand & { name: LocalCommandName }> = [
   { name: 'help', description: 'Show keys and commands' },
@@ -19,13 +19,14 @@ const LOCAL: Array<SlashCommand & { name: LocalCommandName }> = [
   { name: 'effort', description: 'Pick the effort level for this session', argumentHint: '[level]' },
   { name: 'chrome', description: 'Claude in Chrome: status and setup' },
   { name: 'artifacts', description: 'Artifacts published in this session (Ctrl+] opens the latest)' },
+  { name: 'tasks', description: 'Background shells and agents: what each is doing, its tab, and stopping it', aliases: ['bashes'] },
   { name: 'markdown', description: 'Switch the markdown style for responses: classic or vivid', argumentHint: '[style]', aliases: ['md'] },
   { name: 'settings', description: "Binder's settings (config.json): permission mode, sticky prompt, markdown style, config dirs" },
 ];
 
 // Binder's commands a Codex session cannot run: Codex keeps no file
-// checkpoints to rewind to, and has no Claude in Chrome.
-export const CODEX_UNSUPPORTED: LocalCommandName[] = ['rewind', 'chrome'];
+// checkpoints to rewind to, and has no Claude in Chrome or background tasks.
+export const CODEX_UNSUPPORTED: LocalCommandName[] = ['rewind', 'chrome', 'tasks'];
 
 // The child's commands plus binder's own (less `hide`), which replace any of
 // the same name. Names starting with "__" are internal and hidden, as in Claude Code.

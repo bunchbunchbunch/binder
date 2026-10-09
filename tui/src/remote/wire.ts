@@ -20,7 +20,8 @@ export type WireBlock =
       inputChars?: number;
     };
 
-export type WireTurn = { prompt: string; status: string; blocks: WireBlock[]; result?: Turn['result']; uuid?: string; bash?: boolean };
+// `auto`: a turn the child or binder started about background work, headed by what finished.
+export type WireTurn = { prompt: string; status: string; blocks: WireBlock[]; result?: Turn['result']; uuid?: string; bash?: boolean; auto?: boolean };
 export type WireTab = WireTurn & { id: number; earlier: WireTurn[] };
 
 export type WireQuestion = {
@@ -46,7 +47,8 @@ export type WireMeta = {
   activity: string;
   interrupting: boolean;
   canSteer: boolean;
-  queue: { tabId: number; prompt: string; followup: boolean }[];
+  // `auto`: binder's own follow-up about background work, not the user's.
+  queue: { tabId: number; prompt: string; followup: boolean; auto?: boolean }[];
   steer: { tabId: number; prompt: string } | null;
   question: WireQuestion | null;
   childExit: { code: number | null; stderr: string[] } | null;
@@ -59,7 +61,7 @@ export type WireMeta = {
 
 export type WireState = WireMeta & { tabs: WireTab[] };
 
-type TabFields = { prompt: string; status: string; result: Turn['result'] | null; uuid: string | null; bash: boolean };
+type TabFields = { prompt: string; status: string; result: Turn['result'] | null; uuid: string | null; bash: boolean; auto: boolean };
 
 export type TabOp =
   | { op: 'set'; tab: WireTab }
@@ -99,7 +101,7 @@ export function wireBlock(b: Block, full = false): WireBlock {
 }
 
 function wireTurn(t: Turn): WireTurn {
-  return { prompt: t.prompt, status: t.status, blocks: t.blocks.map((b) => wireBlock(b)), result: t.result, uuid: t.uuid, bash: t.bash };
+  return { prompt: t.prompt, status: t.status, blocks: t.blocks.map((b) => wireBlock(b)), result: t.result, uuid: t.uuid, bash: t.bash, auto: t.auto };
 }
 
 export function wireTab(t: Tab): WireTab {
@@ -133,7 +135,7 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   activity: [(s) => s.state.activity, (s) => s.state.activity],
   interrupting: [(s) => s.state.interrupting, (s) => s.state.interrupting],
   canSteer: [(s) => s.state.canSteer, (s) => s.state.canSteer],
-  queue: [(s) => s.state.queue, (s) => s.state.queue.map((q) => ({ tabId: q.tabId, prompt: q.prompt, followup: q.followup }))],
+  queue: [(s) => s.state.queue, (s) => s.state.queue.map((q) => ({ tabId: q.tabId, prompt: q.prompt, followup: q.followup, ...(q.auto && { auto: true }) }))],
   steer: [(s) => s.state.steer, (s) => (s.state.steer ? { tabId: s.state.steer.tabId, prompt: s.state.steer.prompt } : null)],
   question: [(s) => s.state.question, (s) => wireQuestion(s.state.question)],
   childExit: [(s) => s.state.childExit, (s) => s.state.childExit ?? null],
@@ -148,7 +150,7 @@ export function wireState(src: Source): WireState {
 }
 
 function tabFields(t: Tab): TabFields {
-  return { prompt: t.prompt, status: t.status, result: t.result ?? null, uuid: t.uuid ?? null, bash: Boolean(t.bash) };
+  return { prompt: t.prompt, status: t.status, result: t.result ?? null, uuid: t.uuid ?? null, bash: Boolean(t.bash), auto: Boolean(t.auto) };
 }
 
 export function diffTabs(prev: Tab[], next: Tab[]): TabOp[] {
@@ -207,7 +209,7 @@ export function applyPatch(s: WireState, p: Patch): WireState {
       tabs = tabs.map((t) => {
         if (t.id !== op.id) return t;
         const f = op.fields;
-        const fields = { prompt: f.prompt, status: f.status, result: f.result ?? undefined, uuid: f.uuid ?? undefined, bash: f.bash || undefined };
+        const fields = { prompt: f.prompt, status: f.status, result: f.result ?? undefined, uuid: f.uuid ?? undefined, bash: f.bash || undefined, auto: f.auto || undefined };
         if (op.op === 'blocks') return { ...t, ...fields, blocks: t.blocks.slice(0, op.from).concat(op.blocks) };
         const blocks = t.blocks.map((b, i) => (i === op.index && b.kind !== 'tool_use' ? { ...b, text: b.text + op.text } : b));
         return { ...t, ...fields, blocks };

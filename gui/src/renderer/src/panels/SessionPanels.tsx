@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { firstLine, modelDisplayName } from '../lib/format';
+import type { BackgroundTask, ToolBlock, WireBlock, WireTab } from '@shared/wire';
+import { elapsed, firstLine, modelDisplayName } from '../lib/format';
 import { errText, request, toast } from '../store';
 import { Picker, type PickerItem } from '../components/Picker';
+import { toolLine } from '../components/Blocks';
 
 // binder's own panels for one session, over its transcript: /model, /effort,
-// /mcp, /chrome, /rewind and /artifacts. Each talks to the session's host.
+// /mcp, /chrome, /rewind, /artifacts and /tasks. Each talks to the session's host.
 
 type Common = { conn: string; close: () => void; active: boolean };
 
@@ -255,6 +257,131 @@ export function RewindPanel({ conn, close, active, onRewound }: Common & { onRew
 }
 
 type Artifact = { url: string; title: string; tabId: number };
+
+export const taskKind = (type: string) => (type === 'local_bash' ? 'shell' : type.replace(/^local_/, '').replace(/_/g, ' '));
+
+/** "agent · tab 1 · 12h 3m" */
+export function taskMeta(t: BackgroundTask, now: number): string {
+  return [taskKind(t.type), t.tabId !== undefined && `tab ${t.tabId}`, t.startedAt !== undefined && elapsed(Math.max(0, now - t.startedAt))].filter(Boolean).join(' · ');
+}
+
+/** A command's output as plain lines: escape sequences out, and of a line a progress bar redrew with \r, what shows last. */
+export function plainLines(output: string): string[] {
+  const lines = output
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .split('\n')
+    .map((l) => (l.split('\r').filter(Boolean).pop() ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ''));
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  return lines;
+}
+
+function findCall(tabs: WireTab[], id: string): ToolBlock | undefined {
+  const find = (blocks: WireBlock[]): ToolBlock | undefined => {
+    for (const b of blocks) {
+      if (b.kind !== 'tool_use') continue;
+      if (b.id === id) return b;
+      const hit = find(b.children);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  for (const tab of tabs) for (const turn of [tab, ...tab.earlier]) {
+    const hit = find(turn.blocks);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+const DETAIL_LINES = 14;
+
+// Under the /tasks list: the highlighted task's latest output. A shell's or
+// monitor's comes from the host every second; an agent's is its latest steps.
+function TaskDetail({ conn, task, tabs, cwd, onStop }: { conn: string; task: BackgroundTask; tabs: WireTab[]; cwd: string; onStop: () => void }) {
+  const agent = task.type === 'local_agent';
+  const [shell, setShell] = useState<{ lines: string[]; note: string } | null>(null);
+  useEffect(() => {
+    if (agent) return;
+    let live = true;
+    const read = () =>
+      request(conn, 'task_output', { taskId: task.id })
+        .then((r) => live && setShell({ lines: plainLines(String(r.output ?? '')), note: r.truncated ? `last 8 KB of ${Math.round(Number(r.totalBytes) / 1024)} KB` : '' }))
+        .catch((e) => live && setShell({ lines: [], note: errText(e) }));
+    void read();
+    const t = setInterval(read, 1000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [conn, task.id, agent]);
+
+  let lines: string[];
+  let note = '';
+  if (agent) {
+    const call = task.toolUseId ? findCall(tabs, task.toolUseId) : undefined;
+    lines = (call?.children ?? []).flatMap((b) => {
+      if (b.kind === 'tool_use') return [`⏺ ${toolLine(b, cwd)}`];
+      if (b.kind === 'text') return b.text.trim() ? [b.text.trim().split('\n')[0]] : [];
+      return [];
+    });
+    note = task.progress ?? '';
+  } else {
+    lines = shell?.lines ?? [];
+    note = shell ? shell.note : 'Reading its output…';
+  }
+  const shown = lines.slice(-DETAIL_LINES);
+  return (
+    <div className="task-detail">
+      <div className="task-detail-head">
+        <span>
+          {agent ? 'Latest steps' : 'Output'}
+          {note && <span className="note"> · {note}</span>}
+        </span>
+        <button onClick={onStop}>Stop</button>
+      </div>
+      <pre className="task-output">{shown.length ? shown.join('\n') : agent ? 'No steps yet' : shell ? 'No output yet' : ' '}</pre>
+    </div>
+  );
+}
+
+// /tasks: background shells and agents still running, with the highlighted
+// one's output under the list. Enter goes to the tab that started it, x stops it.
+export function TasksPanel({ conn, close, active, tasks, tabs, cwd, initial, onGoTo }: Common & { tasks: BackgroundTask[]; tabs: WireTab[]; cwd: string; initial?: string; onGoTo: (tabId: number) => void }) {
+  const now = Date.now();
+  const items: PickerItem[] = tasks.map((t) => ({ key: t.id, label: t.description, description: taskMeta(t, now), mark: '◷' }));
+  const find = (item: PickerItem | undefined) => tasks.find((t) => t.id === item?.key);
+  const stop = (t: BackgroundTask) =>
+    request(conn, 'stop_task', { taskId: t.id })
+      .then(() => toast(`Stopped ${t.description}`))
+      .catch((e) => toast(errText(e), true));
+  return (
+    <Picker
+      active={active}
+      title="Background tasks"
+      items={items}
+      initial={Math.max(0, tasks.findIndex((t) => t.id === initial))}
+      empty="No background tasks running"
+      onCancel={close}
+      onSelect={(item) => {
+        const t = find(item);
+        if (t?.tabId === undefined) return;
+        onGoTo(t.tabId);
+        close();
+      }}
+      onKey={(e, item) => {
+        const t = find(item);
+        if (e.key !== 'x' || e.metaKey || e.ctrlKey || !t) return false;
+        void stop(t);
+        return true;
+      }}
+      detail={(item) => {
+        const t = find(item);
+        return t ? <TaskDetail key={t.id} conn={conn} task={t} tabs={tabs} cwd={cwd} onStop={() => void stop(t)} /> : null;
+      }}
+      hint="↑↓ move · ⏎ go to its tab · x stop it · esc close"
+    />
+  );
+}
 
 export function ArtifactsPanel({ conn, close, active }: Common) {
   const [list, setList] = useState<Artifact[] | null>(null);

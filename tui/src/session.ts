@@ -69,7 +69,8 @@ export interface AgentSession extends EventEmitter<SessionEvents> {
   switchTo(sessionId: string, opts: SwitchOptions): void;
   movedTo(cwd: string): void;
   logLocal(marker: LocalMarker): void;
-  sendPrompt(prompt: string, tabId: number, images?: ImageAttachment[], followup?: boolean, context?: string): string;
+  // `auto`: binder's own follow-up, whose `prompt` is the turn's heading and `auto` what the model reads.
+  sendPrompt(prompt: string, tabId: number, images?: ImageAttachment[], followup?: boolean, context?: string, auto?: string): string;
   steer(prompt: string, tabId: number, images?: ImageAttachment[]): string;
   interrupt(): void;
   answerQuestion(req: PermissionRequest, answers: Record<string, string>): void;
@@ -233,11 +234,13 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
 
   // Images are sent with the message but not logged; replay shows the "[Image #n]" text.
   // `context` (bash mode output) goes ahead of the prompt but is not logged as
-  // part of it. Returns the message uuid, which rewind targets.
-  sendPrompt(prompt: string, tabId: number, images: ImageAttachment[] = [], followup = false, context = ''): string {
+  // part of it, nor is the text of binder's own follow-up (`auto`). Returns
+  // the message uuid, which rewind targets.
+  sendPrompt(prompt: string, tabId: number, images: ImageAttachment[] = [], followup = false, context = '', auto?: string): string {
     const uuid = randomUUID();
-    appendPrompt(this.id, { prompt, tabId, uuid, ...(followup && { kind: 'followup' as const }) });
-    this.proc?.sendPrompt(context ? `${context}\n\n${prompt}` : prompt, images, uuid);
+    appendPrompt(this.id, { prompt, tabId, uuid, ...(followup && { kind: 'followup' as const }), ...(auto !== undefined && { auto: true as const }) });
+    const text = auto ?? prompt;
+    this.proc?.sendPrompt(context ? `${context}\n\n${text}` : text, images, uuid);
     return uuid;
   }
 

@@ -59,6 +59,13 @@ icon from the TUI's pixel logo.
   each background task (what it is doing, its kind, the tab that started it, and how long it
   has run) and a status bar under it (folder, model and effort, permission mode, context size, and
   the 5-hour and 7-day usage).
+- **Background tasks:** a click on a task's row, or `/tasks`, lists them with the highlighted
+  one's output (a shell's last lines, an agent's latest steps); `Enter` goes to the tab that
+  started it, `x` or Stop stops it. `Ctrl+B` moves the running command or agent to the
+  background, as in Claude Code. When a task finishes while another tab's turn runs, Claude
+  sees its result there; once that turn ends, binder sends a follow-up into the tab that
+  started the task, so Claude carries on with it there, under a gold `Background task
+  finished: …` heading.
 - Open sessions come back on the next launch: live ones reattach, and the one on screen is
   resumed if its host had exited.
 - Outside the window: the Dock icon shows how many sessions are waiting for an answer and
@@ -88,6 +95,7 @@ The TUI's keys work the same way; `?` on an empty prompt lists them and `/help` 
 | `PgUp` / `PgDn`, `Home` / `End` | scroll the tab |
 | `Ctrl+E` | expand or collapse the work behind a response |
 | `Ctrl+O` | full tool output, thinking, and subagent detail |
+| `Ctrl+B` | move the running command or agent to the background (`/tasks` lists them) |
 | `Ctrl+V` | paste an image as `[Image #n]`, or text (`Cmd+V` and dropping files work too) |
 | `Ctrl+]` | open the latest artifact |
 | `Ctrl+R` | restart claude after it exits, or reopen a session that ended |

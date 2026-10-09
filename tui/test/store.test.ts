@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { initialState, reduce, nextToSend, tabText, type State } from '../src/store.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { logPath, replay } from '../src/eventLog.js';
 import type { ClaudeEvent } from '../src/events.js';
 import { FIXTURES } from './helpers.js';
 
@@ -301,7 +304,9 @@ describe('background work', () => {
     const idle = drive('background-bash.jsonl', (e) => e.type === 'result');
     expect(idle.running).toBeNull();
     // Dated by the message that started it, and placed in the tab whose turn did.
-    expect(idle.backgroundTasks).toEqual([{ id: 'bifp3kil2', type: 'local_bash', description: 'sleep 8; echo BG_DONE', tabId: 1, startedAt: Date.parse('2026-10-05T15:38:22.275Z') }]);
+    expect(idle.backgroundTasks).toEqual([
+      { id: 'bifp3kil2', type: 'local_bash', description: 'sleep 8; echo BG_DONE', toolUseId: 'toolu_014G5hS1HjaF65evYVYNt5hp', tabId: 1, startedAt: Date.parse('2026-10-05T15:38:22.275Z') },
+    ]);
 
     const s = drive('background-bash.jsonl');
     expect(s.tabs).toHaveLength(1);
@@ -332,29 +337,61 @@ describe('background work', () => {
   it("a prompt sent as background work finishes runs in its own tab, with the child's turn taken in", () => {
     const s = drive('background-race.jsonl');
     expect(s.tabs.map((t) => [t.id, t.earlier.length, t.status, !!t.auto])).toEqual([
-      [1, 1, 'done', true],
+      [1, 0, 'done', false],
       [2, 0, 'done', false],
     ]);
-    expect(tabText(s.tabs[0])).toBe('*Its result went to the turn in tab 2.*');
     expect(tabText(s.tabs[1])).toBe('PONG');
+    // The tab that launched the work carries on with it once the child is idle.
+    expect(nextToSend(s)).toMatchObject({ tabId: 1, prompt: 'Background task finished: sleep 8; echo BG_DONE', followup: true, auto: {} });
     expect(s.running).toBeNull();
     expect(s.unstarted).toBeUndefined();
   });
 
-  it("work that finishes during another tab's turn is taken into that turn, and the tab that launched it says so", () => {
-    const s = drive('background-midturn.jsonl');
+  it("work that finishes during another tab's turn is taken into that turn, then carries on in the tab that launched it", () => {
+    let s = drive('background-midturn.jsonl');
     expect(tabText(s.tabs[1])).toBe('FG_DONE');
-    expect(s.tabs[1].auto).toBeUndefined();
-    expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: sleep 8; echo BG_DONE', status: 'done' });
-    expect(tabText(s.tabs[0])).toBe('*Its result went to the turn in tab 2.*');
-    expect(s.tabs[0].earlier.map((t) => t.result?.text)).toEqual(['started']);
     expect(s.notices).toEqual([]);
+    // Tab 1 is as it was, with binder's own follow-up queued for it.
+    expect(s.tabs[0]).toMatchObject({ status: 'done', earlier: [], result: { text: 'started' } });
+    const next = nextToSend(s)!;
+    expect(next).toMatchObject({ tabId: 1, prompt: 'Background task finished: sleep 8; echo BG_DONE', followup: true });
+    expect(next.auto?.text).toMatch(/^\[binder\] Background task "sleep 8; echo BG_DONE" \(completed\) finished while you were working on a different request/);
+    s = reduce(s, { type: 'sent', tabId: 1, uuid: 'u-auto', auto: true });
+    expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: sleep 8; echo BG_DONE', status: 'running', uuid: 'u-auto' });
+    expect(s.queue).toEqual([]);
+  });
+
+  it('replays the follow-up as a turn of its own, and drops one never sent', () => {
+    process.env.BINDER_STATE_DIR = mkdtempSync(join(tmpdir(), 'binder-auto-'));
+    const lines = readFileSync(join(FIXTURES, 'background-midturn.jsonl'), 'utf8').trimEnd();
+    writeFileSync(logPath('unsent'), lines + '\n');
+    expect(replay('unsent').queue).toEqual([]);
+    const reply = [
+      { type: 'hc_prompt', prompt: 'Background task finished: sleep 8; echo BG_DONE', tabId: 1, kind: 'followup', auto: true, uuid: 'u-auto' },
+      { type: 'system', subtype: 'init', cwd: '/', model: 'm', permissionMode: 'default' },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'It printed BG_DONE.' }] }, parent_tool_use_id: null },
+      { type: 'result', subtype: 'success', is_error: false, duration_ms: 1, num_turns: 1, result: 'It printed BG_DONE.' },
+    ];
+    writeFileSync(logPath('sent'), lines + '\n' + reply.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    const s = replay('sent');
+    expect(s.queue).toEqual([]);
+    expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: sleep 8; echo BG_DONE', status: 'done', uuid: 'u-auto' });
+    expect(tabText(s.tabs[0])).toBe('It printed BG_DONE.');
+    expect(s.tabs[0].earlier.map((t) => t.result?.text)).toEqual(['started']);
   });
 
   it("names an agent's latest step while it runs", () => {
     const s = drive('background-agent.jsonl', (e) => e.subtype === 'task_progress');
     expect(s.backgroundTasks).toEqual([
-      { id: 'a643afef3b88add10', type: 'local_agent', description: 'slow echo', tabId: 1, startedAt: Date.parse('2026-10-05T15:38:22.640Z'), progress: 'Running Sleep for 6 seconds, then print AGENT_DONE' },
+      {
+        id: 'a643afef3b88add10',
+        type: 'local_agent',
+        description: 'slow echo',
+        toolUseId: 'toolu_01X6ku6MJvLUgp1vZCBj2a3x',
+        tabId: 1,
+        startedAt: Date.parse('2026-10-05T15:38:22.640Z'),
+        progress: 'Running Sleep for 6 seconds, then print AGENT_DONE',
+      },
     ]);
   });
 
@@ -393,18 +430,47 @@ describe('background work', () => {
 
     // Tab 1 starts a background agent and its turn ends; tab 2's turn is running.
     function agentThenTab2(): State {
-      let s = run(prompt(initialState('sid'), 1), [init, call('agent1', 'Agent', { description: 'Research', run_in_background: true }), toolResult('agent1'), say('launched'), result()]);
+      let s = run(prompt(initialState('sid'), 1), [
+        init,
+        call('agent1', 'Agent', { description: 'Research', run_in_background: true }),
+        toolResult('agent1'),
+        call('agent1b', 'Agent', { description: 'Survey', run_in_background: true }),
+        toolResult('agent1b'),
+        say('launched'),
+        result(),
+      ]);
       s = run(prompt(s, 2), [init, call('bash2', 'Bash', { command: 'make' })]);
       return s;
     }
 
-    it("puts an agent's report in the tab that launched it when another tab's turn takes it in", () => {
-      const s = run(agentThenTab2(), [finished('agent1', '## Findings\nAll good.'), finished('bash2', 'make'), toolResult('bash2'), say('built'), result()]);
-      expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: Research', status: 'done' });
-      expect(tabText(s.tabs[0])).toBe('*Its result went to the turn in tab 2.*\n\n## Findings\nAll good.');
-      // Tab 2's own foreground call leaves no note.
+    it('carries on in the tab that launched the work when another tab\'s turn takes it in, one follow-up for all of it', () => {
+      let s = run(agentThenTab2(), [finished('agent1', 'report'), finished('bash2', 'make'), toolResult('bash2')]);
+      expect(s.queue).toEqual([expect.objectContaining({ tabId: 1, prompt: 'Background task finished: Research', followup: true })]);
+      // Tab 1's other agent finishes later in the same turn: it joins the follow-up already queued.
+      s = run(s, [call('bash3', 'Bash', { command: 'make test' }), finished('agent1b', 'more'), toolResult('bash3'), say('built'), result()]);
+      // Tab 2's own foreground calls queue nothing.
       expect(s.tabs[1]).toMatchObject({ status: 'done', earlier: [] });
-      expect(s.tabs[1].auto).toBeUndefined();
+      expect(s.queue).toEqual([expect.objectContaining({ tabId: 1, prompt: 'Background tasks finished: Research, Survey', followup: true })]);
+      expect(s.queue[0].auto?.text).toContain('Background tasks "Research" (completed), "Survey" (completed) finished');
+    });
+
+    it('notes work stopped during another tab\'s turn in the tab that launched it, with nothing to carry on', () => {
+      const stopped = ev({ type: 'system', subtype: 'task_notification', task_id: 't-agent1', tool_use_id: 'agent1', status: 'stopped', summary: 'Research' });
+      const s = run(agentThenTab2(), [stopped, toolResult('bash2'), say('built'), result()]);
+      expect(s.queue).toEqual([]);
+      expect(s.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: Research (stopped)', status: 'done' });
+      expect(tabText(s.tabs[0])).toBe('*Stopped during the turn in tab 2.*');
+    });
+
+    it('says nothing about work the user stopped', () => {
+      let s = run(agentThenTab2(), [toolResult('bash2'), say('built'), result()]);
+      s = reduce(s, { type: 'task_stopping', taskId: 't-agent1' });
+      s = run(s, [ev({ type: 'system', subtype: 'task_notification', task_id: 't-agent1', tool_use_id: 'agent1', status: 'stopped', summary: 'Research' })]);
+      expect([s.notices, s.stopping]).toEqual([[], []]);
+      const before = s.tabs;
+      s = run(prompt(s, 3), [init, say('hi'), result()]);
+      expect(s.tabs.slice(0, 2)).toEqual(before);
+      expect(s.queue).toEqual([]);
     });
 
     it("sends work that finishes after the running turn's last tool result to the child's own turn, in the tab that launched it", () => {

@@ -499,6 +499,18 @@ kbd {
   margin-left: 8px;
 }
 
+/* Heads a turn about background work, started by Claude Code or binder rather than typed. */
+.auto-head {
+  color: var(--gold);
+  font-size: 13.5px;
+  font-weight: 500;
+  margin: 0 0 12px;
+}
+
+.auto-head.pending {
+  opacity: 0.75;
+}
+
 .queued-actions button {
   border: 0;
   background: none;
@@ -1173,6 +1185,14 @@ kbd {
   justify-content: space-between;
   gap: 12px;
   line-height: 1.7;
+  cursor: pointer;
+  border-radius: 5px;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.bg-task:hover {
+  background: var(--bg-hover);
 }
 
 .bg-task .what {
@@ -1749,6 +1769,48 @@ kbd {
 .picker-empty {
   color: var(--text-faint);
   padding: 10px 12px;
+}
+
+/* /tasks: the highlighted task's output, under the list. */
+.task-detail {
+  border-top: 1px solid var(--border);
+  padding: 10px 14px 4px;
+}
+
+.task-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+.task-detail-head button {
+  border: 0;
+  background: none;
+  color: var(--red);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+
+.task-detail-head button:hover {
+  background: var(--bg-hover);
+}
+
+.task-output {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg-code);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .picker-hint {

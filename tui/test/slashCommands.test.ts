@@ -12,7 +12,7 @@ const child = [
 describe('slash commands', () => {
   it("merges binder's own commands over the child's, sorted by name", () => {
     const all = mergeCommands(child);
-    expect(all.map((c) => c.name)).toEqual(['artifacts', 'cd', 'chrome', 'clear', 'compact', 'context', 'effort', 'exit', 'fork', 'help', 'markdown', 'mcp', 'model', 'resume', 'rewind', 'settings', 'vercel:deploy']);
+    expect(all.map((c) => c.name)).toEqual(['artifacts', 'cd', 'chrome', 'clear', 'compact', 'context', 'effort', 'exit', 'fork', 'help', 'markdown', 'mcp', 'model', 'resume', 'rewind', 'settings', 'tasks', 'vercel:deploy']);
     expect(all.find((c) => c.name === 'clear')?.description).toMatch(/new session/);
   });
 

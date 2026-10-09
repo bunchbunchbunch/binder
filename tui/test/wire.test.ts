@@ -74,6 +74,16 @@ describe('wire patches', () => {
     expect(state.messageAt).toEqual(expect.any(Number));
   });
 
+  it("mark binder's own follow-ups, and the turns about background work", () => {
+    const { client, state } = replayWithPatches('background-midturn.jsonl', 3, ['start it', 'run it']);
+    expect(client.queue).toEqual([{ tabId: 1, prompt: 'Background task finished: sleep 8; echo BG_DONE', followup: true, auto: true }]);
+    const sent = reduce(state, { type: 'sent', tabId: 1, uuid: 'u-auto', auto: true });
+    const patched = applyPatch(client, roundTrip(diff({ state, cwd: '/w' }, { state: sent, cwd: '/w' })!));
+    expect(patched.tabs[0]).toMatchObject({ auto: true, prompt: 'Background task finished: sleep 8; echo BG_DONE', status: 'running' });
+    expect(patched.tabs[0].earlier[0].auto).toBeUndefined();
+    expect(patched.queue).toEqual([]);
+  });
+
   it('carry a question and its answer', () => {
     let state = initialState('s1');
     const before: Source = { state, cwd: '/w' };

@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Text } from 'ink';
 import type { AgentSession } from '../session.js';
-import type { Tab, Turn } from '../store.js';
+import { findCall, type BackgroundTask, type Tab, type Turn } from '../store.js';
 import { Picker, type PickerItem } from './Picker.js';
+import { taskMeta } from './BackgroundTasks.js';
+import { toolSummary } from './toolSummary.js';
 import { openExternal, copyText } from '../openUrl.js';
 import { sessionArtifacts } from '../artifacts.js';
 import { currentBranch, listTranscripts, worktreePaths, type SessionSummary } from '../transcripts.js';
@@ -15,7 +18,7 @@ import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 // binder's own panels, shown in place of the transcript: /model, /effort,
-// /mcp, /chrome, /rewind, /artifacts, /resume, /settings, and a yes/no confirm.
+// /mcp, /chrome, /rewind, /artifacts, /tasks, /resume, /settings, and a yes/no confirm.
 
 type Common = { session: AgentSession; flash: (msg: string) => void; close: () => void };
 
@@ -277,6 +280,108 @@ export function RewindPanel({ session, close, tabs, onRewind }: Common & { tabs:
       onSelect={(i) => setTarget(targets.find((t) => t.uuid === i.key) ?? null)}
       onCancel={close}
       empty="no prompts to rewind to"
+    />
+  );
+}
+
+export type TaskOutput = { output: string; totalBytes: number; truncated: boolean };
+
+const DETAIL_ROWS = 8;
+
+// A command's output as plain lines: escape sequences out, and of a line a
+// progress bar redrew with \r, what shows last.
+export function plainLines(output: string): string[] {
+  const lines = output
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .split('\n')
+    .map((l) => (l.split('\r').filter(Boolean).pop() ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ''));
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  return lines;
+}
+
+// Under the /tasks list: the highlighted task's latest output. A shell's or
+// monitor's comes from the child every second; an agent's is its latest steps.
+function TaskDetail({ task, tabs, output }: { task: BackgroundTask; tabs: Tab[]; output: (taskId: string) => Promise<TaskOutput> }) {
+  const agent = task.type === 'local_agent';
+  const [shell, setShell] = useState<{ lines: string[]; note: string } | null>(null);
+  useEffect(() => {
+    if (agent) return;
+    let live = true;
+    const read = () =>
+      output(task.id)
+        .then((r) => live && setShell({ lines: plainLines(r.output), note: r.truncated ? `last 8 KB of ${Math.round(r.totalBytes / 1024)} KB` : '' }))
+        .catch((e) => live && setShell({ lines: [], note: errText(e) }));
+    void read();
+    const t = setInterval(read, 1000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [task.id, agent]);
+
+  let lines: string[];
+  let note = '';
+  if (agent) {
+    const call = task.toolUseId ? findCall(tabs, task.toolUseId) : undefined;
+    lines = (call?.children ?? []).flatMap((b) => {
+      if (b.kind === 'tool_use') return [`⏺ ${toolSummary(b.name, b.input, b.inputJson)}`];
+      if (b.kind === 'text') return b.text.trim() ? [b.text.trim().split('\n')[0]] : [];
+      return [];
+    });
+    if (task.progress) note = task.progress;
+  } else {
+    lines = shell?.lines ?? [];
+    note = shell ? shell.note : 'reading its output…';
+  }
+  const shown = lines.slice(-DETAIL_ROWS);
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text dimColor wrap="truncate-end">{`── ${agent ? 'latest steps' : 'output'}${note ? ` · ${note}` : ''}`}</Text>
+      {shown.length ? shown.map((l, i) => <Text key={i} wrap="truncate-end">{l || ' '}</Text>) : <Text dimColor>{agent ? 'no steps yet' : shell ? 'no output yet' : ' '}</Text>}
+    </Box>
+  );
+}
+
+// /tasks: background shells and agents still running, with the highlighted
+// one's output under the list. Enter goes to the tab that started it, x stops it.
+export function TasksPanel({ flash, close, tasks, tabs, output, onStop, onGoTo }: Common & {
+  tasks: BackgroundTask[];
+  tabs: Tab[];
+  output: (taskId: string) => Promise<TaskOutput>;
+  onStop: (taskId: string) => Promise<void>;
+  onGoTo: (tabId: number) => void;
+}) {
+  const now = Date.now();
+  const items: PickerItem[] = tasks.map((t) => ({ key: t.id, label: t.description, description: taskMeta(t, now), mark: '◷', markColor: '#7CC4FF' }));
+  const find = (item: PickerItem | undefined) => tasks.find((t) => t.id === item?.key);
+  return (
+    <Picker
+      title="Background tasks"
+      items={items}
+      rows={5}
+      empty="no background tasks running"
+      onCancel={close}
+      onSelect={(item) => {
+        const t = find(item);
+        if (t?.tabId === undefined) return;
+        onGoTo(t.tabId);
+        close();
+      }}
+      onKey={(input, _key, item) => {
+        const t = find(item);
+        if (input !== 'x' || !t) return false;
+        onStop(t.id).then(
+          () => flash(`Stopped ${t.description}`),
+          (e) => flash(errText(e)),
+        );
+        return true;
+      }}
+      detail={(item) => {
+        const t = find(item);
+        return t ? <TaskDetail key={t.id} task={t} tabs={tabs} output={output} /> : null;
+      }}
+      hint="↑↓ move · enter goes to its tab · x stops it · esc closes"
     />
   );
 }

@@ -9,6 +9,7 @@ import { Session } from '../src/session.js';
 import { SessionHost } from '../src/host.js';
 import { initialState } from '../src/store.js';
 import { logPath, replay } from '../src/eventLog.js';
+import { plainLines } from '../src/ui/panels.js';
 import { FAKE_BIN, FIXTURES } from './helpers.js';
 
 const ENTER = '\r';
@@ -29,7 +30,7 @@ async function until(check: () => boolean, ui: { lastFrame: () => string | undef
 }
 
 // Each test gets its own state dir, transcript dir and session.
-function start(name: string, opts: { cwd?: string; fixture?: string } = {}) {
+function start(name: string, opts: { cwd?: string; fixture?: string; delay?: number } = {}) {
   const stateDir = mkdtempSync(join(tmpdir(), `binder-${name}-`));
   const inputOut = join(stateDir, 'input.jsonl');
   const argsOut = join(stateDir, 'args.json');
@@ -41,6 +42,7 @@ function start(name: string, opts: { cwd?: string; fixture?: string } = {}) {
     BINDER_FAKE_ARGS_OUT: argsOut,
   });
   delete process.env.BINDER_FAKE_DELAY_MS;
+  if (opts.delay) process.env.BINDER_FAKE_DELAY_MS = String(opts.delay);
   delete process.env.BINDER_FAKE_CAPS;
   const cwd = opts.cwd ?? process.cwd();
   const configDir = join(stateDir, 'claude');
@@ -277,6 +279,53 @@ describe('/artifacts', () => {
     await t.key(ESC);
     await t.key('\x1d');
     await t.wait(() => t.frame().includes('No artifact published in this session yet'));
+    await t.stop();
+  });
+});
+
+describe('background tasks', () => {
+  it("shows a command's output as plain lines: no escape sequences, and what a progress bar drew last", () => {
+    expect(plainLines('\x1b[32mok\x1b[0m line\n10%\r50%\r100%\n\x1b]8;;http://x\x07link\x1b]8;;\x07\n\n')).toEqual(['ok line', '100%', 'link']);
+  });
+
+  it("/tasks shows a running shell's output and stops it", async () => {
+    const t = start('tasks', { fixture: 'background-bash.jsonl' });
+    await t.type('Start the background job');
+    await t.wait(() => t.frame().includes('◷ sleep 8; echo BG_DONE'));
+    await t.type('/tasks');
+    await t.wait(() => t.frame().includes('output of bifp3kil2'));
+    expect(t.frame()).toContain('Background tasks');
+    expect(t.frame()).toMatch(/◷ sleep 8; echo BG_DONE +shell · tab 1 · /);
+    expect(t.frame()).toContain('── output · last 8 KB of 20 KB');
+    expect(t.frame()).toContain('tick 2');
+    await t.key('x');
+    await t.wait(() => t.frame().includes('no background tasks running'));
+    expect(t.frame()).toContain('Stopped sleep 8; echo BG_DONE');
+    expect(t.requests('stop_task')).toEqual([{ subtype: 'stop_task', task_id: 'bifp3kil2' }]);
+    await t.key(ESC);
+    await t.wait(() => !t.frame().includes('Background tasks'));
+    expect(t.frame()).not.toContain('◷');
+    await t.stop();
+  });
+
+  it("Ctrl+B moves the running command to the background; the tab that launched finished work carries on with it", async () => {
+    const t = start('ctrlb', { fixture: 'background-midturn.jsonl', delay: 150 });
+    await t.type('Start the background job');
+    await t.wait(() => t.frame().includes('◷ sleep 8; echo BG_DONE'), 15000);
+    await t.wait(() => !t.frame().includes('esc to interrupt'), 15000);
+    await t.type('Run the foreground job');
+    await t.wait(() => t.frame().includes('ctrl+b to run in background'), 15000);
+    await t.key('\x02');
+    await t.wait(() => t.requests('background_tasks').length === 1);
+    await t.wait(() => t.frame().includes('Running in the background'));
+    // Tab 1's shell finished during tab 2's turn: a follow-up waits for tab 1.
+    await t.key('\x1b[1;5D'); // Ctrl+Left
+    await t.wait(() => t.frame().includes('Claude carries on with it here once the current turn ends'), 15000);
+    expect(t.frame()).toContain('⏺ Background task finished: sleep 8; echo BG_DONE');
+    // Then it goes to the model, with what binder asks of it.
+    await t.wait(() => t.sent().some((m) => m.type === 'user' && String(m.message.content).startsWith('[binder] Background task "sleep 8; echo BG_DONE" (completed)')), 15000);
+    await t.wait(() => !t.frame().includes('Claude carries on with it here'));
+    expect(t.frame()).toContain('⏺ Background task finished: sleep 8; echo BG_DONE');
     await t.stop();
   });
 });

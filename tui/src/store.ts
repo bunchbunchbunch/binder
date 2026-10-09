@@ -46,8 +46,10 @@ export type Tab = Turn & {
 };
 
 // A prompt waiting for the child to be idle: a new tab's first prompt, or a
-// follow-up for an existing tab.
-export type QueuedPrompt = { tabId: number; prompt: string; images: ImageAttachment[]; followup: boolean };
+// follow-up for an existing tab. `auto` marks binder's own follow-up about
+// background work another tab's turn took in: `prompt` heads the turn, and
+// `text` is what the model reads.
+export type QueuedPrompt = { tabId: number; prompt: string; images: ImageAttachment[]; followup: boolean; auto?: { text: string; notices: Notice[] } };
 
 export type Usage = NonNullable<RateLimitEvent['rate_limit_info']['unifiedWindows']>;
 
@@ -56,7 +58,8 @@ export type BackgroundTask = {
   id: string;
   type: string;
   description: string;
-  // The tab whose turn started it.
+  // The tool call that started it, and the tab whose turn made that call.
+  toolUseId?: string;
   tabId?: number;
   // When it started (ms), from the timestamp of the message that started it.
   startedAt?: number;
@@ -65,7 +68,7 @@ export type BackgroundTask = {
 };
 
 // Background work that finished, until a turn takes in its result.
-type Notice = { toolUseId: string; status: string; summary?: string };
+export type Notice = { toolUseId: string; status: string; summary?: string };
 
 export type Question = {
   requestId: string;
@@ -121,6 +124,8 @@ export type State = {
   backgroundTasks: BackgroundTask[];
   // The tool call that started each task not yet finished, by task id.
   taskCalls: Record<string, string>;
+  // Tasks the user asked to stop: their end needs no word from anyone.
+  stopping: string[];
   // When the latest message was written (ms), to date background tasks.
   messageAt?: number;
   // The next prompt Claude Code predicts after a turn, until anything is sent.
@@ -134,7 +139,10 @@ export type Action =
   | { type: 'steer'; tabId: number; prompt: string; uuid: string }
   // A prompt still queued for tab `tabId` becomes `text`; empty text drops it.
   | { type: 'edit_queued'; tabId: number; prompt: string; text: string }
-  | { type: 'sent'; tabId: number; uuid?: string }
+  // `auto`: whether the prompt sent was binder's own follow-up (replay names it).
+  | { type: 'sent'; tabId: number; uuid?: string; auto?: boolean }
+  // The user stopped a background task (stop_task).
+  | { type: 'task_stopping'; taskId: string }
   | { type: 'bash_start'; command: string; tabId?: number }
   | { type: 'bash_done'; tabId: number; output: string; exitCode: number | null }
   // Drop the turn sent with this uuid and every turn sent after it.
@@ -169,6 +177,7 @@ export function initialState(sessionId: string): State {
     notices: [],
     backgroundTasks: [],
     taskCalls: {},
+    stopping: [],
   };
 }
 
@@ -266,6 +275,24 @@ function mapTool(blocks: Block[], toolId: string, fn: (b: ToolBlock) => ToolBloc
   });
 }
 
+// Tool call `toolId` in any turn of `tabs`, a subagent's included.
+export function findCall(tabs: Tab[], toolId: string): ToolBlock | undefined {
+  const find = (blocks: Block[]): ToolBlock | undefined => {
+    for (const b of blocks) {
+      if (b.kind !== 'tool_use') continue;
+      if (b.id === toolId) return b;
+      const hit = find(b.children);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  for (const tab of tabs) for (const turn of [tab, ...tab.earlier]) {
+    const hit = find(turn.blocks);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 function hasTool(blocks: Block[], toolId: string): boolean {
   return blocks.some((b) => b.kind === 'tool_use' && (b.id === toolId || hasTool(b.children, toolId)));
 }
@@ -298,31 +325,67 @@ function lastRun(state: State): Tab | undefined {
   return state.tabs.filter((t) => !t.bash).reduce<Tab | undefined>((last, t) => (!last || (t.seq ?? -1) >= (last.seq ?? -1) ? t : last), undefined);
 }
 
+type Finished = { call: ToolBlock; status: string };
+
+// What a background call is called: its description, else its command.
+function taskName(call: ToolBlock): string {
+  const input = (call.input ?? {}) as { description?: unknown; command?: unknown };
+  return String(input.description || input.command || call.name);
+}
+
 // Heads a turn about background work that finished: what finished, and how
 // unless it completed.
-function finishedPrompt(finished: { call: ToolBlock; status: string }[]): string {
-  const names = finished.map(({ call, status }) => {
-    const input = (call.input ?? {}) as { description?: unknown; command?: unknown };
-    const name = String(input.description || input.command || call.name);
-    return status === 'completed' ? name : `${name} (${status})`;
-  });
+function finishedPrompt(finished: Finished[]): string {
+  const names = finished.map(({ call, status }) => (status === 'completed' ? taskName(call) : `${taskName(call)} (${status})`));
   return names.length ? `Background ${names.length > 1 ? 'tasks' : 'task'} finished: ${names.join(', ')}` : 'Background work finished';
 }
 
-// The turn in tab `tabId` took in the background work that finished. A tab
-// that launched some of it gets a turn of binder's own saying where its
-// result went, with an agent's report, since its own turn has long ended.
+// What binder asks the model when a turn in another tab took in background
+// work: to carry on with it in the tab that started it, where the user follows it.
+function followupText(finished: Finished[]): string {
+  const one = finished.length === 1;
+  const what = finished.map(({ call, status }) => `"${taskName(call)}" (${status})`).join(', ');
+  return (
+    `[binder] Background ${one ? 'task' : 'tasks'} ${what} finished while you were working on a different request, so ${one ? 'its result' : 'their results'} reached you there. ` +
+    `The user follows this work in the thread where ${one ? 'it' : 'they'} started, so continue it here: do what you said you would do once ${one ? 'it' : 'they'} finished. ` +
+    `If your other reply already did that, summarize the outcome in a few sentences instead of repeating the work.`
+  );
+}
+
+// Queues binder's own follow-up into `tab` about `notices`, or adds them to
+// the one already queued there.
+function queueFollowup(state: State, tab: Tab, notices: Notice[]): State {
+  const at = state.queue.findIndex((q) => q.tabId === tab.id && q.auto);
+  const all = (at >= 0 ? state.queue[at].auto!.notices : []).concat(notices);
+  const finished = all.flatMap((n): Finished[] => {
+    const l = launchedBy(state, n.toolUseId);
+    return l ? [{ call: l.call, status: n.status }] : [];
+  });
+  const item: QueuedPrompt = { tabId: tab.id, prompt: finishedPrompt(finished), images: [], followup: true, auto: { text: followupText(finished), notices: all } };
+  return { ...state, queue: at >= 0 ? state.queue.map((q, i) => (i === at ? item : q)) : state.queue.concat(item) };
+}
+
+// The turn in tab `tabId` took in the background work that finished. Work
+// another tab launched carries on there, in a turn of binder's own once the
+// child is idle; work that was stopped (by that turn, or by a time limit)
+// only gets a note there, as nothing is left to do.
 function takeIn(state: State, tabId: number): State {
   if (!state.notices.length) return state;
   let s: State = { ...state, notices: [] };
+  const elsewhere = new Map<number, Notice[]>();
   for (const n of state.notices) {
     const at = launchedBy(s, n.toolUseId);
     if (!at || at.tab.id === tabId) continue;
-    const report = (at.call.name === 'Agent' || at.call.name === 'Task') && n.summary ? `\n\n${n.summary}` : '';
-    const text = `*Its result went to the turn in tab ${tabId}.*${report}`;
+    if (n.status !== 'stopped') {
+      elsewhere.set(at.tab.id, (elsewhere.get(at.tab.id) ?? []).concat(n));
+      continue;
+    }
+    const why = n.summary && n.summary !== taskName(at.call) ? ` ${n.summary.replace(/\.?$/, '.')}` : '';
+    const text = `*Stopped during the turn in tab ${tabId}.${why}*`;
     const note: Tab = { ...startTurn(at.tab, finishedPrompt([{ call: at.call, status: n.status }])), status: 'done', blocks: [{ kind: 'text', text, final: true }], auto: true, seq: s.seq };
     s = { ...replaceTab(s, note), seq: s.seq + 1 };
   }
+  for (const [id, notices] of elsewhere) s = queueFollowup(s, s.tabs.find((t) => t.id === id)!, notices);
   return s;
 }
 
@@ -355,13 +418,13 @@ function dropLatest(state: State, tab: Tab): State {
   return { ...state, tabs, active: state.active > at ? state.active - 1 : Math.min(state.active, tabs.length - 1) };
 }
 
-// Each task's tab, once the tool call that started it is known.
+// Each task's call and tab, once the tool call that started it is known.
 function placeTasks(state: State, tasks: BackgroundTask[]): BackgroundTask[] {
   return tasks.map((t) => {
     const call = state.taskCalls[t.id];
-    if (t.tabId !== undefined || call === undefined) return t;
+    if (t.toolUseId !== undefined || call === undefined) return t;
     const tab = state.tabs.find((tab) => [tab, ...tab.earlier].some((turn) => hasTool(turn.blocks, call)));
-    return tab ? { ...t, tabId: tab.id } : t;
+    return { ...t, toolUseId: call, ...(tab && { tabId: tab.id }) };
   });
 }
 
@@ -474,8 +537,10 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
     if (sub === 'task_notification') {
       const n = ev as { task_id?: string; tool_use_id?: string; status?: string; summary?: string };
       const { [n.task_id ?? '']: _done, ...taskCalls } = state.taskCalls;
-      const next = { ...state, taskCalls };
-      return n.tool_use_id ? { ...next, notices: next.notices.concat({ toolUseId: n.tool_use_id, status: n.status ?? 'completed', summary: n.summary }) } : next;
+      // One the user stopped needs no word from anyone, and the child starts no turn about it.
+      const stopped = n.task_id !== undefined && state.stopping.includes(n.task_id);
+      const next = { ...state, taskCalls, stopping: stopped ? state.stopping.filter((id) => id !== n.task_id) : state.stopping };
+      return n.tool_use_id && !stopped ? { ...next, notices: next.notices.concat({ toolUseId: n.tool_use_id, status: n.status ?? 'completed', summary: n.summary }) } : next;
     }
     return state;
   }
@@ -590,7 +655,8 @@ export function reduce(state: State, action: Action): State {
     case 'steer':
       return { ...state, steer: { tabId: action.tabId, prompt: action.prompt, uuid: action.uuid }, suggestion: undefined };
     case 'edit_queued': {
-      const at = state.queue.findIndex((q) => q.tabId === action.tabId && q.prompt === action.prompt);
+      // Binder's own follow-ups are not the user's to edit.
+      const at = state.queue.findIndex((q) => q.tabId === action.tabId && q.prompt === action.prompt && !q.auto);
       if (at < 0) return state;
       const item = state.queue[at];
       if (action.text) {
@@ -607,13 +673,13 @@ export function reduce(state: State, action: Action): State {
       return { ...state, tabs, active, queue: state.queue.filter((q) => q.tabId !== item.tabId) };
     }
     case 'sent': {
-      const at = state.queue.findIndex((q) => q.tabId === action.tabId);
+      const at = state.queue.findIndex((q) => q.tabId === action.tabId && (action.auto === undefined || Boolean(q.auto) === action.auto));
       const tab = state.tabs.find((t) => t.id === action.tabId);
       if (at < 0 || !tab) return state;
       const item = state.queue[at];
       const started = item.followup ? startTurn(tab, item.prompt) : { ...tab, status: 'running' as const };
       return {
-        ...replaceTab(state, { ...started, uuid: action.uuid, seq: state.seq }),
+        ...replaceTab(state, { ...started, uuid: action.uuid, seq: state.seq, ...(item.auto && { auto: true }) }),
         queue: state.queue.filter((_, i) => i !== at),
         running: action.tabId,
         streamIndex: {},
@@ -622,6 +688,8 @@ export function reduce(state: State, action: Action): State {
         unstarted: state.canSteer && action.uuid ? action.uuid : undefined,
       };
     }
+    case 'task_stopping':
+      return state.stopping.includes(action.taskId) ? state : { ...state, stopping: state.stopping.concat(action.taskId) };
     case 'event':
       return applyEvent(state, action.event);
     case 'events':
@@ -653,6 +721,7 @@ export function reduce(state: State, action: Action): State {
         notices: [],
         backgroundTasks: [], // they ran inside the child
         taskCalls: {},
+        stopping: [],
         childExit: { code: action.code, stderr: action.stderr },
       };
     }

@@ -26,11 +26,13 @@ type Props = {
   initial?: number;
   empty?: string;
   rows?: number;
+  // Under the list: more about the highlighted item.
+  detail?: (item: PickerItem | undefined) => React.ReactNode;
 };
 
 // A bordered list for binder's own panels (/resume, /mcp, /model, ...):
 // Up/Down (PgUp/PgDn) move, Enter picks, Esc closes.
-export function Picker({ title, items, onSelect, onCancel, search, hint, subtitle, onKey, initial = 0, empty = 'nothing here', rows: maxRows = 10 }: Props) {
+export function Picker({ title, items, onSelect, onCancel, search, hint, subtitle, onKey, initial = 0, empty = 'nothing here', rows: maxRows = 10, detail }: Props) {
   const [cursor, setCursor] = useState(initial);
   // Fit the transcript area: the rest of the screen and the picker's own
   // frame take about 16 rows.
@@ -93,6 +95,7 @@ export function Picker({ title, items, onSelect, onCancel, search, hint, subtitl
       ) : (
         <Text dimColor>{'  ' + empty}</Text>
       )}
+      {detail?.(item)}
       <Text dimColor wrap="truncate-end">{hint ?? '↑↓ move · enter selects · esc closes'}</Text>
     </Box>
   );

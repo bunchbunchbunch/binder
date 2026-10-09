@@ -4,9 +4,9 @@ import { localCommand, visibleCommands, type LocalCommandName } from '../lib/com
 import { elapsed, plural, shortPath } from '../lib/format';
 import { turnVerb } from '../lib/work';
 import { closeConn, errText, getState, openSession, reopen, request, setActiveTab, setState, toast, useApp, type Conn } from '../store';
-import type { BackgroundTask } from '@shared/wire';
+import type { BackgroundTask, WireBlock } from '@shared/wire';
 import { ConfirmPanel } from './Picker';
-import { ArtifactsPanel, ChromePanel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, RewindPanel } from '../panels/SessionPanels';
+import { ArtifactsPanel, ChromePanel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
 import { Composer, type ComposerHandle } from './Composer';
 import { QuestionCard } from './QuestionCard';
 import { HelpView } from './Shortcuts';
@@ -19,7 +19,16 @@ import { Welcome } from './Welcome';
 // prompt (or a question in its place), and binder's panels. While it is the
 // session on screen it takes the TUI's keys.
 
-type Panel = { kind: 'model' | 'effort' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' } | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
+type Panel =
+  | { kind: 'model' | 'effort' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' }
+  // `taskId`: the task to show first.
+  | { kind: 'tasks'; taskId?: string }
+  | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
+
+// A command or agent the running turn waits on, which Ctrl+B moves to the background.
+function waitsOnForeground(blocks: WireBlock[]): boolean {
+  return blocks.some((b) => b.kind === 'tool_use' && b.final && !b.result && ['Bash', 'Agent', 'Task'].includes(b.name) && !(b.input as { run_in_background?: unknown }).run_in_background);
+}
 
 const DOUBLE_ESC_MS = 600;
 
@@ -83,7 +92,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   // The sticky prompt (config.json stickyPrompt), as in the TUI: the tab's
   // latest prompt, held under the tabs in place of the transcript's. Its
   // first 3 lines; Home or a click shows it whole, until the next scroll.
-  const pinned = sticky && tab && !help ? tab : null;
+  // The latest prompt sent, so not a turn about background work (as in the TUI).
+  const pinned = sticky && tab && !help ? ([...tab.earlier, tab].reverse().find((t) => !t.auto) ?? null) : null;
   const [full, setFull] = useState(false);
   const [cut, setCut] = useState(0);
   const pinnedText = useRef<HTMLDivElement>(null);
@@ -114,7 +124,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     const list: PendingPrompt[] = [];
     if (!s || !tab) return list;
     if (s.steer && s.steer.tabId === tab.id) list.push({ prompt: s.steer.prompt, sending: true });
-    for (const q of s.queue) if (q.followup && q.tabId === tab.id) list.push({ prompt: q.prompt, sending: false });
+    for (const q of s.queue) if (q.followup && q.tabId === tab.id) list.push({ prompt: q.prompt, sending: false, auto: q.auto });
     return list;
   }, [s?.steer, s?.queue, tab?.id]);
 
@@ -162,6 +172,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
       case 'settings':
         return onSettings();
       case 'artifacts':
+      case 'tasks':
       case 'mcp':
       case 'chrome':
         return setPanel({ kind: name });
@@ -195,7 +206,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
 
   // Up on an empty prompt, or a queued prompt's Edit, opens it in the
   // composer. Enter saves it in place (empty removes it); Esc leaves it as it was.
-  const lastQueued = s?.queue.filter((q) => q.tabId === tab?.id).at(-1);
+  const lastQueued = s?.queue.filter((q) => q.tabId === tab?.id && !q.auto).at(-1);
   const editQueued = (tabId: number, prompt: string) => {
     if (composer.current?.hasText()) return toast('Send or clear the prompt first', true);
     setEditing({ tabId, prompt });
@@ -272,6 +283,15 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
       return;
     }
     if (ctrl && e.key === 'o') return take(), setState((st) => ({ detail: !st.detail }));
+    // As in Claude Code: the running turn's commands and agents carry on in the background.
+    if (ctrl && e.key === 'b' && s.running !== null) {
+      take();
+      const moved = waitsOnForeground(s.tabs.find((t) => t.id === s.running)?.blocks ?? []);
+      return void request(c.id, 'background').then(
+        () => toast(moved ? 'Running in the background' : 'Nothing to move to the background'),
+        (err) => toast(errText(err), true),
+      );
+    }
     if (ctrl && e.key === 'e') return take(), toggleWork();
     if (ctrl && (e.key === 'n' || e.key === 'ArrowRight')) return take(), moveTab(1);
     if (ctrl && e.key === 'ArrowLeft') return take(), moveTab(-1);
@@ -326,6 +346,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
         return <RewindPanel {...common} onRewound={(text) => text && composer.current?.setText(text)} />;
       case 'artifacts':
         return <ArtifactsPanel {...common} />;
+      case 'tasks':
+        return <TasksPanel {...common} tasks={s?.backgroundTasks ?? []} tabs={s?.tabs ?? []} cwd={s?.cwd ?? ''} initial={p.taskId} onGoTo={(id) => setActiveTab(c.id, id)} />;
       case 'confirm':
         return (
           <ConfirmPanel
@@ -346,7 +368,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   const answering = Boolean(s?.question);
   const turnStatus =
     runningTab && s && !answering
-      ? `${turnVerb(runningTab.blocks, s.activity, s.interrupting)}… (${elapsed(Date.now() - (c.runningSince ?? Date.now()))} · esc to interrupt)${runningTab.id !== tab?.id ? ` · tab ${runningTab.id}` : ''}`
+      ? `${turnVerb(runningTab.blocks, s.activity, s.interrupting)}… (${elapsed(Date.now() - (c.runningSince ?? Date.now()))} · esc to interrupt${waitsOnForeground(runningTab.blocks) ? ' · ⌃B to run in background' : ''})${runningTab.id !== tab?.id ? ` · tab ${runningTab.id}` : ''}`
       : '';
   const commands = useMemo(() => visibleCommands(c.commands), [c.commands]);
 
@@ -407,7 +429,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
           {help ? (
             <HelpView commandCount={commands.length} />
           ) : s && tab ? (
-            <Transcript tab={tab} ctx={{ conn: c.id, tabId: tab.id, cwd: s.cwd, detail }} expanded={expanded} expandEarlier={expandEarlier} onToggle={toggleWork} pending={pending} pinned={Boolean(pinned)} queued={{ edit: (p) => editQueued(tab.id, p), remove: (p) => removeQueued(tab.id, p) }} />
+            <Transcript tab={tab} ctx={{ conn: c.id, tabId: tab.id, cwd: s.cwd, detail }} expanded={expanded} expandEarlier={expandEarlier} onToggle={toggleWork} pending={pending} pinned={pinned} queued={{ edit: (p) => editQueued(tab.id, p), remove: (p) => removeQueued(tab.id, p) }} />
           ) : s ? (
             <Welcome model={s.model} effort={s.effort} cwd={s.cwd} />
           ) : null}
@@ -421,7 +443,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
             </span>
             <span className="side">{s.queue.length ? `${s.queue.length} queued` : ''}</span>
           </div>
-          {s.backgroundTasks?.length ? <BackgroundTasks tasks={s.backgroundTasks} /> : null}
+          {s.backgroundTasks?.length ? <BackgroundTasks tasks={s.backgroundTasks} onOpen={(taskId) => setPanel({ kind: 'tasks', taskId })} /> : null}
           {s.question && (
             <QuestionCard
               key={s.question.requestId}
@@ -458,26 +480,28 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
 
 // Background shells and agents still running, one row each under the status
 // row: what each is doing, and its kind, tab and running time, so one that
-// hangs is plain to see.
+// hangs is plain to see. A click shows its output in /tasks.
 const BG_ROWS = 4;
 
-const taskKind = (type: string) => (type === 'local_bash' ? 'shell' : type.replace(/^local_/, '').replace(/_/g, ' '));
-
-function BackgroundTasks({ tasks }: { tasks: BackgroundTask[] }) {
+function BackgroundTasks({ tasks, onOpen }: { tasks: BackgroundTask[]; onOpen: (taskId?: string) => void }) {
   const shown = tasks.length > BG_ROWS ? tasks.slice(0, BG_ROWS - 1) : tasks;
   const now = Date.now();
   return (
     <div className="bg-tasks">
       {shown.map((t) => (
-        <div key={t.id} className="bg-task">
+        <div key={t.id} className="bg-task" onClick={() => onOpen(t.id)} title="Show its output (/tasks)">
           <span className="what">
             ◷ {t.description}
             {t.progress && <span className="step"> · {t.progress}</span>}
           </span>
-          <span className="meta">{[taskKind(t.type), t.tabId !== undefined && `tab ${t.tabId}`, t.startedAt !== undefined && elapsed(Math.max(0, now - t.startedAt))].filter(Boolean).join(' · ')}</span>
+          <span className="meta">{taskMeta(t, now)}</span>
         </div>
       ))}
-      {shown.length < tasks.length && <div className="bg-task more">+{plural(tasks.length - shown.length, 'more background task')}</div>}
+      {shown.length < tasks.length && (
+        <div className="bg-task more" onClick={() => onOpen()}>
+          +{plural(tasks.length - shown.length, 'more background task')}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import type { SlashCommand } from '@shared/wire';
 
 // Slash commands the app runs itself rather than sending to Claude Code
 // (bindertui runs the same set; its host lists them among the commands).
-export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'settings';
+export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'tasks' | 'settings';
 
 const LOCAL: Record<LocalCommandName, string[]> = {
   help: [],
@@ -17,6 +17,7 @@ const LOCAL: Record<LocalCommandName, string[]> = {
   effort: [],
   chrome: [],
   artifacts: [],
+  tasks: ['bashes'],
   settings: [],
 };
 

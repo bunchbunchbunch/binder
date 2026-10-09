@@ -325,10 +325,11 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
     appendLocal(this.id, marker);
   }
 
-  sendPrompt(prompt: string, tabId: number, images: ImageAttachment[] = [], followup = false, context = ''): string {
+  sendPrompt(prompt: string, tabId: number, images: ImageAttachment[] = [], followup = false, context = '', auto?: string): string {
     const uuid = randomUUID();
-    appendPrompt(this.id, { prompt, tabId, uuid, ...(followup && { kind: 'followup' as const }) });
-    this.startTurn(uuid, context ? `${context}\n\n${prompt}` : prompt, images);
+    appendPrompt(this.id, { prompt, tabId, uuid, ...(followup && { kind: 'followup' as const }), ...(auto !== undefined && { auto: true as const }) });
+    const text = auto ?? prompt;
+    this.startTurn(uuid, context ? `${context}\n\n${text}` : text, images);
     return uuid;
   }
 

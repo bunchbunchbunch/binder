@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { Box, Text, useApp, useInput, useWindowSize } from 'ink';
 import stringWidth from 'string-width';
 import type { SessionHost, RewindMode } from '../host.js';
-import { firstPrompt } from '../store.js';
+import { firstPrompt, type Block } from '../store.js';
 import { buildPayload, fallbackStatusLine, runStatusLine } from '../statusline.js';
 import { localCommand, type LocalCommandName, type SlashCommand } from '../slashCommands.js';
 import { addHistory, loadHistory } from '../history.js';
@@ -19,7 +19,7 @@ import { BackgroundTasks } from './BackgroundTasks.js';
 import { HelpView } from './HelpView.js';
 import { Shortcuts } from './Shortcuts.js';
 import { Welcome } from './Welcome.js';
-import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, SettingsPanel, rewindTargets } from './panels.js';
+import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, SettingsPanel, TasksPanel, rewindTargets } from './panels.js';
 import { SPINNER, elapsed, turnVerb } from './tabLayout.js';
 import { MARKDOWN_STYLES, markdownStyle, setMarkdownStyle, type MarkdownStyle } from './md/theme.js';
 
@@ -47,11 +47,16 @@ function permissionModeLine(mode?: string): { text: string; color: string } | un
 
 const DOUBLE_ESC_MS = 600;
 
+// A command or agent the running turn waits on, which Ctrl+B moves to the background.
+function waitsOnForeground(blocks: Block[]): boolean {
+  return blocks.some((b) => b.kind === 'tool_use' && b.final && !b.result && ['Bash', 'Agent', 'Task'].includes(b.name) && !(b.input as { run_in_background?: unknown }).run_in_background);
+}
+
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // binder's own panels, shown in place of the transcript.
 type Panel =
-  | { kind: 'resume' | 'mcp' | 'model' | 'effort' | 'chrome' | 'rewind' | 'artifacts' | 'settings' }
+  | { kind: 'resume' | 'mcp' | 'model' | 'effort' | 'chrome' | 'rewind' | 'artifacts' | 'tasks' | 'settings' }
   | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
 
 
@@ -243,6 +248,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
       case 'exit':
         return quit();
       case 'artifacts':
+      case 'tasks':
       case 'mcp':
       case 'chrome':
       case 'settings':
@@ -286,7 +292,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
 
   // Up on an empty prompt opens the active tab's last queued prompt in the
   // prompt. Enter saves it in place (empty removes it); Esc leaves it as it was.
-  const lastQueued = state.queue.filter((q) => q.tabId === active?.id).at(-1);
+  const lastQueued = state.queue.filter((q) => q.tabId === active?.id && !q.auto).at(-1);
   const editQueued = () => {
     if (!lastQueued) return;
     setEditing({ tabId: lastQueued.tabId, prompt: lastQueued.prompt });
@@ -341,6 +347,11 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
       return;
     }
     if (key.ctrl && input === 'o') return setDetail((d) => !d);
+    // As in Claude Code: the running turn's commands and agents carry on in the background.
+    if (key.ctrl && input === 'b' && running) {
+      const moved = waitsOnForeground(state.tabs.find((t) => t.id === state.running)?.blocks ?? []);
+      return void host.background().then(() => flash(moved ? 'Running in the background' : 'Nothing to move to the background'), (e) => flash(errText(e)));
+    }
     if ((key.ctrl && input === 'n') || (key.ctrl && key.rightArrow)) return dispatch({ type: 'select_relative', delta: 1 });
     if (key.ctrl && key.leftArrow) return dispatch({ type: 'select_relative', delta: -1 });
     // pi's keys: Ctrl+L picks a model, Ctrl+P / Shift+Ctrl+P cycle models, Shift+Tab cycles the effort level.
@@ -375,6 +386,17 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         return <RewindPanel {...common} tabs={state.tabs} onRewind={(t, mode) => void rewind(t, mode)} />;
       case 'artifacts':
         return <ArtifactsPanel {...common} tabs={state.tabs} />;
+      case 'tasks':
+        return (
+          <TasksPanel
+            {...common}
+            tasks={state.backgroundTasks}
+            tabs={state.tabs}
+            output={(id) => host.taskOutput(id)}
+            onStop={(id) => host.stopTask(id)}
+            onGoTo={(id) => dispatch({ type: 'select', index: state.tabs.findIndex((t) => t.id === id) })}
+          />
+        );
       case 'settings':
         return <SettingsPanel flash={flash} close={closePanel} onSticky={setSticky} onMarkdown={applyMarkdown} />;
       case 'confirm':
@@ -396,14 +418,14 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   // Like Claude Code's "✻ Thinking… (12s · esc to interrupt)" above the prompt.
   const turnStatus =
     runningTab && !answering
-      ? `${SPINNER[frame % SPINNER.length]} ${turnVerb(runningTab.blocks, state.activity, state.interrupting)}… (${elapsed(Date.now() - turnStart.current.at)} · esc to interrupt)`
+      ? `${SPINNER[frame % SPINNER.length]} ${turnVerb(runningTab.blocks, state.activity, state.interrupting)}… (${elapsed(Date.now() - turnStart.current.at)} · esc to interrupt${waitsOnForeground(runningTab.blocks) ? ' · ctrl+b to run in background' : ''})`
       : '';
   // Ctrl+Enter follow-ups for the active tab that have not started yet.
   const activeId = active?.id;
   const pendingFollowups = useMemo(() => {
     const list: PendingPrompt[] = [];
     if (state.steer && state.steer.tabId === activeId) list.push({ prompt: state.steer.prompt, sending: true });
-    for (const q of state.queue) if (q.followup && q.tabId === activeId) list.push({ prompt: q.prompt, sending: false });
+    for (const q of state.queue) if (q.followup && q.tabId === activeId) list.push({ prompt: q.prompt, sending: false, auto: Boolean(q.auto) });
     return list;
   }, [state.steer, state.queue, activeId]);
   // Rows the status line takes once wrapped, so a notice under it is never clipped.
