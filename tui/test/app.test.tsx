@@ -79,8 +79,8 @@ describe('App', () => {
     expect(frame).toContain('ok2'); // second answer, in the active (second) tab
     expect(frame).not.toMatch(/^ │ first prompt/m);
 
-    // Ctrl+P goes back to the first tab.
-    ui.stdin.write('\x10');
+    // Ctrl+Left goes back to the first tab.
+    ui.stdin.write('\x1b[1;5D');
     await until(() => plainFrame(ui).includes('│ first prompt'), 8000, () => ui.lastFrame());
 
     await session.close();
@@ -358,7 +358,7 @@ describe('shortcuts popup', () => {
     const { ui } = mount(session, sessionId, cwd);
     await until(() => plainFrame(ui).includes('? for shortcuts'), 8000, () => ui.lastFrame());
     ui.stdin.write('?');
-    await until(() => plainFrame(ui).includes('ctrl + n / p to switch tabs'), 8000, () => ui.lastFrame());
+    await until(() => plainFrame(ui).includes('ctrl + ← / → to switch tabs'), 8000, () => ui.lastFrame());
     const rows = plainFrame(ui).split('\n');
     const bottom = rows.findIndex((r) => r.startsWith('╰'));
     expect(bottom).toBeGreaterThan(0);
@@ -366,7 +366,7 @@ describe('shortcuts popup', () => {
     ui.stdin.write('\x1b');
     await sleep(60);
     ui.stdin.write('\x1b');
-    await until(() => !plainFrame(ui).includes('ctrl + n / p to switch tabs'), 8000, () => ui.lastFrame());
+    await until(() => !plainFrame(ui).includes('ctrl + ← / → to switch tabs'), 8000, () => ui.lastFrame());
     await sleep(200);
     expect(plainFrame(ui)).not.toContain('No prompts to rewind to yet');
     await session.close();
@@ -722,7 +722,7 @@ describe('slash commands', () => {
     const { ui } = mount(session, sessionId, cwd);
     await type(ui, '/help');
     await until(() => plainFrame(ui).includes('Type / to browse all'), 8000, () => ui.lastFrame());
-    expect(plainFrame(ui)).toContain('Ctrl+Enter');
+    expect(plainFrame(ui)).toContain('send the prompt in a new tab');
     expect(plainFrame(ui)).not.toMatch(/1 [●◌⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \/help/); // no tab, nothing sent
     ui.stdin.write(ESC);
     await until(() => !plainFrame(ui).includes('Type / to browse all'), 8000, () => ui.lastFrame());

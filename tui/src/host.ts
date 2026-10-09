@@ -13,7 +13,7 @@ import { CODEX_UNSUPPORTED, mergeCommands, type SlashCommand } from './slashComm
 import { runBash } from './bash.js';
 import { listTranscripts, replayTranscript, type SessionSummary } from './transcripts.js';
 import { childEnv, configDir as configDirFor } from './paths.js';
-import { saveCachedUsage } from './statusline.js';
+import { modelDisplayName, saveCachedUsage } from './statusline.js';
 import { liveElsewhere } from './remote/sockets.js';
 
 // Stream deltas arrive hundreds per second; they are applied in batches so
@@ -31,6 +31,9 @@ type HostEvents = {
   effort: [string];
   plan: [string];
 };
+
+// An entry of the child's `list_models`.
+type ModelInfo = { value: string; resolvedModel?: string; supportedEffortLevels?: string[] };
 
 export type CdResult = { status: 'ok'; cwd: string } | { status: 'needs_trust'; directory: string } | { status: 'rejected'; message: string };
 export type RewindMode = 'both' | 'conversation' | 'code';
@@ -57,6 +60,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
   private bashRuns = new Map<number, () => void>();
   private batch: ClaudeEvent[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
+  private cycling: Promise<unknown> = Promise.resolve();
 
   constructor(
     readonly session: AgentSession,
@@ -374,6 +378,51 @@ export class SessionHost extends EventEmitter<HostEvents> {
   noteEffort(level: string): void {
     this.effort = level;
     this.emit('effort', level);
+  }
+
+  /** Ctrl+P / Shift+Ctrl+P, as in pi: the next or previous model the agent offers. */
+  cycleModel(delta: 1 | -1): Promise<string> {
+    return this.oneAtATime(async () => {
+      const models = await this.models();
+      // Once per model: Claude Code lists "default" and its alias for the same one.
+      const ids = [...new Set(models.map((m) => m.resolvedModel ?? m.value))];
+      if (!ids.length) throw new Error('No models to switch to');
+      const current = this.modelEntry(models);
+      const i = current ? ids.indexOf(current.resolvedModel ?? current.value) : -1;
+      const id = ids[i < 0 ? (delta > 0 ? 0 : ids.length - 1) : (i + delta + ids.length) % ids.length];
+      await this.session.request('set_model', { model: models.find((m) => (m.resolvedModel ?? m.value) === id)!.value });
+      this.dispatch({ type: 'model', model: id });
+      return `Model: ${modelDisplayName(id)}`;
+    });
+  }
+
+  /** Shift+Tab, as in pi: the next effort level the current model supports. */
+  cycleEffort(): Promise<string> {
+    return this.oneAtATime(async () => {
+      const models = await this.models();
+      const m = this.modelEntry(models) ?? models[0];
+      const levels = m?.supportedEffortLevels ?? [];
+      if (!levels.length) throw new Error(`${modelDisplayName(m?.resolvedModel ?? m?.value ?? this.current.model)} has no effort levels`);
+      const level = levels[(levels.indexOf(this.effort ?? '') + 1) % levels.length];
+      await this.setEffort(level);
+      return `Effort: ${level}`;
+    });
+  }
+
+  private async models(): Promise<ModelInfo[]> {
+    return ((await this.session.request('list_models')).models as ModelInfo[] | undefined) ?? [];
+  }
+
+  private modelEntry(models: ModelInfo[]): ModelInfo | undefined {
+    const model = this.current.model;
+    return models.find((m) => m.resolvedModel === model || m.value === model);
+  }
+
+  // A key held down cycles one step per press: each waits for the last to land.
+  private oneAtATime(fn: () => Promise<string>): Promise<string> {
+    const run = this.cycling.then(fn);
+    this.cycling = run.catch(() => {});
+    return run;
   }
 
   // Claude in Chrome is decided when claude starts, so this restarts it on the same session.

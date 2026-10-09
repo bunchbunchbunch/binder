@@ -40,13 +40,13 @@ test('starts a session, streams a turn, and renders its Markdown and work', asyn
   await page.keyboard.press('Control+e');
   await expect(page.locator('.work')).toHaveCount(0);
 
-  // A second prompt opens a second tab; Ctrl+P and Option+2 move between them.
+  // A second prompt opens a second tab; Ctrl+Left and Option+2 move between them.
   await page.keyboard.type('Summarize it');
   await page.keyboard.press('Enter');
   await expect(page.locator('.tab')).toHaveCount(2);
   await expect(page.locator('.tab.active .num')).toHaveText('2');
   await expect(page.locator('.md strong').last()).toHaveText('display width', { timeout: 20000 });
-  await page.keyboard.press('Control+p');
+  await page.keyboard.press('Control+ArrowLeft');
   await expect(page.locator('.tab.active .num')).toHaveText('1');
   await page.keyboard.press('Alt+Digit2');
   await expect(page.locator('.tab.active .num')).toHaveText('2');
@@ -94,6 +94,22 @@ test('opens the command menu and the model panel', async () => {
   await expect(page.locator('.shortcuts')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.shortcuts')).toHaveCount(0);
+
+  // pi's keys: Ctrl+L opens the same panel, Ctrl+P / Shift+Ctrl+P cycle models, Shift+Tab the effort level.
+  await page.keyboard.press('Control+l');
+  await expect(picker.locator('.picker-title')).toContainText('Model');
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
+  const toast = page.locator('.toast');
+  await page.keyboard.press('Control+p');
+  await expect(toast).toHaveText('Model: Haiku 4.5');
+  await page.keyboard.press('Control+Shift+P');
+  await expect(toast).toHaveText('Model: Opus 5.5');
+  await page.keyboard.press('Shift+Tab');
+  await expect(toast).toHaveText('Effort: low');
+  await page.keyboard.press('Shift+Tab');
+  await expect(toast).toHaveText('Effort: medium');
+  await expect(page.locator('.composer textarea')).toBeFocused();
 });
 
 test('⌘/ and Help > Binder Guide open the guide; Esc closes it', async () => {

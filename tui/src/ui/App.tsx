@@ -342,7 +342,11 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
     }
     if (key.ctrl && input === 'o') return setDetail((d) => !d);
     if ((key.ctrl && input === 'n') || (key.ctrl && key.rightArrow)) return dispatch({ type: 'select_relative', delta: 1 });
-    if ((key.ctrl && input === 'p') || (key.ctrl && key.leftArrow)) return dispatch({ type: 'select_relative', delta: -1 });
+    if (key.ctrl && key.leftArrow) return dispatch({ type: 'select_relative', delta: -1 });
+    // pi's keys: Ctrl+L picks a model, Ctrl+P / Shift+Ctrl+P cycle models, Shift+Tab cycles the effort level.
+    if (key.ctrl && input === 'l') return runLocal('model', '');
+    if (key.ctrl && input === 'p') return void host.cycleModel(key.shift ? -1 : 1).then(flash, (e) => flash(errText(e)));
+    if (key.tab && key.shift && !menuOpen) return void host.cycleEffort().then(flash, (e) => flash(errText(e)));
     if (key.meta && /^[1-9]$/.test(input)) return dispatch({ type: 'select', index: Number(input) - 1 });
     if (state.childExit && key.ctrl && input === 'r') host.restart();
   });

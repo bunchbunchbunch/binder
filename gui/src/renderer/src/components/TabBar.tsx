@@ -56,7 +56,7 @@ export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: nu
   return (
     <div className="tabbar">
       {hidden.left > 0 && (
-        <button className="tab-more" onClick={() => page(-1)} title={`${hidden.left} more tab${hidden.left === 1 ? '' : 's'} to the left (Ctrl+P)`}>
+        <button className="tab-more" onClick={() => page(-1)} title={`${hidden.left} more tab${hidden.left === 1 ? '' : 's'} to the left (Ctrl+Left)`}>
           ‹ {hidden.left}
         </button>
       )}

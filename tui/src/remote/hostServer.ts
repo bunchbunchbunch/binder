@@ -311,6 +311,10 @@ export class HostServer {
         return void (await host.setModel(str(m.model, 'model')));
       case 'set_effort':
         return void (await host.setEffort(str(m.level, 'level')));
+      case 'cycle_model':
+        return { message: await host.cycleModel(m.delta === -1 ? -1 : 1) };
+      case 'cycle_effort':
+        return { message: await host.cycleEffort() };
       case 'mcp_status': {
         const r = await host.session.request('mcp_status');
         return { servers: r.mcpServers ?? [] };

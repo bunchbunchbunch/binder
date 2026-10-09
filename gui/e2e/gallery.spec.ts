@@ -74,7 +74,7 @@ test('narrow window, streaming, and many tabs', async () => {
     await page.keyboard.press('Enter');
   }
   await expect(page.locator('.tab')).toHaveCount(12, { timeout: 15000 });
-  await page.keyboard.press('Control+p');
+  await page.keyboard.press('Control+ArrowLeft');
   await page.screenshot({ path: g('many-tabs') });
   await page.keyboard.type('/');
   await page.screenshot({ path: g('slash-menu') });

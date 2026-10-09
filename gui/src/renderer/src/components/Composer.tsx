@@ -298,8 +298,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
       return submit(value, false);
     }
     if (e.key === 'Tab') {
+      // Shift+Tab is the session's: it cycles the effort level.
+      if (e.shiftKey) return;
       handled();
-      if (!e.shiftKey && !mods) void completeWord();
+      if (!mods) void completeWord();
       return;
     }
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !mods && !e.shiftKey) {

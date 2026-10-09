@@ -81,7 +81,10 @@ The TUI's keys work the same way; `?` on an empty prompt lists them and `/help` 
 | `/` | command menu: Claude Code's commands plus binder's own |
 | `!command` | bash mode, in its own tab |
 | `Esc` | interrupt the turn (or stop a bash command); twice when idle: rewind |
-| `Ctrl+N` / `Ctrl+P`, `Ctrl+Right` / `Ctrl+Left`, `Option+1-9` | switch tabs |
+| `Ctrl+Right` / `Ctrl+Left`, `Ctrl+N`, `Option+1-9` | switch tabs |
+| `Ctrl+L` | pick the model (`/model`) |
+| `Ctrl+P` / `Shift+Ctrl+P` | switch to the next / previous model, as in pi |
+| `Shift+Tab` | switch to the model's next effort level, as in pi |
 | `PgUp` / `PgDn`, `Home` / `End` | scroll the tab |
 | `Ctrl+E` | expand or collapse the work behind a response |
 | `Ctrl+O` | full tool output, thinking, and subagent detail |

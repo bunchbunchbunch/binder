@@ -154,6 +154,28 @@ describe('/model and /effort', () => {
     await t.wait(() => t.frame().includes('Effort: high'));
     await t.stop();
   });
+
+  it("take pi's keys: Ctrl+L picks, Ctrl+P / Shift+Ctrl+P cycle models, Shift+Tab cycles effort", async () => {
+    const t = start('pikeys');
+    await t.wait(() => t.frame().includes('Opus 5.5 with xhigh effort'));
+    await t.key('\x10'); // Ctrl+P
+    await t.wait(() => t.frame().includes('Model: Haiku 4.5'));
+    await t.key('\x1b[112;6u'); // Shift+Ctrl+P, in the kitty keyboard protocol
+    await t.wait(() => t.frame().includes('Model: Opus 5.5'));
+    expect(t.requests('set_model').map((r) => r.model)).toEqual(['haiku', 'default']);
+
+    await t.key('\x1b[Z'); // Shift+Tab
+    await t.wait(() => t.frame().includes('Effort: low'));
+    await t.key('\x1b[Z');
+    await t.wait(() => t.frame().includes('Effort: medium'));
+    expect(t.requests('apply_flag_settings').map((r) => r.settings.effortLevel)).toEqual(['low', 'medium']);
+
+    await t.key('\x0c'); // Ctrl+L
+    await t.wait(() => t.frame().includes('Default (recommended)') && t.frame().includes('Haiku 4.5'));
+    await t.key(ESC);
+    await t.wait(() => !t.frame().includes('Default (recommended)'));
+    await t.stop();
+  });
 });
 
 describe('/mcp', () => {

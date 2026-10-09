@@ -123,7 +123,10 @@ tested against Codex 0.160.1, the version `fixtures/codex/` was recorded with.
 | `Tab` or `Right` (empty prompt) | take the suggested next prompt. After a turn, Claude Code may predict what you will ask next; like Claude Code, binder shows it dim in the empty prompt. Typing replaces it, and `Enter` alone does not send it |
 | `@` | list files as you type a path after it |
 | `!command` | bash mode: binder runs the command in the session's directory and shows it in its own tab; the output goes to the model with your next prompt. `Esc` stops it |
-| `Ctrl+N` / `Ctrl+P`, `Ctrl+Right` / `Ctrl+Left` | next / previous tab |
+| `Ctrl+Right` / `Ctrl+Left` | next / previous tab. `Ctrl+N` also moves to the next tab; `Ctrl+P` cycles models instead, as in pi |
+| `Ctrl+L` | pick the model, as `/model` does (pi's key) |
+| `Ctrl+P` / `Shift+Ctrl+P` | switch to the next / previous model the agent offers, as in pi. A model listed twice (Claude Code's `default` and `opus`) counts once. `Shift+Ctrl+P` needs the kitty keyboard protocol; elsewhere it acts as `Ctrl+P` |
+| `Shift+Tab` | switch to the current model's next effort level, wrapping around, as pi does with its thinking level |
 | `Option+Left` / `Option+Right` | move the cursor by a word in the prompt |
 | `Shift+arrows`, `Shift+Option+arrows`, `Shift+Home/End` | select text (typing, paste, Backspace and Delete act on the selection) |
 | `Ctrl+C` with text selected | copy the selection, like Claude Code. `Cmd+C` works too in terminals that pass it on; iTerm2 keeps `Cmd+C` for its own mouse selection |
@@ -170,8 +173,8 @@ session or directory the child is on, or they need a picker:
 | `/fork [title]` (`/branch`) | continue in a new session forked from this one (`--fork-session`); the original stays resumable |
 | `/rewind` (`/checkpoint`, or `Esc` twice) | pick an earlier prompt, then restore the code, the conversation, or both to just before it. The prompt comes back in the composer. Binder turns on Claude Code's file checkpoints for this (`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`) |
 | `/cd <path>` | move the session to another directory (asks to trust a new folder first); a folder that `configDirs` gives another config dir is refused |
-| `/model [model]` | pick from the models the child offers, or set one by name |
-| `/effort [level]` | pick the effort level for this session, or set one by name |
+| `/model [model]` | pick from the models the child offers, or set one by name. `Ctrl+L` opens the same picker |
+| `/effort [level]` | pick the effort level for this session, or set one by name. `Shift+Tab` steps to the next one |
 | `/mcp` | MCP servers and their status; pick one to authenticate (opens the sign-in page), reconnect, enable or disable it, or clear its authentication |
 | `/chrome` | Claude in Chrome: extension status, enable or disable it for this session (restarts claude with `--chrome`), and links to reconnect or manage permissions |
 | `/artifacts` | artifacts published in this session: `Enter`/`o` opens one, `c` copies its link |

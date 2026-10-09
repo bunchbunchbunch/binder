@@ -177,7 +177,7 @@ describe('shortcuts popup', () => {
 
   it('draws the key in blue and the action dim', () => {
     const ui = render(<Shortcuts width={100} />); // ink-testing-library's width
-    expect(wordColors(ui.lastFrame() ?? '', 'ctrl + n / p')).toEqual(Array(12).fill('#7CC4FF'));
+    expect(wordColors(ui.lastFrame() ?? '', 'ctrl + ← / →')).toEqual(Array(12).fill('#7CC4FF'));
     expect(wordColors(ui.lastFrame() ?? '', 'to switch tabs')).toEqual(Array(14).fill(undefined));
     expect(ui.lastFrame()).toContain('\x1b[2m to switch tabs');
     ui.unmount();
@@ -194,7 +194,7 @@ describe('shortcuts popup', () => {
     );
     const rows = plain(ui.lastFrame()).split('\n');
     const box = rows.filter((r) => /^[╭│╰]/.test(r));
-    expect(box).toHaveLength(10); // 8 rows of shortcuts and the border
+    expect(box).toHaveLength(11); // 9 rows of shortcuts and the border
     for (const r of box) expect(r).toMatch(/^[╭│╰][^#]*[╮│╯]#*$/);
     ui.unmount();
   });

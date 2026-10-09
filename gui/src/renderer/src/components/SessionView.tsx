@@ -274,7 +274,11 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     if (ctrl && e.key === 'o') return take(), setState((st) => ({ detail: !st.detail }));
     if (ctrl && e.key === 'e') return take(), toggleWork();
     if (ctrl && (e.key === 'n' || e.key === 'ArrowRight')) return take(), moveTab(1);
-    if (ctrl && (e.key === 'p' || e.key === 'ArrowLeft')) return take(), moveTab(-1);
+    if (ctrl && e.key === 'ArrowLeft') return take(), moveTab(-1);
+    // pi's keys: Ctrl+L picks a model, Ctrl+P / Shift+Ctrl+P cycle models, Shift+Tab cycles the effort level.
+    if (ctrl && e.key === 'l') return take(), runLocal('model', '');
+    if (ctrl && e.key.toLowerCase() === 'p') return take(), void run('cycle_model', { delta: e.shiftKey ? -1 : 1 });
+    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) return take(), void run('cycle_effort');
     if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-9]$/.test(e.code)) {
       take();
       const t = s.tabs[Number(e.code.slice(5)) - 1];
