@@ -78,7 +78,7 @@ reply:
 | `t` | Fields | Result |
 |-----|--------|--------|
 | `list` | | `{sessions: Session[], roots: string[]}` |
-| `open` | `cwd`, `sessionId?`, `resume?`, `name?` | `{sessionId}`; starts the session if it is not live, then attaches |
+| `open` | `cwd`, `sessionId?`, `resume?`, `name?`, `create?` | `{sessionId}`; starts the session if it is not live, then attaches |
 | `attach` | `sessionId` | `{sessionId}`; a `snapshot` follows |
 | `detach` | | `{}` |
 
@@ -86,7 +86,8 @@ reply:
 inside an allowed root are listed, attachable or startable. For `open` without
 `sessionId`, the gateway makes a new id; with `sessionId` and `resume: false` it starts a
 new session with that id (so a client can link it first); with `resume: true` it resumes
-it. `name` names a new session.
+it. `name` names a new session. With `create: true` a missing `cwd` is made first (with
+any missing parents), as long as it would be inside an allowed root.
 
 The gateway sends `{"t":"detached","reason":"..."}` when the attached host goes away, and
 `{"t":"closed","reason":"..."}` just before it ends the connection itself (remote control

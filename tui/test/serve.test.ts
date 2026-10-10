@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import WebSocket from 'ws';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 // @ts-expect-error plain JavaScript, no types
 import { startRelay } from '../relay/relay.mjs';
@@ -36,7 +36,7 @@ beforeAll(() => {
   execFileSync('npm', ['run', 'build'], { cwd: ROOT, stdio: 'ignore' });
 }, 120000);
 
-async function setup(opts: { paused?: boolean } = {}) {
+async function setup(opts: { paused?: boolean; root?: string } = {}) {
   const dir = mkdtempSync('/tmp/bs-');
   process.env.BINDER_STATE_DIR = join(dir, 's');
   process.env.BINDER_CLAUDE_BIN = FAKE_BIN;
@@ -50,7 +50,7 @@ async function setup(opts: { paused?: boolean } = {}) {
   const out = process.stdout.write;
   process.stdout.write = (() => true) as typeof process.stdout.write;
   try {
-    remoteCommand(['init', '--relay', `ws://127.0.0.1:${relay.port}/relay/mac`, '--root', ROOT], config);
+    remoteCommand(['init', '--relay', `ws://127.0.0.1:${relay.port}/relay/mac`, '--root', opts.root ?? ROOT], config);
   } finally {
     process.stdout.write = out;
   }
@@ -167,6 +167,31 @@ describe('gateway end to end', () => {
     // Outside the roots: refused.
     expect((await p.request('open', { cwd: '/tmp' })).ok).toBe(false);
     expect(readFileSync(join(config, '..', 'remote.log'), 'utf8')).toContain('test-phone send "first prompt"');
+  }, 60000);
+
+  it('creates a missing folder inside the roots, only when asked', async () => {
+    const root = mkdtempSync('/tmp/bs-root-');
+    const { relay, config, phone: me, macPublic } = await setup({ root });
+    gateway(config).connect();
+    await connected(config);
+    const p = await phone(relay.port, me, macPublic);
+    const sessionId = '00000000-0000-4000-8000-0000000000e4';
+    cleanup.push(() => {
+      if (existsSync(lockPath(sessionId))) process.kill(Number(readFileSync(lockPath(sessionId), 'utf8')), 'SIGTERM');
+    });
+    const fresh = join(root, 'new', 'project');
+    expect((await p.request('open', { cwd: fresh, sessionId })).error).toMatch(/Not a directory/);
+    expect(existsSync(fresh)).toBe(false);
+
+    // A symlinked parent that leads outside the roots: refused, nothing made.
+    const outside = mkdtempSync('/tmp/bs-out-');
+    symlinkSync(outside, join(root, 'out'));
+    expect((await p.request('open', { cwd: join(root, 'out', 'x'), create: true })).error).toMatch(/outside the allowed folders/);
+    expect(existsSync(join(outside, 'x'))).toBe(false);
+
+    expect(await p.request('open', { cwd: fresh, sessionId, create: true })).toMatchObject({ ok: true, result: { sessionId } });
+    expect(statSync(fresh).isDirectory()).toBe(true);
+    expect(readFileSync(join(config, '..', 'remote.log'), 'utf8')).toContain(`created ${fresh}`);
   }, 60000);
 
   it('will not start a session another program already runs', async () => {

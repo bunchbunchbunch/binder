@@ -1,9 +1,9 @@
 import WebSocket from 'ws';
 import { connect, type Socket } from 'node:net';
-import { appendFileSync, existsSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, unlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { Handshake, Opener, fingerprint, seal, type CipherState } from './noise.js';
@@ -182,6 +182,13 @@ function notify(title: string, text: string): void {
   }).unref();
 }
 
+/** Where `dir`, which may not exist yet, really is: its nearest existing ancestor's real path plus the rest. */
+function realTarget(dir: string): string {
+  let base = dir;
+  while (!existsSync(base)) base = dirname(base);
+  return join(realpathSync(base), relative(base, dir));
+}
+
 type Msg = Record<string, unknown> & { t?: string; id?: number };
 
 class Client {
@@ -356,6 +363,12 @@ class Client {
   private async open(id: number | undefined, m: Msg, cfg: RemoteConfig): Promise<void> {
     if (typeof m.cwd !== 'string') throw new Error('cwd must be a string');
     const dir = resolve(expandHome(m.cwd));
+    if (m.create === true && !existsSync(dir)) {
+      // Check where it would land first: a symlinked parent can lead outside the roots.
+      if (!insideRoots(realTarget(dir), cfg.roots)) throw new Error(`${dir} is outside the allowed folders`);
+      mkdirSync(dir, { recursive: true });
+      this.gw.log(`${this.label} created ${dir}`);
+    }
     if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`Not a directory: ${dir}`);
     if (!insideRoots(dir, cfg.roots)) throw new Error(`${dir} is outside the allowed folders`);
     const sessionId = m.sessionId === undefined ? randomUUID() : m.sessionId;
