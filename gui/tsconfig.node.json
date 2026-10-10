@@ -20,6 +20,7 @@
     "playwright.config.ts",
     "src/main",
     "src/preload/index.ts",
+    "src/preload/pane.ts",
     "src/shared"
   ]
 }

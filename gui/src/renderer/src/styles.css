@@ -303,6 +303,29 @@ kbd {
   margin: 8px 0 4px 12px;
 }
 
+/* Where a web pane's page (a view over the window) goes. */
+.pane-web {
+  flex: 1;
+  min-height: 0;
+}
+
+.pane-link {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 6px 9px;
+  font: inherit;
+  outline: 0;
+}
+
+.pane-link:focus {
+  border-color: var(--accent);
+}
+
 .app.no-sidebar .titlebar {
   padding-left: 84px;
 }

@@ -4,7 +4,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   main: {},
-  preload: {},
+  preload: {
+    // The window's preload, and a web pane page's (window.binderPane).
+    build: { rollupOptions: { input: { index: resolve('src/preload/index.ts'), pane: resolve('src/preload/pane.ts') } } },
+  },
   renderer: {
     resolve: { alias: { '@shared': resolve('src/shared') } },
     plugins: [react()],

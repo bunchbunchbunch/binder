@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { ControlReply, ControlRequest, OpenRequest, SessionRow, SidebarConfig, SidebarScriptInput } from '@shared/api';
+import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, SessionRow, SidebarConfig, SidebarScriptInput } from '@shared/api';
 import { applyPatch, type HostMessage, type SlashCommand, type WireState } from '@shared/wire';
 import { sessionFields, sessionStatus, sidebarTemplates, usesField, type SessionFacts } from './lib/sidebarText';
 
@@ -40,6 +40,8 @@ export type AppState = {
   conns: Conn[];
   // config.json's panes, by name; they come before the sessions (⌘1-9 count them first).
   panes: string[];
+  // The panes that show a web page rather than run a program.
+  webPanes: string[];
   // What is on screen: a connection id, or a pane's paneId().
   active: string | null;
   sessions: SessionRow[];
@@ -53,7 +55,7 @@ export type AppState = {
   toast: Toast | null;
 };
 
-let state: AppState = { conns: [], panes: [], active: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, sidebar: {}, toast: null };
+let state: AppState = { conns: [], panes: [], webPanes: [], active: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, sidebar: {}, toast: null };
 const listeners = new Set<() => void>();
 
 export const getState = () => state;
@@ -335,8 +337,9 @@ subscribe(() => {
  * first pane when no session is.
  */
 export async function restoreLayout(): Promise<void> {
-  const [layout, panes] = await Promise.all([window.binder.loadLayout(), window.binder.panes().catch((): string[] => []), refreshSessions()]);
-  setState({ panes });
+  const [layout, infos] = await Promise.all([window.binder.loadLayout(), window.binder.panes().catch((): PaneInfo[] => []), refreshSessions()]);
+  const panes = infos.map((p) => p.name);
+  setState({ panes, webPanes: infos.filter((p) => p.web).map((p) => p.name) });
   const live = new Set(state.sessions.filter((r) => r.live).map((r) => r.id));
   for (const o of layout.open) {
     if (o.sessionId !== layout.active && !live.has(o.sessionId)) continue;

@@ -7,6 +7,8 @@ import { createInterface } from 'node:readline';
 import type { SessionRow, Settings, SettingsPatch, SidebarConfig, SidebarScriptInput } from '../shared/api';
 
 export type PaneConfig = { name: string; command: string; cwd?: string };
+// A web pane: a page (http or https) rather than a program.
+export type WebPaneConfig = { name: string; url: string };
 
 // How the app finds and runs bindertui's `binder`. An app started from the
 // Dock gets launchd's bare environment, so the user's login shell supplies
@@ -160,8 +162,10 @@ export function runSidebarScript(env: NodeJS.ProcessEnv, input: SidebarScriptInp
   });
 }
 
-/** config.json's `panes`: programs that run in a terminal beside the sessions. */
-export function readPanes(env: NodeJS.ProcessEnv): PaneConfig[] {
+const webUrl = (v: unknown): v is string => typeof v === 'string' && URL.canParse(v) && /^https?:$/.test(new URL(v).protocol);
+
+/** config.json's `panes`: programs that run in a terminal beside the sessions, and web pages. */
+export function readPanes(env: NodeJS.ProcessEnv): (PaneConfig | WebPaneConfig)[] {
   let panes: unknown;
   try {
     panes = readConfig(configPath(env)).panes;
@@ -169,9 +173,11 @@ export function readPanes(env: NodeJS.ProcessEnv): PaneConfig[] {
     return [];
   }
   if (!Array.isArray(panes)) return [];
-  return panes
-    .filter((p): p is PaneConfig => typeof p?.name === 'string' && typeof p.command === 'string')
-    .map(({ name, command, cwd }) => ({ name, command, ...(typeof cwd === 'string' && { cwd }) }));
+  return panes.flatMap((p): (PaneConfig | WebPaneConfig)[] => {
+    if (typeof p?.name !== 'string') return [];
+    if (typeof p.command === 'string') return [{ name: p.name, command: p.command, ...(typeof p.cwd === 'string' && { cwd: p.cwd }) }];
+    return webUrl(p.url) ? [{ name: p.name, url: p.url }] : [];
+  });
 }
 
 /**

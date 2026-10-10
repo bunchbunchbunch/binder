@@ -213,6 +213,54 @@ printf '%s\n' '{"t":"close","sessionId":"<uuid>","show":"Todos"}' | nc -U "$BIND
 So a task list in a pane can open a session for a task, and a skill in that session can close
 it again and bring the list back when the task is done.
 
+A pane can show a web page instead of running a program: give it a `url` (http or https;
+anything else is ignored) in place of `command`.
+
+```json
+"panes": [{ "name": "Todo GUI", "url": "https://example.com/desk" }]
+```
+
+It sits in the sidebar and counts for `⌘1` to `⌘9` as any pane does, and the control socket's
+`show` can name it. The page loads when the app starts and stays loaded while the app runs,
+with cookies of its own that last between launches.
+
+- **Keys and focus:** selecting the pane gives the page the keyboard, and the page keeps its
+  own focused field. Every key goes to the page except the app's: `⌘1` to `⌘9`, `⌘⇧[` /
+  `⌘⇧]`, `⌘K`, `⌘N`, `⌘W`, `⌘,`, `⌘/` and `⌃⌘S`. So `⌘C`, `⌘V`, `⌘X`, `⌘A` and `⌘Z` edit the
+  page's fields as usual. Another view, or a panel such as `⌘K`, takes the keyboard back to
+  the app.
+- **Its origin only:** the page stays on its URL's origin. Links elsewhere, and new windows,
+  open in your browser. It has no Node access and gets no camera, microphone, location or
+  notifications.
+- **Signing in:** when the page does not load (a server that drops connections until you
+  sign in, say), the pane shows the error. `Enter` tries again. Paste a link on the page's
+  origin into the field there (a sign-in link that sets a cookie) and press `Enter`: it opens
+  in the pane, then the page loads. Links to other origins are refused.
+
+The page reaches the app through `window.binderPane`, and nothing else. Each call but `onShow`
+returns a promise, and rejects when the page is not on the pane's origin.
+
+- `home()`: your home folder, as an absolute path.
+- `open({ cwd, sessionId, resume?, draft?, name? })`: the control socket's `open`, so it shows
+  the session, switching to it if the app has it open. `cwd` is an absolute path to a folder
+  inside home (normalized, so a trailing slash is fine) and `sessionId` a UUID. Without
+  `resume` a new session starts under that id, with `draft` in its prompt, unsent, and `name`
+  as claude's `-n`; `"resume": true` resumes it. A page cannot pass other claude flags. `draft`
+  is at most 25000 characters and `name` 500.
+- `completeFolder(input)`: a folder field's `Tab`, as in a terminal: `{ value, options }`.
+  `~/` and relative paths are read from home. One match completes with a trailing slash;
+  several extend `value` to their common prefix and come back in `options` (folder names,
+  sorted). Dot-folders show once a `.` is typed, and symlinks to folders count.
+- `missingFolder(input)`: the absolute path a folder field names when nothing is there yet,
+  else `null` (blank, or it exists). `~` is home, and a relative path is under it.
+- `makeFolder(path)`: creates the folder and any missing parents.
+- `onShow(callback)`: calls `callback` each time the pane comes on screen (the sidebar,
+  `⌘1-9`, or the control socket's `close` with `show`), and returns a function that stops it.
+  A hidden pane's page gets no `visibilitychange` or `blur`, so this is how it knows to refresh.
+
+Every path is normalized (`..` too) and must land inside home: outside it, `completeFolder`
+offers nothing and the others reject. `makeFolder` only makes folders.
+
 ## How it works
 
 - `src/main/` is Electron's main process. `binder.ts` reads the login shell's environment once,
@@ -221,19 +269,23 @@ it again and bring the list back when the task is done.
   session's folder when no host serves it. `hostConnection.ts` is one attached viewer: JSON lines
   over the socket, replies matched to requests, everything else forwarded to the window.
   `panes.ts` runs the panes' programs in ptys (node-pty), and `control.ts` serves the control
-  socket, passing requests to the window to carry out.
-- `src/preload/` exposes that as `window.binder`; the window has no Node access.
+  socket, passing requests to the window to carry out. `webPanes.ts` shows web panes' pages,
+  each in a WebContentsView over the window, and passes the window its `⌘` keys from them;
+  `paneBridge.ts` checks what a page asks through `window.binderPane`.
+- `src/preload/` exposes that as `window.binder`; the window has no Node access. A web pane's
+  page gets `src/preload/pane.ts` instead: `window.binderPane`.
 - `src/shared/wire.ts` mirrors the TUI's protocol types and applies its patches.
 - `src/renderer/` is React. `store.ts` keeps each connection's state from the snapshot and
   patches; `components/SessionView.tsx` carries the TUI's keymap; `components/Markdown.tsx`
   renders responses with react-markdown, remark-gfm and highlight.js; `components/PaneView.tsx`
-  is a pane's terminal (xterm.js).
+  is a pane's terminal (xterm.js), and `components/WebPaneView.tsx` holds a web pane's place
+  (its page's view goes over it) and says why the page did not load.
 
 ## Tests
 
 ```sh
 npm run typecheck
-npm test                        # unit tests: patches, work folding, diff, commands, control requests
+npm test                        # unit tests: patches, work folding, diff, commands, control requests, web panes
 npm run e2e                     # builds, then drives the real app with Playwright
 WINDOW_SHOTS=1 npx playwright test window   # captures the real window in light and dark mode
 REVIEW_SHOTS=1 npx playwright test gallery  # screenshots of other states, for design reviews

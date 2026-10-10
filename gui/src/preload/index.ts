@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { BinderApi, ControlRequest, PaneEvent } from '../shared/api';
+import type { BinderApi, ControlRequest, PaneEvent, WebPaneEvent } from '../shared/api';
+import type { KeyDesc } from '../shared/keys';
 import type { HostMessage } from '../shared/wire';
 
 // The window's only way to the main process: `window.binder`.
@@ -46,6 +47,19 @@ const api: BinderApi = {
     const listener = (_e: IpcRendererEvent, name: string, e: PaneEvent) => cb(name, e);
     ipcRenderer.on('pane', listener);
     return () => void ipcRenderer.off('pane', listener);
+  },
+  webPaneStart: (name) => ipcRenderer.invoke('webPaneStart', name),
+  webPaneLayout: (name, box, show) => ipcRenderer.send('webPaneLayout', name, box, show),
+  webPaneLoad: (name, url) => ipcRenderer.invoke('webPaneLoad', name, url),
+  onWebPane: (cb) => {
+    const listener = (_e: IpcRendererEvent, name: string, e: WebPaneEvent) => cb(name, e);
+    ipcRenderer.on('webPane', listener);
+    return () => void ipcRenderer.off('webPane', listener);
+  },
+  onAppKey: (cb) => {
+    const listener = (_e: IpcRendererEvent, k: KeyDesc) => cb(k);
+    ipcRenderer.on('appKey', listener);
+    return () => void ipcRenderer.off('appKey', listener);
   },
   onControl: (cb) => {
     const listener = (_e: IpcRendererEvent, id: number, req: ControlRequest) => ipcRenderer.send('controlReply', id, cb(req));

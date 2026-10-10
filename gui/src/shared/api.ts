@@ -1,3 +1,4 @@
+import type { KeyDesc } from './keys';
 import type { HostMessage } from './wire';
 
 // What the window can ask of the main process (src/preload/index.ts exposes
@@ -31,6 +32,47 @@ export type ControlReply = { ok: true; closed?: boolean } | { ok: false; error: 
 
 // A pane's program printed something, or exited.
 export type PaneEvent = { t: 'data'; data: string } | { t: 'exit'; code: number };
+
+// A pane in config.json; `web`: it shows a page (its `url`) rather than running a program.
+export type PaneInfo = { name: string; web: boolean };
+
+// A web pane's page failed to load (why), or loaded after failing.
+export type WebPaneEvent = { t: 'failed'; error: string } | { t: 'loaded' };
+
+// A box in the window, in CSS pixels.
+export type Rect = { x: number; y: number; width: number; height: number };
+
+/**
+ * What a web pane's page gets as `window.binderPane` (src/preload/pane.ts).
+ * The page comes from a server, so the main process checks every call
+ * (src/main/paneBridge.ts).
+ */
+export interface BinderPane {
+  /** The user's home directory, absolute. */
+  home(): Promise<string>;
+  /**
+   * Open a session in the app, as the control socket's `open` does (switching to it if the
+   * app has it open already). Fresh session: resume false/absent, a new uuid sessionId, the
+   * draft left unsent in the prompt, and name -> args ["-n", name]. Resume: resume true.
+   */
+  open(req: { cwd: string; sessionId: string; resume?: boolean; draft?: string; name?: string }): Promise<void>;
+  /**
+   * Shell-style folder completion, like a terminal's tab: `~/` and relative paths are read
+   * from home. One match completes with a trailing slash; several extend to their common
+   * prefix and come back in `options` (folder names, sorted). Dot-folders only once a "."
+   * is typed. Symlinks to folders count. Unreadable = no matches.
+   */
+  completeFolder(input: string): Promise<{ value: string; options: string[] }>;
+  /** The absolute path a folder field names when nothing exists there yet, else null (blank or exists). `~` is home, relative is under home. */
+  missingFolder(input: string): Promise<string | null>;
+  /** Create the folder and any missing parents. */
+  makeFolder(path: string): Promise<void>;
+  /**
+   * Calls `cb` each time the pane comes on screen. A hidden view's page stays "visible" and
+   * focused as far as it can tell, so this is how it knows to refresh. Returns an unsubscribe.
+   */
+  onShow(cb: () => void): () => void;
+}
 
 export type ImageAttachment = { mediaType: string; data: string };
 
@@ -93,13 +135,22 @@ export type BinderApi = {
   /** Help > Binder Guide (⌘/) in the menu bar. */
   onOpenGuide(cb: () => void): () => void;
   saveLayout(layout: SavedLayout): Promise<void>;
-  /** The names of config.json's panes, in order. */
-  panes(): Promise<string[]>;
+  /** config.json's panes, in order. */
+  panes(): Promise<PaneInfo[]>;
   /** Starts pane `name`'s program at this size, unless it runs; resolves with what it has printed so far. */
   paneStart(name: string, cols: number, rows: number): Promise<string>;
   paneInput(name: string, data: string): void;
   paneResize(name: string, cols: number, rows: number): void;
   onPane(cb: (name: string, e: PaneEvent) => void): () => void;
+  /** Loads web pane `name`'s page in a view over the window, unless it has one; resolves with why the page did not load, or null. */
+  webPaneStart(name: string): Promise<string | null>;
+  /** Where web pane `name`'s box is, and whether its page shows there (on screen, under no panel); showing it gives it the keyboard. */
+  webPaneLayout(name: string, box: Rect, show: boolean): void;
+  /** Loads web pane `name`'s page again; with `url` (a sign-in link on its origin), that first and the page once it has loaded. */
+  webPaneLoad(name: string, url?: string): Promise<void>;
+  onWebPane(cb: (name: string, e: WebPaneEvent) => void): () => void;
+  /** A window-wide ⌘ key (@shared/keys) pressed while a web pane's page had the keyboard. */
+  onAppKey(cb: (k: KeyDesc) => void): () => void;
   /** Requests on the control socket; what `cb` returns is the reply. */
   onControl(cb: (req: ControlRequest) => ControlReply): () => void;
   /** Sessions waiting on a question, and ones with a turn running or queued: the Dock badge and the quit warning. */

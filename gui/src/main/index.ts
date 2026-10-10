@@ -3,16 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ControlReply, ControlRequest, OpenRequest, SavedLayout, Settings, SettingsPatch, SidebarScriptInput } from '../shared/api';
+import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, Rect, SavedLayout, Settings, SettingsPatch, SidebarScriptInput } from '../shared/api';
 import type { HostMessage } from '../shared/wire';
-import { binder, ensureHost, listSessions, readPanes, readSettings, repoInfo, runSidebarScript, writeSettings } from './binder';
+import { binder, ensureHost, listSessions, readPanes, readSettings, repoInfo, runSidebarScript, writeSettings, type PaneConfig, type WebPaneConfig } from './binder';
 import { listenControl } from './control';
 import { HostConnection } from './hostConnection';
 import { paneInput, resizePane, startPane, stopPanes } from './panes';
+import { layoutWebPane, loadWebPane, startWebPane } from './webPanes';
 
 // The app's main process: one window, one socket connection per session the
-// window shows, the panes' programs, and the control socket. Everything about
-// a session lives in its binder host.
+// window shows, the panes' programs and pages, and the control socket.
+// Everything about a session lives in its binder host.
 
 let win: BrowserWindow | null = null;
 // The window's connections; null while one is still opening (its host starting).
@@ -142,15 +143,22 @@ function registerIpc(): void {
     applyAppearance(s);
     return s;
   });
-  ipcMain.handle('panes', async () => readPanes(await loginEnv()).map((p) => p.name));
+  ipcMain.handle('panes', async () => readPanes(await loginEnv()).map((p): PaneInfo => ({ name: p.name, web: 'url' in p })));
   ipcMain.handle('paneStart', async (_e, name: string, cols: number, rows: number) => {
     const env = await loginEnv();
-    const pane = readPanes(env).find((p) => p.name === name);
+    const pane = readPanes(env).find((p): p is PaneConfig => p.name === name && 'command' in p);
     if (!pane) throw new Error(`config.json has no pane named ${name}`);
     return startPane(pane, env, cols, rows, (e) => win && !win.isDestroyed() && win.webContents.send('pane', name, e));
   });
   ipcMain.on('paneInput', (_e, name: string, data: string) => paneInput(name, data));
   ipcMain.on('paneResize', (_e, name: string, cols: number, rows: number) => resizePane(name, cols, rows));
+  ipcMain.handle('webPaneStart', async (_e, name: string) => {
+    const pane = readPanes(await loginEnv()).find((p): p is WebPaneConfig => p.name === name && 'url' in p);
+    if (!pane) throw new Error(`config.json has no web pane named ${name}`);
+    return startWebPane(win!, pane, askWindow);
+  });
+  ipcMain.on('webPaneLayout', (_e, name: string, box: Rect, show: boolean) => win && layoutWebPane(win, name, box, show));
+  ipcMain.handle('webPaneLoad', (_e, name: string, url?: string) => loadWebPane(name, url));
   ipcMain.on('controlReply', (_e, id: number, reply: ControlReply) => {
     controls.get(id)?.(reply);
     controls.delete(id);
