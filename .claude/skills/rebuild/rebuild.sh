@@ -3,7 +3,7 @@
 # Usage: rebuild.sh [tui|gui]   (no argument does both)
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+ROOT="$(cd -P "$(dirname "$0")/../../.." && pwd)"
 APP="$ROOT/gui/release/mac-arm64/Binder.app"
 APP_PROC='Binder\.app/Contents/MacOS/Binder( |$)'
 what="${1:-both}"

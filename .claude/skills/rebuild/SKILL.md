@@ -12,7 +12,7 @@ bundle in `gui/release/`. This builds them and relaunches the Mac app in front o
 1. Unless the argument is `tui`, tell the user in one line that Binder will quit and reopen,
    and that it asks first if a session is mid-turn (click Quit; the turn keeps running in its
    host).
-2. Run `"$(git rev-parse --show-toplevel)/.claude/skills/rebuild/rebuild.sh" $ARGUMENTS` with
+2. Run `"${CLAUDE_SKILL_DIR}/rebuild.sh" $ARGUMENTS` with
    a 600000 ms timeout. No argument does both; `tui` or `gui` does one.
 3. Report from its output:
    - **Built:** which parts, and Binder's new pid if it relaunched.
