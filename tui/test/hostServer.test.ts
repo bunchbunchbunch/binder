@@ -187,23 +187,35 @@ describe('host server', () => {
     expect((await v.request('rewind_preview', { uuid: 'u1' })).result).toEqual({ canRewind: true, files: 1, error: null });
   });
 
-  it("cycles the model and the effort level, as pi's Ctrl+P and Shift+Tab do", async () => {
+  it("cycles the model and the effort level one press at a time, as pi's Ctrl+P and Shift+Tab do", async () => {
     const stateDir = setup('two-turns-stdin.jsonl');
     const id = '00000000-0000-4000-8000-0000000000aa';
+    const { host } = await startHost(id, stateDir);
+    await until(() => host.state.model === 'claude-opus-5-5' && host.effort === 'xhigh');
+    // Two presses at once take two steps; the second wraps around to the first model.
+    expect(await Promise.all([host.cycleModel(1), host.cycleModel(1)])).toEqual(['Model: Haiku 4.5', 'Model: Opus 5.5']);
+    expect(await host.cycleModel(-1)).toBe('Model: Haiku 4.5');
+    expect(host.state.model).toBe('claude-haiku-4-5-20251001');
+    await expect(host.cycleEffort()).rejects.toThrow('Haiku 4.5 has no effort levels');
+    await host.cycleModel(1);
+    // xhigh is not one of this model's levels, so the cycle starts at the first.
+    expect(await Promise.all([host.cycleEffort(), host.cycleEffort()])).toEqual(['Effort: low', 'Effort: medium']);
+    expect(host.effort).toBe('medium');
+  });
+
+  it('names the model an alias stands for, as the next turn would', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl');
+    const id = '00000000-0000-4000-8000-0000000000ab';
     await startHost(id, stateDir);
     const v = viewer(id);
-    await until(() => v.state?.model === 'claude-opus-5-5' && v.state.effort === 'xhigh');
-    // Two presses at once take two steps; the second wraps around to the first model.
-    const [one, two] = await Promise.all([v.request('cycle_model', { delta: 1 }), v.request('cycle_model', { delta: 1 })]);
-    expect([one.result, two.result]).toEqual([{ message: 'Model: Haiku 4.5' }, { message: 'Model: Opus 5.5' }]);
-    expect((await v.request('cycle_model', { delta: -1 })).result).toEqual({ message: 'Model: Haiku 4.5' });
+    await until(() => v.state?.model === 'claude-opus-5-5');
+    expect((await v.request('set_model', { model: 'haiku' })).ok).toBe(true);
     await until(() => v.state!.model === 'claude-haiku-4-5-20251001');
-    expect(await v.request('cycle_effort')).toMatchObject({ ok: false, error: 'Haiku 4.5 has no effort levels' });
-    await v.request('cycle_model', { delta: 1 });
-    // xhigh is not one of this model's levels, so the cycle starts at the first.
-    expect((await v.request('cycle_effort')).result).toEqual({ message: 'Effort: low' });
-    expect((await v.request('cycle_effort')).result).toEqual({ message: 'Effort: medium' });
-    await until(() => v.state!.effort === 'medium');
+    expect((await v.request('set_model', { model: 'default' })).ok).toBe(true);
+    await until(() => v.state!.model === 'claude-opus-5-5');
+    // A name the child does not list stays as given.
+    expect((await v.request('set_model', { model: 'claude-opus-4-8' })).ok).toBe(true);
+    await until(() => v.state!.model === 'claude-opus-4-8');
   });
 
   it('refuses a viewer whose roots do not hold the session, and a cd outside them', async () => {

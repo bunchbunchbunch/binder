@@ -115,8 +115,6 @@ paused, or this client revoked).
 | `models` | | `{models: [{value, displayName, description?, resolvedModel?, supportedEffortLevels?}]}` |
 | `set_model` | `model` | `{}` |
 | `set_effort` | `level` | `{}` |
-| `cycle_model` | `delta` (`1` or `-1`) | `{message}`, e.g. `"Model: Sonnet 5.5"`: the next (or previous) model in `models`, counting each resolved model once (pi's `Ctrl+P` / `Shift+Ctrl+P`) |
-| `cycle_effort` | | `{message}`, e.g. `"Effort: high"`: the current model's next effort level, wrapping around (pi's `Shift+Tab`). Refused for a model with no effort levels |
 | `mcp_status` | | `{servers: [{name, status, error?}]}` |
 | `mcp_toggle` | `server`, `enabled` | `{}` |
 | `mcp_reconnect` | `server` | `{}` |

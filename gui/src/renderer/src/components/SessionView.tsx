@@ -6,7 +6,7 @@ import { turnVerb } from '../lib/work';
 import { closeConn, errText, getState, openSession, reopen, request, setActiveTab, setState, toast, useApp, type Conn } from '../store';
 import type { BackgroundTask, WireBlock } from '@shared/wire';
 import { ConfirmPanel } from './Picker';
-import { ArtifactsPanel, ChromePanel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
+import { ArtifactsPanel, ChromePanel, cycleEffort, cycleModel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
 import { Composer, type ComposerHandle } from './Composer';
 import { QuestionCard } from './QuestionCard';
 import { HelpView } from './Shortcuts';
@@ -297,8 +297,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     if (ctrl && e.key === 'ArrowLeft') return take(), moveTab(-1);
     // pi's keys: Ctrl+L picks a model, Ctrl+P / Shift+Ctrl+P cycle models, Shift+Tab cycles the effort level.
     if (ctrl && e.key === 'l') return take(), runLocal('model', '');
-    if (ctrl && e.key.toLowerCase() === 'p') return take(), void run('cycle_model', { delta: e.shiftKey ? -1 : 1 });
-    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) return take(), void run('cycle_effort');
+    if (ctrl && e.key.toLowerCase() === 'p') return take(), void cycleModel(c.id, e.shiftKey ? -1 : 1).then(toast, (err) => toast(errText(err), true));
+    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) return take(), void cycleEffort(c.id).then(toast, (err) => toast(errText(err), true));
     if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-9]$/.test(e.code)) {
       take();
       const t = s.tabs[Number(e.code.slice(5)) - 1];

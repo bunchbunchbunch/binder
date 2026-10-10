@@ -4,6 +4,7 @@ import { lastToolIndex, splitWork, turnVerb, ultrathinkParts, workSummary } from
 import { diffLines, withContext } from '../src/renderer/src/lib/diff';
 import { commonPrefix, localCommand, matchCommands, visibleCommands, wordAt } from '../src/renderer/src/lib/commands';
 import { elapsed, fmtTokens, modelDisplayName } from '../src/renderer/src/lib/format';
+import { findModel, stepEffort, stepModel } from '../src/renderer/src/lib/models';
 
 const text = (t: string, final = true): WireBlock => ({ kind: 'text', text: t, final });
 const tool = (name: string, result = true): WireBlock => ({ kind: 'tool_use', id: name, name, input: {}, final: true, children: [], ...(result && { result: { content: 'ok', isError: false } }) });
@@ -95,5 +96,35 @@ describe('format', () => {
     expect(elapsed(43_384_000)).toBe('12h 3m');
     expect(fmtTokens(49512)).toBe('49.5k');
     expect(fmtTokens(812)).toBe('812');
+  });
+});
+
+describe("pi's model and effort steps", () => {
+  // As Claude Code lists them: "default" and "opus" are the same model.
+  const models = [
+    { value: 'default', resolvedModel: 'claude-opus-5-5', supportedEffortLevels: ['low', 'high', 'max'] },
+    { value: 'opus', resolvedModel: 'claude-opus-5-5', supportedEffortLevels: ['low', 'high', 'max'] },
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5-5', supportedEffortLevels: ['low', 'high'] },
+    { value: 'claude-haiku-4-5-20251001', resolvedModel: 'claude-haiku-4-5-20251001' },
+  ];
+
+  it('steps through each model once, either way, wrapping around', () => {
+    expect(stepModel(models, 'claude-opus-5-5', 1)?.value).toBe('sonnet');
+    expect(stepModel(models, 'opus', 1)?.value).toBe('sonnet');
+    expect(stepModel(models, 'sonnet', -1)?.value).toBe('default');
+    expect(stepModel(models, 'claude-haiku-4-5-20251001', 1)?.value).toBe('default');
+    expect(stepModel(models, 'default', -1)?.value).toBe('claude-haiku-4-5-20251001');
+    // A model not in the list: forward starts at the first, back at the last.
+    expect(stepModel(models, 'gone', 1)?.value).toBe('default');
+    expect(stepModel(models, null, -1)?.value).toBe('claude-haiku-4-5-20251001');
+    expect(stepModel([], 'opus', 1)).toBeUndefined();
+  });
+
+  it("steps through the model's effort levels, starting at the first when the current one is not among them", () => {
+    expect(stepEffort(findModel(models, 'claude-opus-5-5'), 'high')).toBe('max');
+    expect(stepEffort(findModel(models, 'opus'), 'max')).toBe('low');
+    expect(stepEffort(findModel(models, 'sonnet'), 'xhigh')).toBe('low');
+    expect(stepEffort(findModel(models, 'sonnet'), null)).toBe('low');
+    expect(stepEffort(findModel(models, 'claude-haiku-4-5-20251001'), 'high')).toBeUndefined();
   });
 });

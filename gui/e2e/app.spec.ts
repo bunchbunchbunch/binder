@@ -105,10 +105,13 @@ test('opens the command menu and the model panel', async () => {
   await expect(toast).toHaveText('Model: Haiku 4.5');
   await page.keyboard.press('Control+Shift+P');
   await expect(toast).toHaveText('Model: Opus 5.5');
+  // "default" shows as the model it stands for.
+  await expect(page.locator('.statusbar')).toContainText('Opus 5.5');
+  // Presses in quick succession each take a step.
   await page.keyboard.press('Shift+Tab');
-  await expect(toast).toHaveText('Effort: low');
   await page.keyboard.press('Shift+Tab');
   await expect(toast).toHaveText('Effort: medium');
+  await expect(page.locator('.statusbar')).toContainText('medium');
   await expect(page.locator('.composer textarea')).toBeFocused();
 });
 

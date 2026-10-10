@@ -385,7 +385,9 @@ export class SessionHost extends EventEmitter<HostEvents> {
 
   async setModel(model: string): Promise<void> {
     await this.session.request('set_model', { model });
-    this.dispatch({ type: 'model', model });
+    // An alias ("default", "opus") is kept as the model it stands for, as the next turn's init names it.
+    const entry = (await this.models().catch(() => [])).find((m) => m.value === model);
+    this.dispatch({ type: 'model', model: entry?.resolvedModel ?? model });
   }
 
   async setEffort(level: string): Promise<void> {

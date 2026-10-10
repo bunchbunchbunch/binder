@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { BackgroundTask, ToolBlock, WireBlock, WireTab } from '@shared/wire';
+import type { BackgroundTask, ToolBlock, WireBlock, WireState, WireTab } from '@shared/wire';
 import { elapsed, firstLine, modelDisplayName } from '../lib/format';
-import { errText, request, toast } from '../store';
+import { errText, getState, request, toast } from '../store';
+import { findModel, stepEffort, stepModel } from '../lib/models';
 import { Picker, type PickerItem } from '../components/Picker';
 import { toolLine } from '../components/Blocks';
 
@@ -64,6 +65,49 @@ export function EffortPanel({ conn, close, active, model, current }: Common & { 
   };
   return <Picker active={active} title="Effort" subtitle={error || (models ? `For this session (${modelDisplayName(model) || 'current model'})` : 'Loading…')} items={items} onSelect={pick} onCancel={close} initial={Math.max(0, levels.indexOf(current ?? ''))} />;
 }
+
+// pi's Ctrl+P / Shift+Ctrl+P and Shift+Tab, through the requests every host
+// serves. One press at a time: each waits until the session shows where the
+// last one landed (the host's patch follows its reply), so a held key steps on.
+let stepping: Promise<unknown> = Promise.resolve();
+function oneAtATime(fn: () => Promise<string>): Promise<string> {
+  const run = stepping.then(fn);
+  stepping = run.catch(() => {});
+  return run;
+}
+
+const sessionState = (conn: string) => getState().conns.find((c) => c.id === conn)?.state ?? null;
+
+async function shown(conn: string, check: (s: WireState) => boolean): Promise<void> {
+  for (let waited = 0; waited < 2000; waited += 20) {
+    const s = sessionState(conn);
+    if (!s || check(s)) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+const listModels = async (conn: string) => ((await request(conn, 'models')).models as Model[] | undefined) ?? [];
+
+export const cycleModel = (conn: string, delta: 1 | -1) =>
+  oneAtATime(async () => {
+    const next = stepModel(await listModels(conn), sessionState(conn)?.model ?? null, delta);
+    if (!next) throw new Error('No models to switch to');
+    await request(conn, 'set_model', { model: next.value });
+    await shown(conn, (s) => s.model === next.resolvedModel || s.model === next.value);
+    return `Model: ${modelDisplayName(next.resolvedModel ?? next.value)}`;
+  });
+
+export const cycleEffort = (conn: string) =>
+  oneAtATime(async () => {
+    const s = sessionState(conn);
+    const models = await listModels(conn);
+    const m = findModel(models, s?.model ?? null) ?? models[0];
+    const level = stepEffort(m, s?.effort ?? null);
+    if (!level) throw new Error(`${modelDisplayName(m ? m.resolvedModel ?? m.value : s?.model)} has no effort levels`);
+    await request(conn, 'set_effort', { level });
+    await shown(conn, (st) => st.effort === level);
+    return `Effort: ${level}`;
+  });
 
 type McpServer = { name: string; status: string; scope?: string; config?: { type?: string }; error?: string };
 
