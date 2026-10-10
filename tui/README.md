@@ -36,6 +36,9 @@ binder --codex -- <args>   --model, --permission-mode, or codex app-server flags
 
 On quit, binder prints `Resume with: binder <id>`. Resuming a session binder never ran
 (one from plain Claude Code) shows its conversation from Claude Code's transcript.
+Resuming one Claude Code has no transcript for (started but never sent a prompt, or
+cleaned up since) starts a new session under the same id instead of failing, so a
+launcher's link to that id keeps working.
 
 Binder leaves the permission mode to Claude Code (`permissions.defaultMode` in
 `settings.json`) unless `config.json` sets one or you pass `binder -- --permission-mode

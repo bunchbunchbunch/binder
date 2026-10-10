@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { ClaudeProcess, buildArgs, type ImageAttachment } from './claudeProcess.js';
 import type { ClaudeEvent, ControlRequestEvent, OtherSystemEvent } from './events.js';
 import { appendLocal, appendPrompt, appendRaw, type LocalMarker } from './eventLog.js';
-import { childEnv, stateDir } from './paths.js';
+import { childEnv, configDir, stateDir } from './paths.js';
 import type { SlashCommand } from './slashCommands.js';
+import { findTranscript } from './transcripts.js';
 
 export type SessionOptions = {
   sessionId: string;
@@ -110,11 +111,15 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
 
   start(): void {
     const id = this.id;
+    const env = childEnv(this.dir);
+    // Nothing to resume (linked to a todo but never used, or cleaned up by
+    // Claude Code): start it fresh under the same id instead of failing.
+    if (this.resume && !this.forkFrom && !findTranscript(configDir(env), id)) this.resume = false;
     const proc = new ClaudeProcess({
       bin: this.opts.bin ?? process.env.BINDER_CLAUDE_BIN ?? 'claude',
       args: buildArgs({ sessionId: id, resume: this.resume, passthrough: this.opts.passthrough.concat(this.extraArgs), forkFrom: this.forkFrom }),
       cwd: this.dir,
-      env: childEnv(this.dir),
+      env,
       stderrPath: join(stateDir(), `${id}.stderr.log`),
     });
     this.proc = proc;

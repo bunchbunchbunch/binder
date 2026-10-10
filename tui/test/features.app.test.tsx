@@ -46,6 +46,8 @@ function start(name: string, opts: { cwd?: string; fixture?: string; delay?: num
   delete process.env.BINDER_FAKE_CAPS;
   const cwd = opts.cwd ?? process.cwd();
   const configDir = join(stateDir, 'claude');
+  // The claude child's config dir too, as in production (launchConfigDir).
+  process.env.CLAUDE_CONFIG_DIR = configDir;
   const sessionId = `00000000-0000-4000-8000-${String(Math.floor(Math.random() * 1e12)).padStart(12, '0')}`;
   const session = new Session({ sessionId, resume: false, cwd, passthrough: [] });
   session.start();
@@ -201,6 +203,9 @@ describe('/mcp', () => {
 describe('/chrome', () => {
   it('shows the extension status and restarts claude with --chrome', async () => {
     const t = start('chrome');
+    // Claude Code has the session on disk, as after a first turn.
+    mkdirSync(join(t.configDir, 'projects', 'here'), { recursive: true });
+    writeFileSync(join(t.configDir, 'projects', 'here', `${t.sessionId}.jsonl`), '');
     await t.type('/chrome');
     await t.wait(() => t.frame().includes('extension installed: yes · connected: no'));
     await t.key(ENTER);
