@@ -180,6 +180,18 @@ export function readPanes(env: NodeJS.ProcessEnv): (PaneConfig | WebPaneConfig)[
   });
 }
 
+/** config.json's `computers`: SSH destinations whose sessions the app shows beside this Mac's. */
+export function readComputers(env: NodeJS.ProcessEnv): string[] {
+  let computers: unknown;
+  try {
+    computers = readConfig(configPath(env)).computers;
+  } catch {
+    return [];
+  }
+  // A name that starts with - would read as an ssh option.
+  return Array.isArray(computers) ? [...new Set(computers.filter((c): c is string => typeof c === 'string' && /^[^-\s]\S*$/.test(c)))] : [];
+}
+
 /**
  * Sets keys in config.json and keeps the rest, as bindertui's /settings does.
  * Written in place, so a symlink into a dotfiles repo stays a symlink; a file

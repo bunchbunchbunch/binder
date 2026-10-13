@@ -1,0 +1,24 @@
+#!/bin/sh
+# Stands in for ssh in the tests (BINDER_SSH): skips ssh's options, then runs
+# the command here as "the other computer", with its own binder state and
+# Claude config under $FAKE_SSH_ROOT/<destination>. No SSH_ variables, or
+# `binder start` would hand the host to launchd. A destination named offline
+# fails as an unreachable computer does.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -[bcDEeFIiJLlmOopQRSWw]) shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+dest=$1
+shift
+if [ "$dest" = offline ]; then
+  echo "ssh: connect to host offline port 22: Operation timed out" >&2
+  exit 255
+fi
+unset SSH_CONNECTION SSH_CLIENT SSH_TTY
+export BINDER_STATE_DIR="$FAKE_SSH_ROOT/$dest/s" CLAUDE_CONFIG_DIR="$FAKE_SSH_ROOT/$dest/claude"
+mkdir -p "$BINDER_STATE_DIR"
+# As sshd does: the remote shell runs the words after the destination, joined by spaces.
+exec /bin/sh -c "$*"

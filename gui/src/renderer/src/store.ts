@@ -1,11 +1,13 @@
 import { useSyncExternalStore } from 'react';
 import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, SessionRow, SidebarConfig, SidebarScriptInput } from '@shared/api';
 import { applyPatch, type HostMessage, type SlashCommand, type WireState } from '@shared/wire';
+import { addHome } from './lib/format';
 import { sessionFields, sessionStatus, sidebarTemplates, usesField, type SessionFacts } from './lib/sidebarText';
 
 // The window's state: the sessions it shows (one host connection each), the
-// panes, the session list for the sidebar, and a few app-wide toggles. Session state
-// itself comes from the hosts as a snapshot plus patches.
+// panes, the session list for the sidebar (this Mac's, and config.json's
+// computers'), and a few app-wide toggles. Session state itself comes from the
+// hosts as a snapshot plus patches.
 
 export type ConnStatus = 'opening' | 'attached' | 'detached' | 'failed';
 
@@ -14,6 +16,8 @@ export type Conn = {
   // What it was opened as, until the snapshot says (it changes on /clear and /fork).
   sessionId: string | null;
   cwd: string;
+  // Where it runs: a name from config.json's computers; absent for this Mac.
+  computer?: string;
   // Shown before the snapshot arrives.
   title: string;
   status: ConnStatus;
@@ -44,7 +48,11 @@ export type AppState = {
   webPanes: string[];
   // What is on screen: a connection id, or a pane's paneId().
   active: string | null;
+  // config.json's computers: the other computers whose sessions show here.
+  computers: string[];
+  // Every computer's sessions, live ones first, then the most recent.
   sessions: SessionRow[];
+  // Why a computer's sessions could not be listed, one line each.
   sessionsError: string | null;
   // Ctrl+O: full tool output, thinking and subagent detail, app-wide as in the TUI.
   detail: boolean;
@@ -55,7 +63,7 @@ export type AppState = {
   toast: Toast | null;
 };
 
-let state: AppState = { conns: [], panes: [], webPanes: [], active: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, sidebar: {}, toast: null };
+let state: AppState = { conns: [], panes: [], webPanes: [], active: null, computers: [], sessions: [], sessionsError: null, detail: false, stickyPrompt: true, sidebar: {}, toast: null };
 const listeners = new Set<() => void>();
 
 export const getState = () => state;
@@ -145,13 +153,32 @@ export function request(conn: string, t: string, fields?: Record<string, unknown
   return window.binder.request(conn, t, fields);
 }
 
-export async function refreshSessions(): Promise<void> {
+// The last list from each computer ('' is this Mac), and why one failed.
+const listed = new Map<string, SessionRow[]>();
+const listErrors = new Map<string, string>();
+
+/** Lists one computer's sessions; the others' stay as they were. */
+async function refreshComputer(computer: string): Promise<void> {
   try {
-    setState({ sessions: await window.binder.listSessions(), sessionsError: null });
+    const list = await window.binder.listSessions(computer || undefined);
+    if (computer) addHome(list.home);
+    listed.set(computer, list.sessions);
+    listErrors.delete(computer);
   } catch (e) {
-    setState({ sessionsError: errText(e) });
+    listed.delete(computer);
+    listErrors.set(computer, errText(e));
   }
+  const sessions = [...listed.values()].flat().sort((a, b) => Number(b.live) - Number(a.live) || b.lastUsedAt.localeCompare(a.lastUsedAt));
+  setState({ sessions, sessionsError: [...listErrors.values()].join('\n') || null });
 }
+
+/** Lists every computer's sessions; a slow one does not hold up the others. */
+export async function refreshSessions(): Promise<void> {
+  await Promise.all(['', ...state.computers].map(refreshComputer));
+}
+
+/** Whether two computer fields name the same computer (absent is this Mac). */
+export const sameComputer = (a: string | undefined, b: string | undefined) => (a ?? '') === (b ?? '');
 
 async function attach(id: string, req: OpenRequest): Promise<void> {
   try {
@@ -164,16 +191,16 @@ async function attach(id: string, req: OpenRequest): Promise<void> {
 
 /** Shows a session: the open one with that id, else a new connection (starting its host if needed). */
 export function openSession(req: OpenRequest & { title?: string; draft?: string }): void {
-  const open = req.sessionId && state.conns.find((c) => c.sessionId === req.sessionId);
+  const open = req.sessionId && state.conns.find((c) => c.sessionId === req.sessionId && sameComputer(c.computer, req.computer));
   if (open) {
     setState({ active: open.id });
     if (open.status === 'detached' || open.status === 'failed') reopen(open.id);
     return;
   }
   const id = crypto.randomUUID();
-  const conn: Conn = { id, sessionId: req.sessionId ?? null, cwd: req.cwd, title: req.title ?? 'New session', status: 'opening', state: null, commands: [], activeTab: null, draft: req.draft, runningSince: null, lastTurnMs: null, unseen: false };
+  const conn: Conn = { id, sessionId: req.sessionId ?? null, cwd: req.cwd, ...(req.computer && { computer: req.computer }), title: req.title ?? 'New session', status: 'opening', state: null, commands: [], activeTab: null, draft: req.draft, runningSince: null, lastTurnMs: null, unseen: false };
   setState((s) => ({ conns: [...s.conns, conn], active: id }));
-  void attach(id, { cwd: req.cwd, sessionId: req.sessionId, resume: req.resume, args: req.args });
+  void attach(id, { cwd: req.cwd, sessionId: req.sessionId, resume: req.resume, args: req.args, computer: req.computer });
 }
 
 // A session that never got a prompt has no conversation for claude to resume.
@@ -184,7 +211,7 @@ export function reopen(id: string): void {
   const c = state.conns.find((x) => x.id === id);
   if (!c) return;
   updateConn(id, (x) => ({ ...x, status: 'opening', error: undefined }));
-  void attach(id, c.sessionId ? { cwd: c.cwd, sessionId: c.sessionId, resume: !fresh(c) } : { cwd: c.cwd });
+  void attach(id, c.sessionId ? { cwd: c.cwd, sessionId: c.sessionId, resume: !fresh(c), computer: c.computer } : { cwd: c.cwd, computer: c.computer });
 }
 
 /** Lets a session go from the window; its host keeps running until it is idle. */
@@ -270,8 +297,8 @@ async function refreshExtras(id: string): Promise<void> {
   if (!c?.sessionId) return;
   const want = extrasWanted();
   const [script, branch] = await Promise.all([
-    want.script ? window.binder.sidebarScript(scriptInput(c)).catch(() => '') : undefined,
-    want.branch ? window.binder.repoInfo(c.state?.cwd ?? c.cwd).then((r) => r.branch ?? '', () => '') : undefined,
+    want.script ? window.binder.sidebarScript(scriptInput(c), c.computer).catch(() => '') : undefined,
+    want.branch ? window.binder.repoInfo(c.state?.cwd ?? c.cwd, c.computer).then((r) => r.branch ?? '', () => '') : undefined,
   ]);
   const now = state.conns.find((x) => x.id === id);
   if (now && (now.script !== script || now.branch !== branch)) updateConn(id, (x) => ({ ...x, script, branch }));
@@ -300,7 +327,7 @@ subscribe(() => {
 let lastSaved = '';
 subscribe(() => {
   const layout = {
-    open: state.conns.filter((c) => c.sessionId).map((c) => ({ sessionId: c.sessionId!, cwd: c.cwd, ...(fresh(c) && { fresh: true }) })),
+    open: state.conns.filter((c) => c.sessionId).map((c) => ({ sessionId: c.sessionId!, cwd: c.cwd, ...(fresh(c) && { fresh: true }), ...(c.computer && { computer: c.computer }) })),
     active: paneName(state.active) !== null ? state.active : (state.conns.find((c) => c.id === state.active)?.sessionId ?? null),
   };
   const json = JSON.stringify(layout);
@@ -334,18 +361,23 @@ subscribe(() => {
 /**
  * At launch: the sessions open last time that are still live come back, and
  * the active one is resumed. A pane that was on screen is again, and so is the
- * first pane when no session is.
+ * first pane when no session is. Each computer's come back once it has listed
+ * them, so one that is slow or asleep holds up only its own.
  */
 export async function restoreLayout(): Promise<void> {
-  const [layout, infos] = await Promise.all([window.binder.loadLayout(), window.binder.panes().catch((): PaneInfo[] => []), refreshSessions()]);
+  const [layout, infos, computers] = await Promise.all([window.binder.loadLayout(), window.binder.panes().catch((): PaneInfo[] => []), window.binder.computers().catch((): string[] => [])]);
   const panes = infos.map((p) => p.name);
-  setState({ panes, webPanes: infos.filter((p) => p.web).map((p) => p.name) });
-  const live = new Set(state.sessions.filter((r) => r.live).map((r) => r.id));
-  for (const o of layout.open) {
-    if (o.sessionId !== layout.active && !live.has(o.sessionId)) continue;
-    const row = state.sessions.find((r) => r.id === o.sessionId);
-    openSession({ cwd: o.cwd, sessionId: o.sessionId, resume: live.has(o.sessionId) || !o.fresh, title: row?.title });
-  }
+  setState({ panes, webPanes: infos.filter((p) => p.web).map((p) => p.name), computers });
+  const restore = (computer: string) => {
+    const rows = listed.get(computer) ?? [];
+    const live = new Set(rows.filter((r) => r.live).map((r) => r.id));
+    for (const o of layout.open) {
+      if (!sameComputer(o.computer, computer) || (o.sessionId !== layout.active && !live.has(o.sessionId))) continue;
+      const row = rows.find((r) => r.id === o.sessionId);
+      openSession({ cwd: o.cwd, sessionId: o.sessionId, resume: live.has(o.sessionId) || !o.fresh, title: row?.title, computer: o.computer });
+    }
+  };
+  await Promise.all(['', ...computers].map((k) => refreshComputer(k).then(() => restore(k))));
   const active = state.conns.find((c) => c.sessionId === layout.active);
   const pane = paneName(layout.active);
   if (pane !== null && panes.includes(pane)) setState({ active: paneId(pane) });

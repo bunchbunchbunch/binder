@@ -6,10 +6,12 @@ import { HostServer } from './hostServer.js';
 import { liveElsewhere } from './sockets.js';
 import { expandHome, remoteCommand } from './config.js';
 import { listSessions, serve } from './serve.js';
+import { attachMain, startMain } from './start.js';
 import { binderConfig } from '../config.js';
 
 // Entry for the commands that need no terminal UI: `binder host`, `binder
-// serve`, `binder sessions`, `binder remote ...` (bin/binder.mjs routes them here).
+// start`, `binder attach`, `binder serve`, `binder sessions`, `binder remote ...`
+// (bin/binder.mjs routes them here).
 
 // A host nobody watches and that has nothing to do exits after this long.
 const IDLE_MS = Number(process.env.BINDER_HOST_IDLE_MS ?? 15 * 60 * 1000);
@@ -65,6 +67,8 @@ export async function remoteMain(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv;
   try {
     if (cmd === 'host') return await hostMain(rest);
+    if (cmd === 'start') return await startMain(rest);
+    if (cmd === 'attach') return attachMain(rest);
     if (cmd === 'serve') return serve();
     if (cmd === 'sessions') return await sessionsMain();
     if (cmd === 'remote') return remoteCommand(rest);

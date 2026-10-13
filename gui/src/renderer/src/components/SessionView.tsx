@@ -188,7 +188,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
       case 'resume': {
         if (!args) return onSwitcher('folder');
         const hit = getState().sessions.find((r) => r.id.startsWith(args));
-        return hit ? openSession({ cwd: hit.cwd, sessionId: hit.id, resume: true, title: hit.title }) : toast(`No session ${args}`, true);
+        return hit ? openSession({ cwd: hit.cwd, sessionId: hit.id, resume: true, title: hit.title, computer: hit.computer }) : toast(`No session ${args}`, true);
       }
     }
     if (busy) return toast(`Wait for the running turn to finish (or press Esc) before /${name}`, true);

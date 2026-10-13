@@ -77,11 +77,12 @@ export async function launch(fixture: string, env: Record<string, string> = {}, 
   return { app, page, tmp, project, quitApp, close };
 }
 
-/** ⌘N, then start a session in `dir`; resolves once the prompt is ready. */
+/** ⌘N, then start a session in `dir` on this Mac; resolves once the prompt is ready. */
 export async function newSession(page: Page, dir: string): Promise<void> {
   await page.keyboard.press('Meta+n');
   await page.locator('.picker-search').fill(dir);
-  await page.locator('.picker-item', { hasText: `Start in ${dir}` }).waitFor();
+  // This Mac's row comes first; config.json's computers follow ("Start in <dir> on mini").
+  await page.locator('.picker-item', { hasText: `Start in ${dir}` }).first().waitFor();
   await page.keyboard.press('Enter');
   await page.locator('.session:not([hidden]) .composer textarea').waitFor({ state: 'visible', timeout: 30000 });
 }

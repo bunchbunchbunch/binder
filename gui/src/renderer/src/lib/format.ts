@@ -1,12 +1,18 @@
 // Small text helpers shared by the views.
 
 const home = () => (typeof window !== 'undefined' && window.binder?.home) || '';
+// The home folders of config.json's computers, as they list their sessions.
+const otherHomes = new Set<string>();
 
-/** A path relative to `cwd` when inside it, else with ~ for the home folder. */
+export function addHome(h: string): void {
+  if (h) otherHomes.add(h.replace(/\/+$/, ''));
+}
+
+/** A path relative to `cwd` when inside it, else with ~ for the home folder (this Mac's, or another computer's). */
 export function shortPath(p: string, cwd?: string): string {
   if (cwd && p.startsWith(cwd + '/')) return p.slice(cwd.length + 1);
-  const h = home();
-  return h && (p === h || p.startsWith(h + '/')) ? '~' + p.slice(h.length) : p;
+  for (const h of [home(), ...otherHomes]) if (h && (p === h || p.startsWith(h + '/'))) return '~' + p.slice(h.length);
+  return p;
 }
 
 export const baseName = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p;

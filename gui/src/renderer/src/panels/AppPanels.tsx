@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Appearance, SessionRow, Settings, SettingsPatch, SidebarConfig } from '@shared/api';
 import { ago, baseName, shortPath } from '../lib/format';
 import { DEFAULT_SIDEBAR, FIELDS, sessionFields, sidebarTemplates, sidebarText } from '../lib/sidebarText';
-import { errText, openSession, refreshSessions, sessionFacts, setState, toast, useApp } from '../store';
+import { errText, openSession, refreshSessions, sameComputer, sessionFacts, setState, toast, useApp } from '../store';
 import { Picker, type PickerItem } from '../components/Picker';
 
 // Panels that act on the window rather than one session: picking a session
@@ -12,7 +12,8 @@ import { Picker, type PickerItem } from '../components/Picker';
 type Scope = 'folder' | 'worktrees' | 'branch' | 'all';
 const SCOPE_TITLE: Record<Scope, string> = { folder: 'this folder', worktrees: "this repo's worktrees", branch: 'this branch', all: 'all projects' };
 
-export function SessionSwitcher({ cwd, initialScope, close }: { cwd: string | null; initialScope: Scope; close: () => void }) {
+// `cwd` and `computer`: the session on screen, for the scopes other than all projects.
+export function SessionSwitcher({ cwd, computer, initialScope, close }: { cwd: string | null; computer?: string; initialScope: Scope; close: () => void }) {
   const sessions = useApp((s) => s.sessions);
   const error = useApp((s) => s.sessionsError);
   const [scope, setScope] = useState<Scope>(cwd ? initialScope : 'all');
@@ -20,30 +21,32 @@ export function SessionSwitcher({ cwd, initialScope, close }: { cwd: string | nu
   const [repo, setRepo] = useState<{ worktrees: string[]; branch: string | null } | null>(null);
   useEffect(() => void refreshSessions(), []);
   useEffect(() => {
-    if (cwd) void window.binder.repoInfo(cwd).then(setRepo);
-  }, [cwd]);
+    if (cwd) void window.binder.repoInfo(cwd, computer).then(setRepo);
+  }, [cwd, computer]);
 
   const shown = useMemo(() => {
     const q = query.toLowerCase();
     return sessions.filter((s) => {
+      if (scope !== 'all' && !sameComputer(s.computer, computer)) return false;
       if (scope === 'folder' && s.cwd !== cwd) return false;
       if (scope === 'worktrees' && !repo?.worktrees.includes(s.cwd)) return false;
       if (scope === 'branch' && (!repo?.branch || s.branch !== repo.branch || !repo.worktrees.includes(s.cwd))) return false;
-      return !q || `${s.title} ${s.cwd} ${s.branch ?? ''} ${s.id}`.toLowerCase().includes(q);
+      return !q || `${s.title} ${s.cwd} ${s.branch ?? ''} ${s.id} ${s.computer ?? ''}`.toLowerCase().includes(q);
     });
-  }, [sessions, scope, query, cwd, repo]);
+  }, [sessions, scope, query, cwd, computer, repo]);
 
+  const key = (s: SessionRow) => `${s.computer ?? ''}:${s.id}`;
   const items: PickerItem[] = shown.map((s) => ({
-    key: s.id,
+    key: key(s),
     label: s.title || '(no prompt yet)',
-    description: [s.live ? (s.running ? 'running' : 'live') : ago(s.lastUsedAt), s.branch, scope === 'folder' ? undefined : shortPath(s.cwd)].filter(Boolean).join(' · '),
+    description: [s.computer, s.live ? (s.running ? 'running' : 'live') : ago(s.lastUsedAt), s.branch, scope === 'folder' ? undefined : shortPath(s.cwd)].filter(Boolean).join(' · '),
     mark: s.running ? '◐' : s.live ? '●' : ' ',
     markColor: s.running ? '#E8C07D' : '#98C379',
   }));
   const pick = (item: PickerItem) => {
-    const s = shown.find((x) => x.id === item.key)!;
+    const s = shown.find((x) => key(x) === item.key)!;
     close();
-    openSession({ cwd: s.cwd, sessionId: s.id, resume: true, title: s.title });
+    openSession({ cwd: s.cwd, sessionId: s.id, resume: true, title: s.title, computer: s.computer });
   };
   const toggle = (s: Scope) => setScope(scope === s ? (cwd ? 'folder' : 'all') : s);
   return (
@@ -72,50 +75,62 @@ export function SessionSwitcher({ cwd, initialScope, close }: { cwd: string | nu
   );
 }
 
+// A folder on a computer ('' is this Mac).
+type Folder = { dir: string; computer: string };
+
 /** Folders sessions ran in, most recent first. */
-function recentFolders(sessions: SessionRow[], first: string | null): string[] {
+function recentFolders(sessions: SessionRow[], first: Folder | null): Folder[] {
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const dir of [first, ...[...sessions].sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)).map((s) => s.cwd)]) {
-    if (dir && !seen.has(dir)) {
-      seen.add(dir);
-      out.push(dir);
+  const out: Folder[] = [];
+  for (const f of [first, ...[...sessions].sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)).map((s) => ({ dir: s.cwd, computer: s.computer ?? '' }))]) {
+    const key = f && JSON.stringify([f.computer, f.dir]);
+    if (f?.dir && key && !seen.has(key)) {
+      seen.add(key);
+      out.push(f);
     }
   }
   return out;
 }
 
-export function NewSessionPanel({ cwd, close }: { cwd: string | null; close: () => void }) {
+// Where a picker row starts a session: " on <computer>", or nothing for this Mac.
+const on = (computer: string) => (computer ? ` on ${computer}` : '');
+
+export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; computer?: string; close: () => void }) {
   const sessions = useApp((s) => s.sessions);
+  const computers = useApp((s) => s.computers);
   const [query, setQuery] = useState('');
-  // A typed path that is a folder.
-  const [typed, setTyped] = useState<string | null>(null);
+  // A typed path, and the computers where it is a folder.
+  const [typed, setTyped] = useState<{ path: string; on: string[] } | null>(null);
   useEffect(() => {
     const q = query.trim();
     if (!/^[~/]/.test(q)) return setTyped(null);
     let live = true;
-    void window.binder.isDirectory(q).then((ok) => live && setTyped(ok ? q : null));
+    const checks = ['', ...computers].map((k) => window.binder.isDirectory(q, k || undefined).then((ok) => (ok ? [k] : []), (): string[] => []));
+    void Promise.all(checks).then((found) => live && setTyped({ path: q, on: found.flat() }));
     return () => {
       live = false;
     };
-  }, [query]);
-  const folders = useMemo(() => recentFolders(sessions, cwd), [sessions, cwd]);
+  }, [query, computers]);
+  const folders = useMemo(() => recentFolders(sessions, cwd ? { dir: cwd, computer: computer ?? '' } : null), [sessions, cwd, computer]);
   const q = query.toLowerCase();
+  const typedOn = typed?.on ?? [];
   const items: PickerItem[] = [
-    ...(typed ? [{ key: `path:${typed}`, label: `Start in ${typed}` }] : []),
-    { key: 'choose', label: 'Choose a folder…', description: 'Finder dialog' },
-    ...folders.filter((f) => !q || f.toLowerCase().includes(q)).map((f) => ({ key: `path:${f}`, label: baseName(f), description: shortPath(f) })),
+    ...typedOn.map((k) => ({ key: JSON.stringify([k, typed!.path]), label: `Start in ${typed!.path}${on(k)}` })),
+    { key: 'choose', label: 'Choose a folder…', description: computers.length ? 'Finder dialog, this Mac' : 'Finder dialog' },
+    ...folders.filter((f) => !q || `${f.dir} ${f.computer}`.toLowerCase().includes(q)).map((f) => ({ key: JSON.stringify([f.computer, f.dir]), label: baseName(f.dir), description: shortPath(f.dir) + on(f.computer) })),
   ];
-  const start = (dir: string) => {
+  const start = (dir: string, k: string) => {
     close();
-    openSession({ cwd: dir.replace(/^~(?=$|\/)/, window.binder.home) });
+    // Another computer's ~ is its own home: binder start there reads it so.
+    openSession(k ? { cwd: dir, computer: k } : { cwd: dir.replace(/^~(?=$|\/)/, window.binder.home) });
   };
   const pick = (item: PickerItem) => {
     if (item.key === 'choose') {
-      void window.binder.chooseFolder().then((dir) => dir && start(dir));
+      void window.binder.chooseFolder().then((dir) => dir && start(dir, ''));
       return;
     }
-    start(item.key.slice('path:'.length));
+    const [k, dir] = JSON.parse(item.key) as [string, string];
+    start(dir, k);
   };
   return (
     <Picker
@@ -125,7 +140,7 @@ export function NewSessionPanel({ cwd, close }: { cwd: string | null; close: () 
       search={{ query, onChange: setQuery, placeholder: 'Filter recent folders, or type a path (~/code/app)' }}
       onSelect={pick}
       onCancel={close}
-      initial={typed ? 0 : folders.length ? 1 : 0}
+      initial={typedOn.length ? 0 : folders.length ? 1 : 0}
     />
   );
 }

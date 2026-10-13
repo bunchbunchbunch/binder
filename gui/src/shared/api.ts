@@ -4,8 +4,14 @@ import type { HostMessage } from './wire';
 // What the window can ask of the main process (src/preload/index.ts exposes
 // it as `window.binder`).
 
-/** A row of `binder sessions`: live hosts first, then what /resume offers. */
-export type SessionRow = { id: string; cwd: string; title: string; live: boolean; running: boolean; lastUsedAt: string; branch?: string };
+/**
+ * A row of `binder sessions`: live hosts first, then what /resume offers.
+ * `computer`: where it runs, a name from config.json's `computers`; absent for this Mac.
+ */
+export type SessionRow = { id: string; cwd: string; title: string; live: boolean; running: boolean; lastUsedAt: string; branch?: string; computer?: string };
+
+/** One computer's sessions, and its home folder (for showing its paths as ~/...). */
+export type SessionList = { sessions: SessionRow[]; home: string };
 
 export type OpenRequest = {
   cwd: string;
@@ -15,6 +21,8 @@ export type OpenRequest = {
   resume?: boolean;
   // Flags for claude (binder's `-- <claude args>`) when this starts the session.
   args?: string[];
+  // Where the session runs: a name from config.json's `computers`; omitted for this Mac.
+  computer?: string;
 };
 
 // What another program asks over the control socket (BINDER_GUI_SOCKET): one
@@ -97,12 +105,15 @@ export type SettingsPatch = { permissionMode?: string | null; stickyPrompt?: boo
 // Remembered between launches.
 // `fresh`: no prompt yet, so there is no conversation to resume.
 // `active`: a session id, or pane:<name>.
-export type SavedLayout = { open: { sessionId: string; cwd: string; fresh?: boolean }[]; active: string | null };
+export type SavedLayout = { open: { sessionId: string; cwd: string; fresh?: boolean; computer?: string }[]; active: string | null };
 
 export type BinderApi = {
   /** The user's home folder, for showing paths as ~/... */
   home: string;
-  listSessions(): Promise<SessionRow[]>;
+  /** The sessions of this Mac, or of `computer` (a name from config.json's `computers`). */
+  listSessions(computer?: string): Promise<SessionList>;
+  /** config.json's `computers`: the other computers whose sessions the app shows, as SSH destinations. */
+  computers(): Promise<string[]>;
   /**
    * Attaches to a session as connection `conn` (the window names it first, so
    * it knows the snapshot that arrives before this resolves), starting a host
@@ -114,10 +125,10 @@ export type BinderApi = {
   close(conn: string): Promise<void>;
   onMessage(cb: (conn: string, msg: HostMessage) => void): () => void;
   /** The checkouts of the repo `cwd` is in, and its branch, for the resume picker's scopes. */
-  repoInfo(cwd: string): Promise<{ worktrees: string[]; branch: string | null }>;
-  /** The first line config.json's sidebar.script prints for a session; empty without one, or when it fails. */
-  sidebarScript(input: SidebarScriptInput): Promise<string>;
-  isDirectory(path: string): Promise<boolean>;
+  repoInfo(cwd: string, computer?: string): Promise<{ worktrees: string[]; branch: string | null }>;
+  /** The first line config.json's sidebar.script prints for a session (run where the session runs); empty without one, or when it fails. */
+  sidebarScript(input: SidebarScriptInput, computer?: string): Promise<string>;
+  isDirectory(path: string, computer?: string): Promise<boolean>;
   /** A Finder dialog; `hidden` shows hidden folders (config dirs are). */
   chooseFolder(opts?: { buttonLabel?: string; hidden?: boolean }): Promise<string | null>;
   /** Where a file dropped on the window lives. */

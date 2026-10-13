@@ -30,6 +30,9 @@ export const USAGE = `BinderTUI: one headless Claude Code session, in tabs
 
 Remote control (docs/remote-protocol.md):
   binder host [args]         run a session with no UI, for remote clients
+  binder start [--cwd <dir>] --session-id|--resume <id> [-- <claude args>]
+                             make sure a host runs the session (over SSH, in the login session)
+  binder attach <id>         connect stdin and stdout to a live session's host socket
   binder serve               the gateway: connect to the relay and serve enrolled clients
   binder sessions            list sessions (live ones first) as JSON, for the Mac app
   binder remote <command>    init, enroll <key> [name], revoke <name>, status

@@ -229,6 +229,13 @@ cp docs/com.binder.serve.plist ~/Library/LaunchAgents/   # edit the paths, then:
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.binder.serve.plist
 ```
 
+The Mac app reaches another computer's sessions over SSH instead of the relay (see "Other
+computers" in `../gui/README.md`). `binder start --cwd <dir> --session-id|--resume <id>` makes
+sure a host runs a session and prints its socket; `binder attach <id>` connects stdin and stdout
+to that socket. Run over SSH on macOS, `binder start` has launchd start the host in the login
+session (`gui/<uid>`): a process under sshd cannot read Claude Code's sign-in from the login
+keychain. That needs the user logged in at the Mac's screen.
+
 `binder remote status` shows the key, clients, relay, roots and the log
 (`~/.config/binder/remote.log`, one line per client request). `binder remote pause` refuses
 every client until `unpause`; `binder remote revoke <name>` removes one. With

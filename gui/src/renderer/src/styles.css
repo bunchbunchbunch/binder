@@ -228,6 +228,17 @@ kbd {
   margin-top: 2px;
 }
 
+/* The computer a session runs on, when it is not this Mac. */
+.session-row .computer {
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
 .sidebar-foot {
   padding: 8px;
   border-top: 1px solid var(--border);

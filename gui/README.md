@@ -5,7 +5,8 @@ responses rendered as real documents (heading sizes, tables, highlighted code, t
 the TUI's keys. Everything runs from the keyboard; the mouse works too.
 
 The app is a viewer. Each session runs in a binder session host (`binder host`), and the app
-attaches to it over the host's unix socket, the same protocol the phone client uses
+attaches to it over the host's unix socket (or over SSH, for
+[another computer's sessions](#other-computers)), the same protocol the phone client uses
 (`docs/remote-protocol.md` in the TUI). So the app, a binder TUI, and the phone can all watch
 and drive one session at once, and a session keeps running when the app quits (a host with
 nobody attached exits after 15 idle minutes).
@@ -261,13 +262,48 @@ returns a promise, and rejects when the page is not on the pane's origin.
 Every path is normalized (`..` too) and must land inside home: outside it, `completeFolder`
 offers nothing and the others reject. `makeFolder` only makes folders.
 
+## Other computers
+
+The app can show another Mac's sessions beside this one's, so what Claude opens on screen
+(browsers, test windows, the iOS Simulator) opens there. List SSH destinations in this Mac's
+config.json, each anything `ssh` takes (a `Host` in `~/.ssh/config`, or `user@host`):
+
+```json
+{ "computers": ["mini"] }
+```
+
+That computer's sessions show in the sidebar and `⌘K` with its name beside them. `⌘N` offers a
+typed folder on each computer that has it (`Start in ~/code/app on mini`), and a recent folder
+starts where its sessions ran. Restart the app after changing the list.
+
+The other computer needs:
+
+- SSH by key with no prompt (the app runs ssh with `BatchMode=yes`): Remote Login on, and this
+  Mac's key in its `~/.ssh/authorized_keys`.
+- binder on its login shell's PATH (`npm link` in its `tui`), Claude Code signed in, and you
+  logged in at its screen.
+
+The app runs that computer's `binder sessions`, `binder start` and `binder attach` over one shared
+ssh connection (`ControlMaster`). `binder start` sees the SSH login and has launchd start the
+host in your login session there, where it can read Claude Code's sign-in from the keychain
+(an SSH login cannot) and open windows on that screen; the host gets the login shell's
+environment. `binder attach` pipes the host's socket, so the session works as one here does.
+
+What stays here: panes, the clipboard, links (they open in this Mac's browser, so a `localhost`
+link from a session there points here), the control socket (its `open` starts sessions on this
+Mac), and Settings, which edit this Mac's config.json. A session on another computer reads that
+computer's config.json (`permissionMode`, `configDirs`), and `sidebar.script` runs there, where
+the files it reads are. Choose a folder… browses this Mac; type a path for another computer.
+
 ## How it works
 
 - `src/main/` is Electron's main process. `binder.ts` reads the login shell's environment once,
   finds `node` and `binder` (resolving fnm's per-shell PATH entries to real folders), lists
   sessions with `binder sessions`, and starts `binder host --session-id|--resume <id>` in a
-  session's folder when no host serves it. `hostConnection.ts` is one attached viewer: JSON lines
-  over the socket, replies matched to requests, everything else forwarded to the window.
+  session's folder when no host serves it. `remote.ts` does the same on
+  [another computer](#other-computers) over ssh. `hostConnection.ts` is one attached viewer: JSON
+  lines over the socket (or ssh's stdin and stdout), replies matched to requests, everything else
+  forwarded to the window.
   `panes.ts` runs the panes' programs in ptys (node-pty), and `control.ts` serves the control
   socket, passing requests to the window to carry out. `webPanes.ts` shows web panes' pages,
   each in a WebContentsView over the window, and passes the window its `⌘` keys from them;
@@ -296,7 +332,8 @@ claude (`tui/test/fakeClaude.mjs`), each with its own temporary state, config an
 so your sessions are never touched. They run the TUI in `../tui`, so build it first (`BINDERTUI`
 points elsewhere). `e2e/fixtures/make-showcase.mjs` writes the showcase turn they replay.
 `e2e/packaged.spec.ts` runs `Binder.app` from `npm run dist` with launchd's bare environment,
-as the Dock does.
+as the Dock does. `e2e/remote.spec.ts` drives another computer's sessions through
+`e2e/fixtures/fake-ssh`, which runs the command here with that computer's own state.
 
 ## License
 

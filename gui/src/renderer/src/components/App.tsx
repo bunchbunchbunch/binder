@@ -145,8 +145,8 @@ export function App() {
             {toastNow && <div className={`toast${toastNow.error ? ' error' : ''}`} style={{ bottom: 24 }}>{toastNow.text}</div>}
           </div>
         )}
-        {appPanel?.kind === 'switcher' && <SessionSwitcher cwd={cwd} initialScope={appPanel.scope} close={close} />}
-        {appPanel?.kind === 'new' && <NewSessionPanel cwd={cwd} close={close} />}
+        {appPanel?.kind === 'switcher' && <SessionSwitcher cwd={cwd} computer={activeConn?.computer} initialScope={appPanel.scope} close={close} />}
+        {appPanel?.kind === 'new' && <NewSessionPanel cwd={cwd} computer={activeConn?.computer} close={close} />}
         {appPanel?.kind === 'settings' && <SettingsPanel close={close} />}
         {appPanel?.kind === 'guide' && <Guide close={close} />}
       </main>

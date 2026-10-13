@@ -136,7 +136,9 @@ requests; any other `/command` in `send` goes to Claude Code as typed.
 ### The host socket
 
 The gateway talks to a session host over its unix socket with the same JSON, one message
-per line. The first line is a hello the gateway writes (a client's own `hello` is refused):
+per line. `binder attach <session id>` connects its stdin and stdout to this socket, so a client
+can reach a host through SSH (the Mac app does, for another computer's sessions); it then
+writes the hello itself. The first line is a hello the gateway writes (a client's own `hello` is refused):
 
 - `{"t":"hello","want":"info"}`: the host answers
   `{"t":"info","sessionId","cwd","title","running","model","pid"}` and closes.

@@ -3,17 +3,19 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, Rect, SavedLayout, Settings, SettingsPatch, SidebarScriptInput } from '../shared/api';
+import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, Rect, SavedLayout, SessionList, Settings, SettingsPatch, SidebarScriptInput } from '../shared/api';
 import type { HostMessage } from '../shared/wire';
-import { binder, ensureHost, listSessions, readPanes, readSettings, repoInfo, runSidebarScript, writeSettings, type PaneConfig, type WebPaneConfig } from './binder';
+import { binder, ensureHost, listSessions, readComputers, readPanes, readSettings, repoInfo, runSidebarScript, stateDir, writeSettings, type PaneConfig, type WebPaneConfig } from './binder';
 import { listenControl } from './control';
-import { HostConnection } from './hostConnection';
+import { HostConnection, processStream, socketStream, type HostStream } from './hostConnection';
+import { Remote } from './remote';
 import { paneInput, resizePane, startPane, stopPanes } from './panes';
 import { layoutWebPane, loadWebPane, startWebPane } from './webPanes';
 
-// The app's main process: one window, one socket connection per session the
-// window shows, the panes' programs and pages, and the control socket.
-// Everything about a session lives in its binder host.
+// The app's main process: one window, one host connection per session the
+// window shows (a socket here, or ssh to another computer), the panes'
+// programs and pages, and the control socket. Everything about a session
+// lives in its binder host.
 
 let win: BrowserWindow | null = null;
 // The window's connections; null while one is still opening (its host starting).
@@ -36,17 +38,36 @@ function post(conn: string, msg: HostMessage): void {
   if (win && !win.isDestroyed()) win.webContents.send('host', conn, msg);
 }
 
+// One per name in config.json's computers, made on first use; each shares one ssh connection.
+const remotes = new Map<string, Remote>();
+
+async function remote(name: string): Promise<Remote> {
+  const env = await loginEnv();
+  if (!readComputers(env).includes(name)) throw new Error(`config.json's computers has no ${name}`);
+  let r = remotes.get(name);
+  if (!r) remotes.set(name, (r = new Remote(name, env.BINDER_SSH || 'ssh', join(stateDir(env), 'ssh'))));
+  return r;
+}
+
+/** Makes sure a host serves the session, here or on req.computer, and opens the line to it. */
+async function hostStream(req: OpenRequest, sessionId: string, dropped: () => boolean): Promise<HostStream | null> {
+  const resume = Boolean(req.sessionId && req.resume);
+  if (!req.computer) return socketStream(await ensureHost(await binder(), req.cwd, sessionId, resume, req.args));
+  const r = await remote(req.computer);
+  await r.start(req.cwd, sessionId, resume, req.args);
+  return dropped() ? null : processStream(await r.attach(sessionId));
+}
+
 async function open(conn: string, req: OpenRequest): Promise<void> {
   conns.set(conn, null);
   // The window let it go (⌘W) while its host was starting.
   const dropped = () => !conns.has(conn);
   try {
-    const b = await binder();
     const sessionId = req.sessionId ?? randomUUID();
-    const path = await ensureHost(b, req.cwd, sessionId, Boolean(req.sessionId && req.resume), req.args);
-    if (dropped()) return;
+    const stream = await hostStream(req, sessionId, dropped);
+    if (!stream || dropped()) return stream?.end();
     const hc = new HostConnection(
-      path,
+      stream,
       (msg) => post(conn, msg),
       (reason) => {
         conns.delete(conn);
@@ -97,7 +118,8 @@ function openExternal(url: string): void {
 }
 
 function registerIpc(): void {
-  ipcMain.handle('listSessions', async () => listSessions(await binder()));
+  ipcMain.handle('listSessions', async (_e, computer?: string): Promise<SessionList> => (computer ? (await remote(computer)).sessions() : { sessions: await listSessions(await binder()), home: homedir() }));
+  ipcMain.handle('computers', async () => readComputers(await loginEnv()));
   ipcMain.handle('open', (_e, conn: string, req: OpenRequest) => open(conn, req));
   ipcMain.handle('request', (_e, conn: string, t: string, fields?: Record<string, unknown>) => {
     const hc = conns.get(conn);
@@ -108,9 +130,15 @@ function registerIpc(): void {
     conns.get(conn)?.close();
     conns.delete(conn);
   });
-  ipcMain.handle('repoInfo', (_e, cwd: string) => repoInfo(cwd));
-  ipcMain.handle('sidebarScript', async (_e, input: SidebarScriptInput) => runSidebarScript(await loginEnv(), input));
-  ipcMain.handle('isDirectory', (_e, path: string) => {
+  ipcMain.handle('repoInfo', async (_e, cwd: string, computer?: string) => (computer ? (await remote(computer)).repoInfo(cwd) : repoInfo(cwd)));
+  ipcMain.handle('sidebarScript', async (_e, input: SidebarScriptInput, computer?: string) => {
+    const env = await loginEnv();
+    if (!computer) return runSidebarScript(env, input);
+    const command = readSettings(env).sidebar.script;
+    return command ? (await remote(computer)).sidebarScript(command, input) : '';
+  });
+  ipcMain.handle('isDirectory', async (_e, path: string, computer?: string) => {
+    if (computer) return (await remote(computer)).isDirectory(path);
     const p = resolve(path.replace(/^~(?=$|\/)/, homedir()));
     return existsSync(p) && statSync(p).isDirectory();
   });

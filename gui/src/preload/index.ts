@@ -7,7 +7,8 @@ import type { HostMessage } from '../shared/wire';
 
 const api: BinderApi = {
   home: process.env.HOME ?? '',
-  listSessions: () => ipcRenderer.invoke('listSessions'),
+  listSessions: (computer) => ipcRenderer.invoke('listSessions', computer),
+  computers: () => ipcRenderer.invoke('computers'),
   open: (conn, req) => ipcRenderer.invoke('open', conn, req),
   request: (conn, t, fields) => ipcRenderer.invoke('request', conn, t, fields),
   close: (conn) => ipcRenderer.invoke('close', conn),
@@ -16,9 +17,9 @@ const api: BinderApi = {
     ipcRenderer.on('host', listener);
     return () => void ipcRenderer.off('host', listener);
   },
-  repoInfo: (cwd) => ipcRenderer.invoke('repoInfo', cwd),
-  sidebarScript: (input) => ipcRenderer.invoke('sidebarScript', input),
-  isDirectory: (path) => ipcRenderer.invoke('isDirectory', path),
+  repoInfo: (cwd, computer) => ipcRenderer.invoke('repoInfo', cwd, computer),
+  sidebarScript: (input, computer) => ipcRenderer.invoke('sidebarScript', input, computer),
+  isDirectory: (path, computer) => ipcRenderer.invoke('isDirectory', path, computer),
   chooseFolder: (opts) => ipcRenderer.invoke('chooseFolder', opts),
   pathForFile: (file) => webUtils.getPathForFile(file),
   clipboardImage: () => ipcRenderer.invoke('clipboardImage'),
