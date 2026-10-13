@@ -118,7 +118,12 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
             key={label}
             className={`option${i === cursor ? ' cursor' : ''}${label === OTHER ? ' other' : ''}`}
             onMouseMove={() => i !== cursor && setCursor(i)}
-            onClick={() => (q.multiSelect && label !== OTHER ? toggle(i) : choose(i))}
+            onClick={() => {
+              // A drag that selected the option's text is not a pick.
+              if (!window.getSelection()?.isCollapsed) return;
+              if (q.multiSelect && label !== OTHER) toggle(i);
+              else choose(i);
+            }}
           >
             <span className="mark">{mark}</span>
             <span className="n">{i + 1}.</span>

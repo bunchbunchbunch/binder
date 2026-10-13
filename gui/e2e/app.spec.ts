@@ -73,6 +73,36 @@ test('answers an AskUserQuestion from the keyboard', async () => {
   await expect.poll(() => JSON.parse(readFileSync(answers, 'utf8')).response.response.updatedInput.answers).toEqual({ 'Which color do you prefer?': 'Blue' });
 });
 
+test("a question's text can be selected and copied; selecting an option does not answer", async () => {
+  run = await launch(tuiFixture('ask-and-interrupt.jsonl'), { BINDER_FAKE_DELAY_MS: '2' });
+  const { app, page, project } = run;
+  await newSession(page, project);
+  await page.keyboard.type('ask me a color');
+  await page.keyboard.press('Enter');
+  const card = page.locator('.question');
+  await expect(card).toBeVisible({ timeout: 20000 });
+  const selected = () => page.evaluate(() => window.getSelection()?.toString() ?? '');
+
+  await card.locator('.q').click({ clickCount: 3 });
+  expect(await selected()).toContain('Which color do you prefer?');
+  await app.evaluate(({ clipboard }) => clipboard.writeText(''));
+  await page.keyboard.press('Meta+c');
+  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toContain('Which color do you prefer?');
+
+  // A drag across an option selects its text and leaves the question open.
+  const desc = await card.locator('.option .desc').first().boundingBox();
+  await page.mouse.move(desc!.x + 1, desc!.y + desc!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(desc!.x + desc!.width - 1, desc!.y + desc!.height / 2, { steps: 5 });
+  await page.mouse.up();
+  expect(await selected()).toContain('warm');
+  await page.waitForTimeout(300);
+  await expect(card).toBeVisible();
+
+  await card.locator('.option', { hasText: 'Blue' }).click();
+  await expect(card).toHaveCount(0);
+});
+
 test('opens the command menu and the model panel', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;
