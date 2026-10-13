@@ -470,7 +470,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         <Text dimColor>{titledRule(columns, title)}</Text>
       )}
       {answering && state.question && (
-        <QuestionView question={state.question} onAnswer={onAnswer} onDeny={state.question.toolName === 'AskUserQuestion' ? undefined : onDeny} />
+        <QuestionView question={state.question} onAnswer={onAnswer} onDeny={onDeny} />
       )}
       {/* Hidden, not unmounted, under a question: remounting would bring back the initial text and drop what was typed. */}
       <Box display={answering ? 'none' : 'flex'} flexDirection="column">

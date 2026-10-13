@@ -105,7 +105,7 @@ paused, or this client revoked).
 | `task_output` | `taskId` | `{output, totalBytes, truncated}`: the end of a background shell's or monitor's output, at most its last 8 KiB, escape sequences included. Refused for an agent |
 | `background` | | `{}`; the running turn's foreground commands and agents carry on in the background (Claude Code's `Ctrl+B`) |
 | `answer` | `requestId`, `answers` | `{}`; AskUserQuestion: `answers` maps question text to the chosen label(s) (comma-separated for multi-select) |
-| `allow` / `deny` | `requestId` | `{}`; a permission prompt |
+| `allow` / `deny` | `requestId` | `{}`; a permission prompt. `deny` also declines an AskUserQuestion: Claude is told the user declined and carries on |
 | `rewind_targets` | | `{targets: [{uuid, prompt, tabId}]}` newest first |
 | `rewind_preview` | `uuid` | `{canRewind, files, error}`: whether the code can be restored to before that prompt, and how many files it would change |
 | `rewind` | `uuid`, `mode` (`both`, `conversation`, `code`) | `{prefill?}`: the prompt to put back in the composer |

@@ -162,6 +162,28 @@ describe('App', () => {
     ui.unmount();
   });
 
+  it('Esc declines an AskUserQuestion', async () => {
+    const cwd = process.cwd();
+    const stateDir = setup('ask-and-interrupt.jsonl', { BINDER_FAKE_DELAY_MS: '5' });
+    const answersOut = join(stateDir, 'answers.json');
+    process.env.BINDER_FAKE_ANSWERS_OUT = answersOut;
+    const sessionId = '00000000-0000-4000-8000-000000000023';
+    const session = new Session({ sessionId, resume: false, cwd, passthrough: [] });
+    session.start();
+    const { ui } = mount(session, sessionId, cwd);
+
+    await type(ui, 'ask me a color');
+    await until(() => plainFrame(ui).includes('esc declines'), 8000, () => ui.lastFrame());
+    await sleep(50); // let the picker's input hook attach after its first paint
+    ui.stdin.write('\x1b');
+    await until(() => existsSync(answersOut), 8000, () => ui.lastFrame());
+    expect(JSON.parse(readFileSync(answersOut, 'utf8')).response.response.behavior).toBe('deny');
+    await until(() => !plainFrame(ui).includes('esc declines'), 8000, () => ui.lastFrame());
+
+    await session.close();
+    ui.unmount();
+  });
+
   // Bypass mode still asks when Claude Code's own safety checks fire; the
   // prompt says why, or it looks like bypass mode is broken.
   it('shows why a permission prompt was raised, and Allow lets the tool run', async () => {

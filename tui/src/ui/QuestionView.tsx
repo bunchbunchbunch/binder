@@ -103,7 +103,7 @@ export function QuestionView({ question, onAnswer, onDeny }: Props) {
             <Text color="#7CC4FF" bold>{'❯ '}</Text>{typing}<Text inverse> </Text>
           </Text>
         ) : (
-          <Text dimColor>{q.multiSelect ? '↑↓ move · space toggles · enter confirms' : '↑↓ move · enter or number selects'}{onDeny ? ' · esc denies' : ''}</Text>
+          <Text dimColor>{q.multiSelect ? '↑↓ move · space toggles · enter confirms' : '↑↓ move · enter or number selects'}{onDeny ? (question.toolName === 'AskUserQuestion' ? ' · esc declines' : ' · esc denies') : ''}</Text>
         )}
       </Box>
     </Box>

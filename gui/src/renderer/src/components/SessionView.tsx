@@ -450,7 +450,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
               question={s.question}
               active={visible && !panel && !appPanelOpen}
               onAnswer={(answers) => void run('answer', { requestId: s.question!.requestId, answers })}
-              onDeny={s.question.kind === 'permission' ? () => void run('deny', { requestId: s.question!.requestId }) : undefined}
+              onDeny={() => void run('deny', { requestId: s.question!.requestId })}
             />
           )}
           {/* Hidden, not unmounted, under a question: the draft stays. */}

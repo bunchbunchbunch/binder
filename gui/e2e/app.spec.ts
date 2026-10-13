@@ -103,6 +103,23 @@ test("a question's text can be selected and copied; selecting an option does not
   await expect(card).toHaveCount(0);
 });
 
+for (const how of ['Esc', 'a click on its hint'] as const) {
+  test(`${how} declines an AskUserQuestion`, async () => {
+    const answers = join(mkdtempSync('/tmp/bga-'), 'answers.json');
+    run = await launch(tuiFixture('ask-and-interrupt.jsonl'), { BINDER_FAKE_DELAY_MS: '2', BINDER_FAKE_ANSWERS_OUT: answers });
+    await newSession(run.page, run.project);
+    await run.page.keyboard.type('ask me a color');
+    await run.page.keyboard.press('Enter');
+    const card = run.page.locator('.question');
+    await expect(card.locator('.decline')).toHaveText('esc declines', { timeout: 20000 });
+    if (how === 'Esc') await run.page.keyboard.press('Escape');
+    else await card.locator('.decline').click();
+    await expect(card).toHaveCount(0);
+    await expect(run.page.locator('.composer textarea')).toBeFocused();
+    await expect.poll(() => JSON.parse(readFileSync(answers, 'utf8')).response.response.behavior).toBe('deny');
+  });
+}
+
 test('opens the command menu and the model panel', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;

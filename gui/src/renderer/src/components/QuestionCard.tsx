@@ -3,7 +3,8 @@ import type { WireQuestion } from '@shared/wire';
 
 // AskUserQuestion and permission prompts, in place of the prompt box:
 // Up/Down move, a number picks, Space toggles in multi-select, Enter
-// confirms, Esc denies a permission. "Other" lets you type an answer.
+// confirms, Esc declines the question (or denies a permission). "Other"
+// lets you type an answer.
 // While `active` the card takes these keys wherever focus is, so a click
 // elsewhere in the window never leaves the question unanswerable.
 
@@ -17,7 +18,7 @@ function inputSummary(toolName: string | undefined, input: unknown): string {
   return JSON.stringify(input, null, 2);
 }
 
-export function QuestionCard({ question, active, onAnswer, onDeny }: { question: WireQuestion; active: boolean; onAnswer: (answers: Record<string, string>) => void; onDeny?: () => void }) {
+export function QuestionCard({ question, active, onAnswer, onDeny }: { question: WireQuestion; active: boolean; onAnswer: (answers: Record<string, string>) => void; onDeny: () => void }) {
   const [qi, setQi] = useState(0);
   const [cursor, setCursor] = useState(0);
   const [picked, setPicked] = useState<Set<number>>(new Set());
@@ -78,10 +79,8 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
     const digit = Number(e.key);
     if (e.key === 'ArrowUp') setCursor((cursor - 1 + labels.length) % labels.length);
     else if (e.key === 'ArrowDown') setCursor((cursor + 1) % labels.length);
-    else if (e.key === 'Escape') {
-      if (onDeny) onDeny();
-      else handled = false;
-    } else if (!e.metaKey && !e.ctrlKey && digit >= 1 && digit <= labels.length) {
+    else if (e.key === 'Escape') onDeny();
+    else if (!e.metaKey && !e.ctrlKey && digit >= 1 && digit <= labels.length) {
       setCursor(digit - 1);
       if (!q.multiSelect || labels[digit - 1] === OTHER) choose(digit - 1);
     } else if (e.key === ' ' && q.multiSelect) toggle(cursor);
@@ -135,7 +134,14 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
       {typing !== null && <input ref={other} className="other-input" value={typing} placeholder="Type your answer, then Enter" onChange={(e) => setTyping(e.target.value)} />}
       <div className="hint">
         {typing !== null ? 'Enter sends · Esc goes back' : q.multiSelect ? '↑↓ move · space toggles · ⏎ confirms' : '↑↓ move · ⏎ or a number selects'}
-        {onDeny && typing === null ? ' · esc denies' : ''}
+        {typing === null && (
+          <>
+            {' · '}
+            <button className="decline" onClick={onDeny}>
+              {question.kind === 'ask' ? 'esc declines' : 'esc denies'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

@@ -1687,6 +1687,18 @@ kbd {
   margin-top: 8px;
 }
 
+.question .hint .decline {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.question .hint .decline:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 /* ───────── Pickers (panels) ───────── */
 
 .overlay {
