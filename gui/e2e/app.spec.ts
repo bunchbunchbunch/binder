@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dragsAt, launch, newSession, shot, SHOWCASE, tuiFixture, type Launched } from './helpers';
 
@@ -496,4 +496,36 @@ test('the @ menu, Tab completion, and a long paste', async () => {
   await expect(box).toHaveValue('[Pasted text #1 +4 lines]');
   await page.keyboard.press('Enter');
   await expect(page.locator('.prompt')).toHaveText(long);
+});
+
+test("⌘T opens the new-session panel, which picks the folder named by the search; Finder is ⌘O, not a row", async () => {
+  run = await launch(SHOWCASE);
+  const { page, tmp } = run;
+  // Sessions in projects and two folders inside it, projects the least recent.
+  const top = join(tmp, 'projects');
+  [join(top, 'foobar'), join(top, 'barbaz'), top].forEach((cwd, i) => {
+    mkdirSync(cwd, { recursive: true });
+    const dir = join(tmp, 'claude', 'projects', cwd.replace(/\//g, '-'));
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `00000000-0000-4000-8000-00000000000${i}.jsonl`);
+    writeFileSync(file, JSON.stringify({ type: 'user', cwd, entrypoint: 'cli', message: { content: `Work in ${cwd}` } }) + '\n');
+    const t = new Date(Date.now() - (i + 1) * 3600_000);
+    utimesSync(file, t, t);
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.locator('.session-row')).toHaveCount(3, { timeout: 15000 });
+
+  // ⌘T opens it, as ⌘N does.
+  await page.keyboard.press('Meta+t');
+  const labels = page.locator('.picker-item .label');
+  await expect(labels).toHaveText(['foobar', 'barbaz', 'projects']);
+  await expect(page.locator('.picker-hint')).toContainText('⌘O choose in Finder');
+
+  // Typing keeps the cursor on the top row, the folder whose own name matches.
+  await page.keyboard.type('projects');
+  await expect(labels).toHaveText(['projects', 'foobar', 'barbaz']);
+  await expect(page.locator('.picker-item.picked .label')).toHaveText('projects');
+  await page.keyboard.press('Enter');
+  await page.locator('.session:not([hidden]) .composer textarea').waitFor({ state: 'visible', timeout: 30000 });
+  await expect(page.locator('.session-row.active .sub')).toHaveText('projects');
 });

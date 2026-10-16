@@ -205,7 +205,7 @@ function registerIpc(): void {
 }
 
 // The standard Mac menus plus Settings… and the guide, minus the shortcuts
-// the window uses itself (Cmd+N, Cmd+W, Cmd+K, Cmd+1-9 act on sessions).
+// the window uses itself (Cmd+N, Cmd+T, Cmd+W, Cmd+K, Cmd+1-9 act on sessions).
 function buildMenu(): void {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([

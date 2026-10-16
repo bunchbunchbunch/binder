@@ -74,7 +74,7 @@ const KEYS: [string, string][] = [
 
 // The ⌘ keys: the window's, which the TUI has no need for.
 const WINDOW_KEYS: [string, string][] = [
-  ['Cmd+N', 'New session in a folder'],
+  ['Cmd+N or Cmd+T', 'New session in a folder'],
   ['Cmd+K', 'Open a session (search all of them)'],
   ['Cmd+1-9, Cmd+Shift+[ / ]', 'Switch between open sessions'],
   ['Cmd+W', 'Close the session in the app (its host keeps running until idle)'],

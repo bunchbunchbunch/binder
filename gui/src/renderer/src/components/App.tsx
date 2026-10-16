@@ -10,7 +10,7 @@ import { WebPaneView } from './WebPaneView';
 import { Logo } from './Welcome';
 
 // The window: the session sidebar, the panes and open sessions (one on
-// screen), and the window-wide keys: ⌘N, ⌘K, ⌘W, ⌘1-9, ⌘⇧[ ], ⌘,, ⌘/, ⌃⌘S
+// screen), and the window-wide keys: ⌘N, ⌘T, ⌘K, ⌘W, ⌘1-9, ⌘⇧[ ], ⌘,, ⌘/, ⌃⌘S
 // (also when a web pane's page has the keyboard), and Ctrl+C (copy, or twice
 // to quit).
 

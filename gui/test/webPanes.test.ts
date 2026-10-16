@@ -39,8 +39,9 @@ describe("the window's keys, as a web pane's page passes them on", () => {
   const key = (code: string, mods: { meta?: boolean; ctrl?: boolean; alt?: boolean; shift?: boolean } = {}) =>
     appKey({ code, meta: mods.meta ?? true, ctrl: mods.ctrl ?? false, alt: mods.alt ?? false, shift: mods.shift ?? false });
 
-  it('are ⌘N, ⌘K, ⌘,, ⌘/, ⌘W, ⌘1-9, ⌘⇧[ ] and ⌃⌘S', () => {
+  it('are ⌘N, ⌘T, ⌘K, ⌘,, ⌘/, ⌘W, ⌘1-9, ⌘⇧[ ] and ⌃⌘S', () => {
     expect(key('KeyN')).toBe('new');
+    expect(key('KeyT')).toBe('new');
     expect(key('KeyK')).toBe('switcher');
     expect(key('Comma')).toBe('settings');
     expect(key('Slash')).toBe('guide');

@@ -6,7 +6,7 @@ import { errText, openSession, refreshSessions, sameComputer, sessionFacts, setS
 import { Picker, type PickerItem } from '../components/Picker';
 
 // Panels that act on the window rather than one session: picking a session
-// to open (⌘K, /resume), starting a new one in a folder (⌘N), and binder's
+// to open (⌘K, /resume), starting a new one in a folder (⌘N, ⌘T), and binder's
 // settings (⌘,, /settings).
 
 type Scope = 'folder' | 'worktrees' | 'branch' | 'all';
@@ -92,6 +92,13 @@ function recentFolders(sessions: SessionRow[], first: Folder | null): Folder[] {
   return out;
 }
 
+/** How well a folder matches search `q` (lowercase), best first: its own name
+ *  is `q`, starts with it, holds it; last, only a parent's name does. */
+function folderRank(dir: string, q: string): number {
+  const name = baseName(dir).toLowerCase();
+  return name === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : 3;
+}
+
 // Where a picker row starts a session: " on <computer>", or nothing for this Mac.
 const on = (computer: string) => (computer ? ` on ${computer}` : '');
 
@@ -116,10 +123,11 @@ export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; 
   const folders = useMemo(() => recentFolders(sessions, cwd ? { dir: cwd, computer: computer ?? '' } : null), [sessions, cwd, computer]);
   const q = query.toLowerCase();
   const typedOn = typed?.on ?? [];
+  const matches = folders.filter((f) => !q || `${f.dir} ${f.computer}`.toLowerCase().includes(q));
+  if (q) matches.sort((a, b) => folderRank(a.dir, q) - folderRank(b.dir, q));
   const items: PickerItem[] = [
     ...typedOn.map((k) => ({ key: JSON.stringify([k, typed!.path]), label: `Start in ${typed!.path}${on(k)}` })),
-    { key: 'choose', label: 'Choose a folder…', description: computers.length ? 'Finder dialog, this Mac' : 'Finder dialog' },
-    ...folders.filter((f) => !q || `${f.dir} ${f.computer}`.toLowerCase().includes(q)).map((f) => ({ key: JSON.stringify([f.computer, f.dir]), label: baseName(f.dir), description: shortPath(f.dir) + on(f.computer) })),
+    ...matches.map((f) => ({ key: JSON.stringify([f.computer, f.dir]), label: baseName(f.dir), description: shortPath(f.dir) + on(f.computer) })),
   ];
   const start = (dir: string, k: string) => {
     close();
@@ -127,10 +135,6 @@ export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; 
     openSession(k ? { cwd: dir, computer: k } : { cwd: dir.replace(/^~(?=$|\/)/, window.binder.home) });
   };
   const pick = (item: PickerItem) => {
-    if (item.key === 'choose') {
-      void window.binder.chooseFolder().then((dir) => dir && start(dir, ''));
-      return;
-    }
     const [k, dir] = JSON.parse(item.key) as [string, string];
     start(dir, k);
   };
@@ -142,7 +146,17 @@ export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; 
       search={{ query, onChange: setQuery, placeholder: 'Filter recent folders, or type a path (~/code/app)' }}
       onSelect={pick}
       onCancel={close}
-      initial={typedOn.length ? 0 : folders.length ? 1 : 0}
+      empty={query ? 'No folder matches' : 'No recent folders'}
+      hint={
+        <>
+          ↑↓ move · ⏎ start · <kbd>⌘O</kbd> choose in Finder{computers.length ? ' (this Mac)' : ''} · esc close
+        </>
+      }
+      onKey={(e) => {
+        if (!e.metaKey || e.ctrlKey || e.altKey || e.key !== 'o') return false;
+        void window.binder.chooseFolder().then((dir) => dir && start(dir, ''));
+        return true;
+      }}
     />
   );
 }

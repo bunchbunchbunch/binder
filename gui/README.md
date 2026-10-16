@@ -106,7 +106,7 @@ Added for the sidebar:
 
 | Key | Action |
 |-----|--------|
-| `⌘N` | new session: pick a recent folder, type a path, or choose one in Finder |
+| `⌘N` or `⌘T` | new session: pick a recent folder, type a path, or `⌘O` to choose one in Finder |
 | `⌘K` | open a session: search every session (`Ctrl+A` all projects, `Ctrl+W` this repo's worktrees, `Ctrl+B` this branch) |
 | `⌘1` to `⌘9`, `⌘⇧[` / `⌘⇧]` | switch between panes and open sessions |
 | `⌘W` | close the session in the app (its host keeps running until idle) |
@@ -227,7 +227,7 @@ with cookies of its own that last between launches.
 
 - **Keys and focus:** selecting the pane gives the page the keyboard, and the page keeps its
   own focused field. Every key goes to the page except the app's: `⌘1` to `⌘9`, `⌘⇧[` /
-  `⌘⇧]`, `⌘K`, `⌘N`, `⌘W`, `⌘,`, `⌘/` and `⌃⌘S`. So `⌘C`, `⌘V`, `⌘X`, `⌘A` and `⌘Z` edit the
+  `⌘⇧]`, `⌘K`, `⌘N`, `⌘T`, `⌘W`, `⌘,`, `⌘/` and `⌃⌘S`. So `⌘C`, `⌘V`, `⌘X`, `⌘A` and `⌘Z` edit the
   page's fields as usual. Another view, or a panel such as `⌘K`, takes the keyboard back to
   the app.
 - **Its origin only:** the page stays on its URL's origin. Links elsewhere, and new windows,
