@@ -7,7 +7,7 @@
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
   --mono: 'SF Mono', ui-monospace, Menlo, Monaco, monospace;
   --sidebar-w: 248px;
-  --titlebar-h: 46px;
+  --titlebar-h: 54px;
   --read-w: 860px;
   --radius: 10px;
 
@@ -358,6 +358,8 @@ kbd {
   gap: 4px;
   min-width: 0;
   flex: 1;
+  /* Room to drag the window by, however many tabs. */
+  margin-right: 60px;
 }
 
 .tab-more {
@@ -385,7 +387,11 @@ kbd {
   overflow-x: auto;
   scrollbar-width: none;
   min-width: 0;
-  flex: 1;
+  /* As wide as its tabs, so the bar past them still drags the window. */
+  flex: 0 1 auto;
+  /* The strip, not each tab: a tab's region is its whole box, even scrolled
+     out of view, so tabs past the left edge would cover the sidebar's top. */
+  -webkit-app-region: no-drag;
 }
 
 .tabs::-webkit-scrollbar {
@@ -393,7 +399,8 @@ kbd {
 }
 
 .tab {
-  -webkit-app-region: no-drag;
+  /* No region of its own (see .tabs). `none` still inherits the strip's. */
+  -webkit-app-region: initial;
   display: flex;
   align-items: center;
   gap: 6px;

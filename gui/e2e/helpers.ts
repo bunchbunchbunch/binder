@@ -86,3 +86,23 @@ export async function newSession(page: Page, dir: string): Promise<void> {
   await page.keyboard.press('Enter');
   await page.locator('.session:not([hidden]) .composer textarea').waitFor({ state: 'visible', timeout: 30000 });
 }
+
+/** Whether pressing at (x, y) drags the window. Blink's rule (LocalFrameView::CollectDraggableRegions):
+ *  each box with an app-region gives its whole border box, in tree order and
+ *  unclipped by scrolling, and the last one holding the point decides. */
+export const dragsAt = (page: Page, x: number, y: number): Promise<boolean> =>
+  page.evaluate(
+    ([x, y]) => {
+      let drags = false;
+      for (const el of document.querySelectorAll('*')) {
+        const r = el.getBoundingClientRect();
+        if (!el.getClientRects().length || x < r.left || x >= r.right || y < r.top || y >= r.bottom) continue;
+        const style = getComputedStyle(el);
+        if (style.visibility !== 'visible' || style.display === 'inline') continue;
+        const region = style.getPropertyValue('app-region');
+        if (region === 'drag' || region === 'no-drag') drags = region === 'drag';
+      }
+      return drags;
+    },
+    [x, y],
+  );

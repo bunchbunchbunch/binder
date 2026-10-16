@@ -255,7 +255,7 @@ function createWindow(): void {
     minHeight: 480,
     title: 'Binder',
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 18 },
+    trafficLightPosition: { x: 16, y: 22 },
     vibrancy: 'sidebar',
     visualEffectState: 'followWindow',
     backgroundColor: '#00000000',

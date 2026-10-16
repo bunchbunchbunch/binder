@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launch, newSession, shot, SHOWCASE, tuiFixture, type Launched } from './helpers';
+import { dragsAt, launch, newSession, shot, SHOWCASE, tuiFixture, type Launched } from './helpers';
 
 let run: Launched | null = null;
 test.afterEach(async () => {
@@ -426,6 +426,14 @@ test('fits a narrow window, counts tabs out of view, and hides the sidebar', asy
   // On the last tab only earlier tabs are out of view, and on the first only later ones.
   await expect(page.locator('.tab-more')).toHaveCount(1);
   await expect(page.locator('.tab-more')).toHaveText(/‹ \d+/);
+  // A full strip still leaves the window to drag: by the bar's right end, and
+  // by the sidebar's top, which the tabs scrolled past it must not cover.
+  const bar = (await page.locator('.session:not([hidden]) .titlebar').boundingBox())!;
+  const mid = bar.y + bar.height / 2;
+  expect(await dragsAt(page, bar.x + bar.width - 30, mid)).toBe(true);
+  expect(await dragsAt(page, bar.x / 2, mid)).toBe(true);
+  const tab = (await page.locator('.tab.active').boundingBox())!;
+  expect(await dragsAt(page, tab.x + tab.width / 2, mid)).toBe(false);
   await page.keyboard.press('Alt+Digit1');
   await expect(page.locator('.tab-more')).toHaveCount(1);
   await expect(page.locator('.tab-more')).toHaveText(/\d+ ›/);
