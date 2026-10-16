@@ -160,6 +160,59 @@ test('opens the command menu and the model panel', async () => {
   await expect(toast).toHaveText('Effort: medium');
   await expect(page.locator('.statusbar')).toContainText('medium');
   await expect(page.locator('.composer textarea')).toBeFocused();
+
+  // A click on the status bar's model or effort level opens its picker.
+  await page.locator('.statusbar .pick.model').click();
+  await expect(picker.locator('.picker-title')).toContainText('Model');
+  await page.keyboard.press('Escape');
+  await page.locator('.statusbar .pick.effort').click();
+  await expect(picker.locator('.picker-title')).toContainText('Effort');
+  await expect(picker.locator('.picker-item.picked')).toContainText('medium');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(toast).toHaveText('Effort: high');
+  await expect(page.locator('.statusbar .pick.effort')).toHaveText('high');
+  await expect(page.locator('.composer textarea')).toBeFocused();
+});
+
+test('a click on the permission mode badge switches the mode', async () => {
+  run = await launch(SHOWCASE);
+  const { page, project } = run;
+  await newSession(page, project);
+  await page.keyboard.type('Fix the table alignment');
+  await page.keyboard.press('Enter');
+  const badge = page.locator('.statusbar .badge');
+  await expect(badge).toHaveText('accept edits', { timeout: 20000 });
+  await badge.click();
+  const picker = page.locator('.picker');
+  await expect(picker.locator('.picker-title')).toContainText('Permission mode');
+  await expect(picker.locator('.picker-item.picked')).toContainText('accept edits');
+  await picker.locator('.picker-item', { hasText: 'plan mode' }).click();
+  await expect(page.locator('.toast')).toHaveText('Permission mode: plan mode');
+  await expect(badge).toHaveText('plan mode');
+  await expect(badge).toHaveClass(/\bplan\b/);
+  await expect(picker).toHaveCount(0);
+  await expect(page.locator('.composer textarea')).toBeFocused();
+});
+
+test('a click on the folder moves the session to another one', async () => {
+  run = await launch(SHOWCASE);
+  const { page, project, tmp } = run;
+  const other = join(tmp, 'other');
+  mkdirSync(other);
+  await newSession(page, project);
+  await page.locator('.statusbar .cwd').click();
+  const picker = page.locator('.picker');
+  await expect(picker.locator('.picker-title')).toContainText('Move to a folder');
+  await page.keyboard.type(other);
+  await expect(picker.locator('.picker-item .label').first()).toHaveText(`Move to ${other}`);
+  await page.keyboard.press('Enter');
+  // A folder Claude Code has not been trusted with asks first, as /cd does.
+  await expect(picker.locator('.picker-title')).toContainText('Trust this folder?');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.statusbar .cwd')).toHaveText(other);
+  await expect(picker).toHaveCount(0);
+  await expect(page.locator('.composer textarea')).toBeFocused();
 });
 
 test('⌘/ and Help > Binder Guide open the guide; Esc closes it', async () => {

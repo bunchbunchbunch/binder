@@ -95,6 +95,7 @@ const CONTROL = {
   }),
   set_model: () => ({}),
   apply_flag_settings: () => ({}),
+  set_permission_mode: (r) => ({ mode: r.mode === 'manual' ? 'default' : r.mode }),
   mcp_status: () => ({ mcpServers: mcp }),
   mcp_toggle: (r) => {
     const s = mcp.find((x) => x.name === r.serverName);

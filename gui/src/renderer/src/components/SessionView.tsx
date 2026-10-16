@@ -6,7 +6,7 @@ import { turnVerb } from '../lib/work';
 import { closeConn, errText, getState, openSession, reopen, request, setActiveTab, setState, toast, useApp, type Conn } from '../store';
 import type { BackgroundTask, WireBlock } from '@shared/wire';
 import { ConfirmPanel } from './Picker';
-import { ArtifactsPanel, ChromePanel, cycleEffort, cycleModel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
+import { ArtifactsPanel, CdPanel, ChromePanel, cycleEffort, cycleModel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, PermissionModePanel, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
 import { Composer, type ComposerHandle } from './Composer';
 import { QuestionCard } from './QuestionCard';
 import { HelpView } from './Shortcuts';
@@ -20,7 +20,7 @@ import { Welcome } from './Welcome';
 // session on screen it takes the TUI's keys.
 
 type Panel =
-  | { kind: 'model' | 'effort' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' }
+  | { kind: 'model' | 'effort' | 'mode' | 'cd' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' }
   // `taskId`: the task to show first.
   | { kind: 'tasks'; taskId?: string }
   | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
@@ -338,6 +338,10 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
         return <ModelPanel {...common} current={s?.model ?? null} />;
       case 'effort':
         return <EffortPanel {...common} model={s?.model ?? null} current={s?.effort ?? null} />;
+      case 'mode':
+        return <PermissionModePanel {...common} current={s?.permissionMode ?? null} />;
+      case 'cd':
+        return <CdPanel {...common} cwd={s?.cwd ?? c.cwd} computer={c.computer} onPick={(dir) => changeDir(dir)} />;
       case 'mcp':
         return <McpPanel {...common} />;
       case 'chrome':
@@ -469,7 +473,14 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
               onSubmit={send}
             />
           </div>
-          <StatusBar s={s} />
+          <StatusBar
+            s={s}
+            onPick={(kind) => {
+              if (c.status !== 'attached') return;
+              if (kind === 'cd' && busy) return toast('Wait for the running turn to finish (or press Esc) before /cd', true);
+              setPanel({ kind });
+            }}
+          />
           <Toast />
         </div>
       )}

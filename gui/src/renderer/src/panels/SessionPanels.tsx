@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { BackgroundTask, ToolBlock, WireBlock, WireState, WireTab } from '@shared/wire';
-import { elapsed, firstLine, modelDisplayName } from '../lib/format';
-import { errText, getState, request, toast } from '../store';
+import { baseName, elapsed, firstLine, modelDisplayName, shortPath } from '../lib/format';
+import { errText, getState, request, sameComputer, toast, useApp } from '../store';
 import { findModel, stepEffort, stepModel } from '../lib/models';
 import { Picker, type PickerItem } from '../components/Picker';
 import { toolLine } from '../components/Blocks';
+import { PERMISSION_MODES } from '../components/StatusBar';
+import { folderRank, recentFolders } from './AppPanels';
 
 // binder's own panels for one session, over its transcript: /model, /effort,
-// /mcp, /chrome, /rewind, /artifacts and /tasks. Each talks to the session's host.
+// the permission mode, the folder (/cd), /mcp, /chrome, /rewind, /artifacts
+// and /tasks. Each talks to the session's host.
 
 type Common = { conn: string; close: () => void; active: boolean };
 
@@ -64,6 +67,74 @@ export function EffortPanel({ conn, close, active, model, current }: Common & { 
       .catch((e) => setError(errText(e)));
   };
   return <Picker active={active} title="Effort" subtitle={error || (models ? `For this session (${modelDisplayName(model) || 'current model'})` : 'Loading…')} items={items} onSelect={pick} onCancel={close} initial={Math.max(0, levels.indexOf(current ?? ''))} />;
+}
+
+export function PermissionModePanel({ conn, close, active, current }: Common & { current: string | null }) {
+  const [error, setError] = useState('');
+  const items: PickerItem[] = Object.entries(PERMISSION_MODES).map(([key, [label, description]]) => ({ key, label, description, mark: key === current ? '✓' : ' ', markColor: CHECK }));
+  const pick = (item: PickerItem) => {
+    request(conn, 'set_permission_mode', { mode: item.key })
+      .then(() => {
+        toast(`Permission mode: ${item.label}`);
+        close();
+      })
+      .catch((e) => setError(errText(e)));
+  };
+  return <Picker active={active} title="Permission mode" subtitle={error || 'For this session, until it restarts'} items={items} onSelect={pick} onCancel={close} initial={Math.max(0, items.findIndex((i) => i.key === current))} />;
+}
+
+const TYPED = '?typed';
+
+// The folder to move the session to (/cd): one sessions ran in on its
+// computer, a typed path, or (on this Mac) one chosen in Finder.
+export function CdPanel({ close, active, cwd, computer, onPick }: Common & { cwd: string; computer?: string; onPick: (dir: string) => void }) {
+  const sessions = useApp((s) => s.sessions);
+  const [query, setQuery] = useState('');
+  // The typed path, once it is known to be a folder there.
+  const [typed, setTyped] = useState<string | null>(null);
+  useEffect(() => {
+    const q = query.trim();
+    setTyped(null);
+    if (!/^[~/]/.test(q)) return;
+    let live = true;
+    void window.binder.isDirectory(q, computer).then((ok) => live && ok && setTyped(q));
+    return () => {
+      live = false;
+    };
+  }, [query, computer]);
+  const q = query.toLowerCase();
+  const folders = recentFolders(sessions.filter((s) => sameComputer(s.computer, computer)), null).filter((f) => f.dir !== cwd && (!q || f.dir.toLowerCase().includes(q)));
+  if (q) folders.sort((a, b) => folderRank(a.dir, q) - folderRank(b.dir, q));
+  const items: PickerItem[] = [
+    ...(typed ? [{ key: TYPED, label: `Move to ${typed}` }] : []),
+    ...folders.map((f) => ({ key: f.dir, label: baseName(f.dir), description: shortPath(f.dir) })),
+  ];
+  const pick = (dir: string) => {
+    close();
+    onPick(dir);
+  };
+  return (
+    <Picker
+      active={active}
+      title="Move to a folder"
+      subtitle={`Claude Code works in ${shortPath(cwd)} until you pick another`}
+      items={items}
+      search={{ query, onChange: setQuery, placeholder: 'Filter recent folders, or type a path (~/code/app)' }}
+      onSelect={(i) => pick(i.key === TYPED ? typed! : i.key)}
+      onCancel={close}
+      empty={query ? 'No folder matches' : 'No other recent folders'}
+      hint={
+        <>
+          ↑↓ move · ⏎ move there{computer ? '' : <> · <kbd>⌘O</kbd> choose in Finder</>} · esc close
+        </>
+      }
+      onKey={(e) => {
+        if (computer || !e.metaKey || e.ctrlKey || e.altKey || e.key !== 'o') return false;
+        void window.binder.chooseFolder().then((dir) => dir && pick(dir));
+        return true;
+      }}
+    />
+  );
 }
 
 // pi's Ctrl+P / Shift+Ctrl+P and Shift+Tab, through the requests every host

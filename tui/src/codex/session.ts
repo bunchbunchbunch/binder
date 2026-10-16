@@ -27,6 +27,13 @@ export const CODEX_MODES: Record<string, { approvalPolicy: string; sandbox: stri
   plan: { approvalPolicy: 'on-request', sandbox: 'read-only' },
 };
 
+// The same sandboxes as turn/start's sandboxPolicy, with Codex's defaults.
+const SANDBOX_POLICIES: Record<string, Params> = {
+  'read-only': { type: 'readOnly', networkAccess: false },
+  'workspace-write': { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+  'danger-full-access': { type: 'dangerFullAccess' },
+};
+
 // `binder --codex -- <args>`: --model (-m), --permission-mode and --name (-n,
 // which the phone passes for a new session) are binder's to apply to the
 // thread; the rest go to `codex app-server` (-c key=value, --enable ...).
@@ -97,7 +104,9 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
   private starting = false;
   private model: string | undefined;
   private readonly requestedModel: string | undefined;
-  private readonly mode: string | undefined;
+  // The mode the thread starts in, and the one in effect (set_permission_mode changes it until the next start).
+  private readonly launchMode: string | undefined;
+  private mode: string | undefined;
   private readonly name: string | undefined;
   private readonly serverArgs: string[];
   // Sent with every turn/start: what /model, /effort and /cd changed.
@@ -120,7 +129,7 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
     this.forkFrom = opts.forkFrom;
     const { model, mode, name, serverArgs } = codexArgs(opts.passthrough);
     this.requestedModel = model;
-    this.mode = mode && CODEX_MODES[mode] ? mode : undefined;
+    this.launchMode = mode && CODEX_MODES[mode] ? mode : undefined;
     this.name = name;
     this.serverArgs = serverArgs;
   }
@@ -163,6 +172,7 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
     this.approvals.clear();
     // A new app-server starts from the launch settings, as a new claude does.
     this.overrides = {};
+    this.mode = this.launchMode;
     const translator = new Translator(() => this.facts());
     this.translator = translator;
 
@@ -203,7 +213,7 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
     // requiresOpenaiAuth is true even when logged in; only a missing account says it is not.
     if (!account) throw new Error('Codex is not logged in: run `codex login`, then press Ctrl+R');
     this.emit('plan', account.type === 'chatgpt' ? planLabel(account.planType ?? '') : 'API key');
-    const settings: Params = { cwd: this.dir, ...(this.requestedModel && { model: this.requestedModel }), ...(this.mode && CODEX_MODES[this.mode]) };
+    const settings: Params = { cwd: this.dir, ...(this.requestedModel && { model: this.requestedModel }), ...(this.launchMode && CODEX_MODES[this.launchMode]) };
     const r = forkFrom
       ? await rpc.request('thread/fork', { threadId: threadOf(forkFrom), excludeTurns: true, ...settings })
       : resume
@@ -281,6 +291,15 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
         const level = (fields.settings as { effortLevel?: string } | undefined)?.effortLevel;
         if (level) this.overrides.effort = level;
         return {};
+      }
+      case 'set_permission_mode': {
+        const mode = String(fields.mode);
+        const m = CODEX_MODES[mode];
+        if (!m) throw new Error(`Cannot set permission mode: must be one of ${Object.keys(CODEX_MODES).join(', ')}`);
+        this.mode = mode;
+        this.overrides.approvalPolicy = m.approvalPolicy;
+        this.overrides.sandboxPolicy = SANDBOX_POLICIES[m.sandbox];
+        return { mode };
       }
       case 'set_cwd':
         this.overrides.cwd = String(fields.path);

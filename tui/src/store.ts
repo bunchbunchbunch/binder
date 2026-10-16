@@ -149,6 +149,8 @@ export type Action =
   | { type: 'rewind'; uuid: string }
   // /model changed it; the next init confirms.
   | { type: 'model'; model: string }
+  // A viewer changed the permission mode; the next init confirms.
+  | { type: 'permission_mode'; mode: string }
   | { type: 'event'; event: ClaudeEvent }
   | { type: 'events'; events: ClaudeEvent[] }
   | { type: 'select'; index: number }
@@ -729,6 +731,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, childExit: undefined };
     case 'model':
       return { ...state, model: action.model };
+    case 'permission_mode':
+      return { ...state, permissionMode: action.mode };
     case 'reset': {
       // Account-wide and per-process facts carry over until the new child reports its own.
       const next = action.state;

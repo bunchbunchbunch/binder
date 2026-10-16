@@ -79,7 +79,7 @@ export function SessionSwitcher({ cwd, computer, initialScope, close }: { cwd: s
 type Folder = { dir: string; computer: string };
 
 /** Folders sessions ran in, most recent first. */
-function recentFolders(sessions: SessionRow[], first: Folder | null): Folder[] {
+export function recentFolders(sessions: SessionRow[], first: Folder | null): Folder[] {
   const seen = new Set<string>();
   const out: Folder[] = [];
   for (const f of [first, ...[...sessions].sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt)).map((s) => ({ dir: s.cwd, computer: s.computer ?? '' }))]) {
@@ -94,7 +94,7 @@ function recentFolders(sessions: SessionRow[], first: Folder | null): Folder[] {
 
 /** How well a folder matches search `q` (lowercase), best first: its own name
  *  is `q`, starts with it, holds it; last, only a parent's name does. */
-function folderRank(dir: string, q: string): number {
+export function folderRank(dir: string, q: string): number {
   const name = baseName(dir).toLowerCase();
   return name === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : 3;
 }

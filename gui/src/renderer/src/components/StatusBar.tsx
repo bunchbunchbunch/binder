@@ -2,11 +2,14 @@ import type { WireState } from '@shared/wire';
 import { fmtTokens, modelDisplayName, shortPath } from '../lib/format';
 
 // Permission modes: the badge, and what it means for someone new to Claude Code.
-const MODES: Record<string, [string, string]> = {
-  bypassPermissions: ['bypass permissions', 'Claude runs every tool, including commands and edits, without asking'],
+// In the order the permission mode picker lists them.
+export const PERMISSION_MODES: Record<string, [string, string]> = {
+  default: ['manual', 'Claude asks before it edits files or runs commands'],
   acceptEdits: ['accept edits', 'Claude edits files without asking; it still asks before running other tools'],
   plan: ['plan mode', 'Claude reads and plans but changes nothing until you approve the plan'],
+  auto: ['auto mode', 'A classifier approves or refuses the tools Claude would ask about'],
   dontAsk: ["don't ask", 'Tools that would need your permission are refused instead of asking'],
+  bypassPermissions: ['bypass permissions', 'Claude runs every tool, including commands and edits, without asking'],
 };
 
 function Meter({ label, w }: { label: string; w?: { utilization: number; resetsAt: number } }) {
@@ -26,18 +29,33 @@ function Meter({ label, w }: { label: string; w?: { utilization: number; resetsA
 }
 
 // Under the prompt: where and what is running, the permission mode, and the account's usage.
-export function StatusBar({ s }: { s: WireState }) {
+// A click on the folder, the model, the effort level or the permission mode opens its picker.
+export function StatusBar({ s, onPick }: { s: WireState; onPick: (panel: 'cd' | 'model' | 'effort' | 'mode') => void }) {
   const model = modelDisplayName(s.model);
-  const mode = s.permissionMode ? MODES[s.permissionMode] : undefined;
+  const mode = s.permissionMode ? PERMISSION_MODES[s.permissionMode] : undefined;
   return (
     <div className="statusbar">
       <div className="left">
-        <span className="cwd" title={s.cwd}>
+        <span className="cwd pick" title={`${s.cwd}\nClick to move the session to another folder (/cd)`} onClick={() => onPick('cd')}>
           {shortPath(s.cwd)}
         </span>
-        {model && <span title="Model and effort level (/model and /effort change them)">{s.effort ? `${model} · ${s.effort}` : model}</span>}
+        {model && (
+          <span className="picks">
+            <span className="pick model" title="Change the model (⌃L)" onClick={() => onPick('model')}>
+              {model}
+            </span>
+            {s.effort && (
+              <>
+                ·
+                <span className="pick effort" title="Change the effort level (⇧Tab steps to the next)" onClick={() => onPick('effort')}>
+                  {s.effort}
+                </span>
+              </>
+            )}
+          </span>
+        )}
         {mode && (
-          <span className={`badge ${s.permissionMode}`} title={mode[1]}>
+          <span className={`badge ${s.permissionMode}`} title={`${mode[1]}. Click to change it.`} onClick={() => onPick('mode')}>
             {mode[0]}
           </span>
         )}

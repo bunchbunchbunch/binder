@@ -116,6 +116,7 @@ paused, or this client revoked).
 | `models` | | `{models: [{value, displayName, description?, resolvedModel?, supportedEffortLevels?}]}` |
 | `set_model` | `model` | `{}` |
 | `set_effort` | `level` | `{}` |
+| `set_permission_mode` | `mode` (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`) | `{}`; until the child restarts. Claude Code refuses `bypassPermissions` in a session it did not start in that mode, and `auto` where auto mode is off |
 | `mcp_status` | | `{servers: [{name, status, error?}]}` |
 | `mcp_toggle` | `server`, `enabled` | `{}` |
 | `mcp_reconnect` | `server` | `{}` |

@@ -1383,7 +1383,25 @@ kbd {
   flex-shrink: 0;
 }
 
+/* The model and the effort level open their pickers; the padding spaces them around the "·". */
+.statusbar .picks {
+  margin: 0 -4px;
+}
+
+.statusbar .pick {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.statusbar .pick:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* A pick too: the margin takes back its padding. */
 .statusbar .left > .cwd {
+  margin: 0 -4px;
   flex-shrink: 1;
   min-width: 0;
   overflow: hidden;
@@ -1429,6 +1447,25 @@ kbd {
 .badge.dontAsk {
   color: var(--gold);
   background: color-mix(in srgb, var(--gold) 14%, transparent);
+}
+
+.badge.default {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+}
+
+.badge.auto {
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 14%, transparent);
+}
+
+/* A click opens the permission mode picker. */
+.statusbar .badge {
+  cursor: pointer;
+}
+
+.statusbar .badge:hover {
+  box-shadow: inset 0 0 0 1px currentColor;
 }
 
 .meter {

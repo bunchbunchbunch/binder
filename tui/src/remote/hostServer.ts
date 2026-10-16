@@ -317,6 +317,8 @@ export class HostServer {
         return void (await host.setModel(str(m.model, 'model')));
       case 'set_effort':
         return void (await host.setEffort(str(m.level, 'level')));
+      case 'set_permission_mode':
+        return void (await host.setPermissionMode(str(m.mode, 'mode')));
       case 'mcp_status': {
         const r = await host.session.request('mcp_status');
         return { servers: r.mcpServers ?? [] };

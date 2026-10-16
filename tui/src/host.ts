@@ -390,6 +390,12 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.dispatch({ type: 'model', model: entry?.resolvedModel ?? model });
   }
 
+  async setPermissionMode(mode: string): Promise<void> {
+    const r = await this.session.request('set_permission_mode', { mode });
+    // Claude Code answers with the mode in effect ("manual" comes back as "default").
+    this.dispatch({ type: 'permission_mode', mode: typeof r.mode === 'string' ? r.mode : mode });
+  }
+
   async setEffort(level: string): Promise<void> {
     await this.session.request('apply_flag_settings', { settings: { effortLevel: level } });
     this.noteEffort(level);

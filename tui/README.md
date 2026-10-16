@@ -330,6 +330,7 @@ row model:
 - Every prompt is sent with a uuid, which `/rewind` targets. Binder's panels talk to the
   child over the same control protocol the Agent SDK uses (`src/session.ts` `request()`):
   `initialize` (command list), `list_models` / `set_model`, `apply_flag_settings` (effort),
+  `set_permission_mode`,
   `mcp_status` / `mcp_toggle` / `mcp_reconnect` / `mcp_authenticate` / `mcp_clear_auth`,
   `get_chrome_dialog`, `rewind_files` / `rewind_conversation`, and `set_cwd`. `/fork`,
   `/resume` and `/chrome` restart the child (`--fork-session`, `--resume`, `--chrome`).

@@ -59,7 +59,10 @@ icon from the TUI's pixel logo.
 - **Prompt:** with a status row above it (`Thinking… (12s · esc to interrupt)`), a row for
   each background task (what it is doing, its kind, the tab that started it, and how long it
   has run) and a status bar under it (folder, model and effort, permission mode, context size, and
-  the 5-hour and 7-day usage).
+  the 5-hour and 7-day usage). A click on the folder, the model, the effort level or the
+  permission mode opens its picker. Picking a folder moves the session there, as `/cd` does,
+  between turns. A permission mode picked there lasts until the session restarts; Claude
+  Code allows bypass permissions only in a session that started in that mode.
 - **Background tasks:** a click on a task's row, or `/tasks`, lists them with the highlighted
   one's output (a shell's last lines, an agent's latest steps); `Enter` goes to the tab that
   started it, `x` or Stop stops it. `Ctrl+B` moves the running command or agent to the

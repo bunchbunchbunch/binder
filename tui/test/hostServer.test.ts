@@ -218,6 +218,18 @@ describe('host server', () => {
     await until(() => v.state!.model === 'claude-opus-4-8');
   });
 
+  it('switches the permission mode, showing the one Claude Code reports', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl');
+    const id = '00000000-0000-4000-8000-0000000000ac';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    expect((await v.request('set_permission_mode', { mode: 'plan' })).ok).toBe(true);
+    await until(() => v.state!.permissionMode === 'plan');
+    expect((await v.request('set_permission_mode', { mode: 'manual' })).ok).toBe(true);
+    await until(() => v.state!.permissionMode === 'default');
+  });
+
   it('refuses a viewer whose roots do not hold the session, and a cd outside them', async () => {
     const stateDir = setup('two-turns-stdin.jsonl');
     const id = '00000000-0000-4000-8000-0000000000a4';

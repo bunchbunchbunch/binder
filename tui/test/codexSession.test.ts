@@ -297,16 +297,24 @@ describe('CodexSession on the fake app-server', () => {
     expect(spawned).toEqual(['app-server']);
   });
 
-  it('sends /model, /effort and /cd with the next turn', async () => {
+  it('sends /model, /effort, /cd and the permission mode with the next turn', async () => {
     const { session, sent, result } = codex('answer.jsonl');
     session.start();
     await session.request('set_model', { model: 'gpt-5.6-terra' });
     await session.request('apply_flag_settings', { settings: { effortLevel: 'high' } });
     expect(await session.request('set_cwd', { path: '/private/tmp' })).toEqual({ status: 'ok' });
+    expect(await session.request('set_permission_mode', { mode: 'plan' })).toEqual({ mode: 'plan' });
+    await expect(session.request('set_permission_mode', { mode: 'yolo' })).rejects.toThrow('must be one of');
     session.sendPrompt('hi', 1);
     await result();
     await session.close();
-    expect(sent().find((m) => m.method === 'turn/start')?.params).toMatchObject({ model: 'gpt-5.6-terra', effort: 'high', cwd: '/private/tmp' });
+    expect(sent().find((m) => m.method === 'turn/start')?.params).toMatchObject({
+      model: 'gpt-5.6-terra',
+      effort: 'high',
+      cwd: '/private/tmp',
+      approvalPolicy: 'on-request',
+      sandboxPolicy: { type: 'readOnly', networkAccess: false },
+    });
   });
 
   it('starts the next thread from the launch settings and the folder /cd moved to', async () => {
@@ -315,6 +323,7 @@ describe('CodexSession on the fake app-server', () => {
     await session.request('set_model', { model: 'gpt-5.6-terra' });
     await session.request('apply_flag_settings', { settings: { effortLevel: 'high' } });
     await session.request('set_cwd', { path: '/private/tmp' });
+    await session.request('set_permission_mode', { mode: 'bypassPermissions' });
     session.movedTo('/private/tmp');
     session.switchTo('00000000-0000-4000-8000-0000000000c1', { resume: false });
     session.sendPrompt('hi', 1);
@@ -322,7 +331,7 @@ describe('CodexSession on the fake app-server', () => {
     await session.close();
     expect(sent().filter((m) => m.method === 'thread/start').at(-1)?.params).toMatchObject({ cwd: '/private/tmp' });
     const turn = sent().find((m) => m.method === 'turn/start')!.params!;
-    expect(['model', 'effort', 'cwd'].filter((k) => k in turn)).toEqual([]);
+    expect(['model', 'effort', 'cwd', 'approvalPolicy', 'sandboxPolicy'].filter((k) => k in turn)).toEqual([]);
   });
 
   it('lists MCP servers with their state for /mcp', async () => {
