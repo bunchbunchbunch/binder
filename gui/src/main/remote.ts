@@ -66,7 +66,8 @@ export class Remote {
   private locate(): Promise<Found> {
     if (!this.found) {
       // Node's own folder goes first on PATH, as binder.ts puts it here; binder is
-      // on that PATH, or BINDER_BIN names it.
+      // on that PATH, or BINDER_BIN names it. The login shell (zsh, bash, fish...)
+      // only supplies the environment; sh reads it.
       const probe = [
         `printf ${MARK}; printf %s "$HOME"; printf ${MARK}`,
         'n=$(node -p process.execPath) || exit 1',
@@ -74,7 +75,7 @@ export class Remote {
         `printf %s "$PATH"; printf ${MARK}; printf %s "$n"; printf ${MARK}`,
         `if [ -n "$BINDER_BIN" ]; then printf %s "$BINDER_BIN"; else command -v binder; fi; printf ${MARK}`,
       ].join('\n');
-      this.found = this.exec(`exec "$SHELL" -l -i -c ${shellQuote(probe)}`, { timeout: 20000 }).then((out) => {
+      this.found = this.exec(`exec "$SHELL" -l -i -c ${shellQuote(`exec /bin/sh -c ${shellQuote(probe)}`)}`, { timeout: 20000 }).then((out) => {
         const [, home, path, node, bin] = out.split(MARK).map((s) => s.trim());
         if (!node) throw new Error(`${this.name}: node is not on the login shell's PATH`);
         if (!bin) throw new Error(`${this.name}: binder is not on the login shell's PATH (npm link in its bindertui)`);
