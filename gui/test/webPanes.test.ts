@@ -157,6 +157,9 @@ describe('the bridge', () => {
     expect(paneOpen({ ...ok, cwd: elsewhere }, home)).toBe('cwd must be inside your home folder');
     expect(paneOpen({ ...ok, cwd: join(home, 'gone') }, home)).toBe(`cwd is not a folder: ${join(home, 'gone')}`);
     expect(paneOpen({ ...ok, cwd: join(home, 'code/apple.txt') }, home)).toBe(`cwd is not a folder: ${join(home, 'code/apple.txt')}`);
+    // Sessions that start on another computer: it checks the folder, but home still bounds it.
+    expect(paneOpen({ ...ok, cwd: join(home, 'gone') }, home, false)).toMatchObject({ t: 'open', cwd: join(home, 'gone') });
+    expect(paneOpen({ ...ok, cwd: elsewhere }, home, false)).toBe('cwd must be inside your home folder');
     expect(paneOpen({ ...ok, sessionId: 'abc' }, home)).toBe('sessionId must be a UUID');
     expect(paneOpen({ ...ok, sessionId: undefined }, home)).toBe('sessionId must be a UUID');
     expect(paneOpen({ ...ok, resume: 'yes' }, home)).toBe('resume must be true or false');

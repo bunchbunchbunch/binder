@@ -81,15 +81,17 @@ export function makeFolder(path: unknown, home: string): void {
 /**
  * window.binderPane.open's request as the control socket's `open` (so it
  * behaves the same), or what is wrong with it. cwd is normalized (tab
- * completion leaves a trailing slash) and must be a folder inside home. A
- * new session's name becomes claude's `-n`, the only flag a page can set.
+ * completion leaves a trailing slash) and must be a folder inside home; with
+ * `checkFolder` false (new sessions start on another computer), that computer
+ * checks the folder instead. A new session's name becomes claude's `-n`, the
+ * only flag a page can set.
  */
-export function paneOpen(req: unknown, home: string): ControlRequest | string {
+export function paneOpen(req: unknown, home: string, checkFolder = true): ControlRequest | string {
   const m = (req && typeof req === 'object' ? req : {}) as Record<string, unknown>;
   if (!text(m.cwd, MAX_PATH) || !isAbsolute(m.cwd)) return 'cwd must be an absolute path';
   const cwd = resolve(m.cwd);
   if (!inHome(cwd, home)) return 'cwd must be inside your home folder';
-  if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) return `cwd is not a folder: ${cwd}`;
+  if (checkFolder && !statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) return `cwd is not a folder: ${cwd}`;
   if (typeof m.sessionId !== 'string' || !UUID.test(m.sessionId)) return 'sessionId must be a UUID';
   if (m.resume !== undefined && typeof m.resume !== 'boolean') return 'resume must be true or false';
   if (m.draft !== undefined && !text(m.draft, MAX_DRAFT)) return `draft must be a string of at most ${MAX_DRAFT} characters`;

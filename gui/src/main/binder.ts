@@ -192,6 +192,17 @@ export function readComputers(env: NodeJS.ProcessEnv): string[] {
   return Array.isArray(computers) ? [...new Set(computers.filter((c): c is string => typeof c === 'string' && /^[^-\s]\S*$/.test(c)))] : [];
 }
 
+/** config.json's `defaultComputer`: one of `computers`, where new sessions start; null for this Mac. */
+export function readDefaultComputer(env: NodeJS.ProcessEnv): string | null {
+  let name: unknown;
+  try {
+    name = readConfig(configPath(env)).defaultComputer;
+  } catch {
+    return null;
+  }
+  return typeof name === 'string' && readComputers(env).includes(name) ? name : null;
+}
+
 /**
  * Sets keys in config.json and keeps the rest, as bindertui's /settings does.
  * Written in place, so a symlink into a dotfiles repo stays a symlink; a file

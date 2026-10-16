@@ -112,8 +112,11 @@ export type BinderApi = {
   home: string;
   /** The sessions of this Mac, or of `computer` (a name from config.json's `computers`). */
   listSessions(computer?: string): Promise<SessionList>;
-  /** config.json's `computers`: the other computers whose sessions the app shows, as SSH destinations. */
-  computers(): Promise<string[]>;
+  /**
+   * config.json's `computers` (the other computers whose sessions the app shows, as SSH
+   * destinations) and `defaultComputer` (the one new sessions start on; null for this Mac).
+   */
+  computers(): Promise<{ computers: string[]; defaultComputer: string | null }>;
   /**
    * Attaches to a session as connection `conn` (the window names it first, so
    * it knows the snapshot that arrives before this resolves), starting a host

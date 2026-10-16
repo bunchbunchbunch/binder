@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { readComputers } from '../src/main/binder';
+import { readComputers, readDefaultComputer } from '../src/main/binder';
 import { Remote, shellQuote } from '../src/main/remote';
 
 // Another computer over e2e/fixtures/fake-ssh, which runs the command here as
@@ -28,6 +28,16 @@ describe("config.json's computers", () => {
     writeFileSync(file, JSON.stringify({ computers: 'mini' }));
     expect(readComputers({ BINDER_CONFIG: file })).toEqual([]);
     expect(readComputers({ BINDER_CONFIG: join(tmp, 'missing.json') })).toEqual([]);
+  });
+
+  it('takes defaultComputer only when it is one of them', () => {
+    const file = join(tmp, 'default.json');
+    writeFileSync(file, JSON.stringify({ computers: ['mini'], defaultComputer: 'mini' }));
+    expect(readDefaultComputer({ BINDER_CONFIG: file })).toBe('mini');
+    writeFileSync(file, JSON.stringify({ computers: ['mini'], defaultComputer: 'studio' }));
+    expect(readDefaultComputer({ BINDER_CONFIG: file })).toBe(null);
+    writeFileSync(file, JSON.stringify({ defaultComputer: 'mini' }));
+    expect(readDefaultComputer({ BINDER_CONFIG: file })).toBe(null);
   });
 });
 

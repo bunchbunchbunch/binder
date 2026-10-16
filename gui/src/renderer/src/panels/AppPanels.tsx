@@ -98,19 +98,21 @@ const on = (computer: string) => (computer ? ` on ${computer}` : '');
 export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; computer?: string; close: () => void }) {
   const sessions = useApp((s) => s.sessions);
   const computers = useApp((s) => s.computers);
+  const defaultComputer = useApp((s) => s.defaultComputer);
   const [query, setQuery] = useState('');
-  // A typed path, and the computers where it is a folder.
+  // A typed path, and the computers where it is a folder: config.json's defaultComputer first, so Enter starts there.
   const [typed, setTyped] = useState<{ path: string; on: string[] } | null>(null);
   useEffect(() => {
     const q = query.trim();
     if (!/^[~/]/.test(q)) return setTyped(null);
     let live = true;
-    const checks = ['', ...computers].map((k) => window.binder.isDirectory(q, k || undefined).then((ok) => (ok ? [k] : []), (): string[] => []));
+    const order = defaultComputer ? [defaultComputer, '', ...computers.filter((k) => k !== defaultComputer)] : ['', ...computers];
+    const checks = order.map((k) => window.binder.isDirectory(q, k || undefined).then((ok) => (ok ? [k] : []), (): string[] => []));
     void Promise.all(checks).then((found) => live && setTyped({ path: q, on: found.flat() }));
     return () => {
       live = false;
     };
-  }, [query, computers]);
+  }, [query, computers, defaultComputer]);
   const folders = useMemo(() => recentFolders(sessions, cwd ? { dir: cwd, computer: computer ?? '' } : null), [sessions, cwd, computer]);
   const q = query.toLowerCase();
   const typedOn = typed?.on ?? [];

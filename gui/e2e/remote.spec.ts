@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { launch, newSession, ROOT, shot, SHOWCASE, type Launched } from './helpers';
 
@@ -26,8 +28,8 @@ test.afterEach(async () => {
   remote = null;
 });
 
-function computers(dir: string, names: string[]) {
-  writeFileSync(join(dir, 'config.json'), JSON.stringify({ computers: names }));
+function computers(dir: string, names: string[], defaultComputer?: string) {
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ computers: names, ...(defaultComputer && { defaultComputer }) }));
   remote = join(dir, 'remote');
   // Hosts outlive the relaunch below: the other computer is a login shell away.
   return { BINDER_CONFIG: join(dir, 'config.json'), BINDER_SSH: join(ROOT, 'e2e/fixtures/fake-ssh'), FAKE_SSH_ROOT: remote, BINDER_HOST_IDLE_MS: '60000' };
@@ -84,6 +86,40 @@ test("runs a session on another computer beside this Mac's, labeled, and brings 
   await back.keyboard.press('Enter');
   await expect(back.locator('.session:not([hidden]) .md h1')).toHaveText('Table rendering', { timeout: 20000 });
   await expect(back.locator('.session-row.active .computer')).toHaveText('mini');
+});
+
+/** One request on the app's control socket (BINDER_GUI_SOCKET); resolves with its reply. */
+function control(tmp: string, req: object): Promise<Record<string, unknown>> {
+  return new Promise((done, fail) => {
+    const s = connect(join(tmp, 'gui', 'control.sock'));
+    let out = '';
+    s.on('data', (d) => (out += d));
+    s.on('end', () => done(JSON.parse(out)));
+    s.on('error', fail);
+    s.write(JSON.stringify(req) + '\n');
+  });
+}
+
+test('with defaultComputer, ⌘N and the control socket start new sessions there', async () => {
+  const dir = mkdtempSync('/tmp/bgr-');
+  run = await launch(SHOWCASE, computers(dir, ['mini'], 'mini'));
+  const { page, project } = run;
+
+  // The default computer's row comes first, so Enter starts there.
+  await page.keyboard.press('Meta+n');
+  await page.locator('.picker-search').fill(project);
+  await expect(page.locator('.picker-item .label', { hasText: 'Start in' })).toHaveText([`Start in ${project} on mini`, `Start in ${project}`], { timeout: 20000 });
+  await page.keyboard.press('Enter');
+  await page.locator('.session:not([hidden]) .composer textarea').waitFor({ state: 'visible', timeout: 30000 });
+  await expect(page.locator('.session-row.active .computer')).toHaveText('mini');
+  expect(sockets(join(remote!, 'mini/s/sock'))).toHaveLength(1);
+
+  // A session the control socket names that the window does not know (a todo's) starts there too.
+  expect(await control(run.tmp, { t: 'open', cwd: project, sessionId: randomUUID(), draft: 'From a todo' })).toEqual({ ok: true });
+  await expect(page.locator('.session-row.active .computer')).toHaveText('mini', { timeout: 30000 });
+  await expect(page.locator('.session:not([hidden]) .composer textarea')).toHaveValue('From a todo', { timeout: 30000 });
+  await expect.poll(() => sockets(join(remote!, 'mini/s/sock')).length, { timeout: 20000 }).toBe(2);
+  expect(sockets(join(run.tmp, 's/sock'))).toHaveLength(0);
 });
 
 test("a computer that cannot be reached says why, and this Mac's sessions still list", async () => {

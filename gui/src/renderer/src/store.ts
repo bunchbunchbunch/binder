@@ -50,6 +50,8 @@ export type AppState = {
   active: string | null;
   // config.json's computers: the other computers whose sessions show here.
   computers: string[];
+  // config.json's defaultComputer: where new sessions start; null for this Mac.
+  defaultComputer: string | null;
   // Every computer's sessions, live ones first, then the most recent.
   sessions: SessionRow[];
   // Why a computer's sessions could not be listed, one line each.
@@ -63,7 +65,7 @@ export type AppState = {
   toast: Toast | null;
 };
 
-let state: AppState = { conns: [], panes: [], webPanes: [], active: null, computers: [], sessions: [], sessionsError: null, detail: false, stickyPrompt: true, sidebar: {}, toast: null };
+let state: AppState = { conns: [], panes: [], webPanes: [], active: null, computers: [], defaultComputer: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, sidebar: {}, toast: null };
 const listeners = new Set<() => void>();
 
 export const getState = () => state;
@@ -226,10 +228,23 @@ export function closeConn(id: string): void {
   void refreshSessions();
 }
 
-/** A request on the control socket (ControlRequest in @shared/api). */
+/** A folder in this Mac's home as ~/..., which another computer reads as its own home. */
+export function homeRelative(path: string): string {
+  const home = window.binder.home;
+  return path === home ? '~' : path.startsWith(home + '/') ? '~' + path.slice(home.length) : path;
+}
+
+/**
+ * A request on the control socket (ControlRequest in @shared/api). A session
+ * the window knows opens where it runs; any other starts on config.json's
+ * defaultComputer, in the same folder under that computer's home.
+ */
 export function handleControl(req: ControlRequest): ControlReply {
   if (req.t === 'open') {
-    openSession({ cwd: req.cwd, sessionId: req.sessionId, resume: req.resume, args: req.args, draft: req.draft });
+    const known = req.sessionId ? state.sessions.find((r) => r.id === req.sessionId) : undefined;
+    const computer = known ? known.computer : (state.defaultComputer ?? undefined);
+    const cwd = known ? known.cwd : computer ? homeRelative(req.cwd) : req.cwd;
+    openSession({ cwd, sessionId: req.sessionId, resume: req.resume, args: req.args, draft: req.draft, computer });
     return { ok: true };
   }
   const c = state.conns.find((x) => x.sessionId === req.sessionId);
@@ -365,9 +380,10 @@ subscribe(() => {
  * them, so one that is slow or asleep holds up only its own.
  */
 export async function restoreLayout(): Promise<void> {
-  const [layout, infos, computers] = await Promise.all([window.binder.loadLayout(), window.binder.panes().catch((): PaneInfo[] => []), window.binder.computers().catch((): string[] => [])]);
+  const [layout, infos, config] = await Promise.all([window.binder.loadLayout(), window.binder.panes().catch((): PaneInfo[] => []), window.binder.computers().catch(() => ({ computers: [], defaultComputer: null }))]);
+  const { computers, defaultComputer } = config;
   const panes = infos.map((p) => p.name);
-  setState({ panes, webPanes: infos.filter((p) => p.web).map((p) => p.name), computers });
+  setState({ panes, webPanes: infos.filter((p) => p.web).map((p) => p.name), computers, defaultComputer });
   const restore = (computer: string) => {
     const rows = listed.get(computer) ?? [];
     const live = new Set(rows.filter((r) => r.live).map((r) => r.id));

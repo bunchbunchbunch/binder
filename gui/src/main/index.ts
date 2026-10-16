@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, Rect, SavedLayout, SessionList, Settings, SettingsPatch, SidebarScriptInput } from '../shared/api';
 import type { HostMessage } from '../shared/wire';
-import { binder, ensureHost, listSessions, readComputers, readPanes, readSettings, repoInfo, runSidebarScript, stateDir, writeSettings, type PaneConfig, type WebPaneConfig } from './binder';
+import { binder, ensureHost, listSessions, readComputers, readDefaultComputer, readPanes, readSettings, repoInfo, runSidebarScript, stateDir, writeSettings, type PaneConfig, type WebPaneConfig } from './binder';
 import { listenControl } from './control';
 import { HostConnection, processStream, socketStream, type HostStream } from './hostConnection';
 import { Remote } from './remote';
@@ -119,7 +119,10 @@ function openExternal(url: string): void {
 
 function registerIpc(): void {
   ipcMain.handle('listSessions', async (_e, computer?: string): Promise<SessionList> => (computer ? (await remote(computer)).sessions() : { sessions: await listSessions(await binder()), home: homedir() }));
-  ipcMain.handle('computers', async () => readComputers(await loginEnv()));
+  ipcMain.handle('computers', async () => {
+    const env = await loginEnv();
+    return { computers: readComputers(env), defaultComputer: readDefaultComputer(env) };
+  });
   ipcMain.handle('open', (_e, conn: string, req: OpenRequest) => open(conn, req));
   ipcMain.handle('request', (_e, conn: string, t: string, fields?: Record<string, unknown>) => {
     const hc = conns.get(conn);
@@ -183,7 +186,7 @@ function registerIpc(): void {
   ipcMain.handle('webPaneStart', async (_e, name: string) => {
     const pane = readPanes(await loginEnv()).find((p): p is WebPaneConfig => p.name === name && 'url' in p);
     if (!pane) throw new Error(`config.json has no web pane named ${name}`);
-    return startWebPane(win!, pane, askWindow);
+    return startWebPane(win!, pane, askWindow, async () => readDefaultComputer(await loginEnv()));
   });
   ipcMain.on('webPaneLayout', (_e, name: string, box: Rect, show: boolean) => win && layoutWebPane(win, name, box, show));
   ipcMain.handle('webPaneLoad', (_e, name: string, url?: string) => loadWebPane(name, url));

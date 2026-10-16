@@ -48,7 +48,8 @@ function show(win: BrowserWindow, p: WebPane, on: boolean): void {
 }
 
 /** Loads web pane `pane`'s page in a view over `win`, unless it has one; returns why the page did not load, or null. */
-export function startWebPane(win: BrowserWindow, pane: WebPaneConfig, open: (req: ControlRequest) => Promise<ControlReply>): string | null {
+// `defaultComputer`: config.json's, where a session the page opens starts (so its folder is checked there).
+export function startWebPane(win: BrowserWindow, pane: WebPaneConfig, open: (req: ControlRequest) => Promise<ControlReply>, defaultComputer: () => Promise<string | null>): string | null {
   const had = panes.get(pane.name);
   if (had) return had.failed;
   const view = new WebContentsView({
@@ -121,7 +122,7 @@ export function startWebPane(win: BrowserWindow, pane: WebPaneConfig, open: (req
     });
   bridge('home', () => home);
   bridge('open', async (req) => {
-    const r = paneOpen(req, home);
+    const r = paneOpen(req, home, !(await defaultComputer()));
     if (typeof r === 'string') throw new Error(r);
     const reply = await open(r);
     if (!reply.ok) throw new Error(reply.error);

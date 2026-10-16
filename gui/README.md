@@ -276,6 +276,12 @@ That computer's sessions show in the sidebar and `⌘K` with its name beside the
 typed folder on each computer that has it (`Start in ~/code/app on mini`), and a recent folder
 starts where its sessions ran. Restart the app after changing the list.
 
+`"defaultComputer": "mini"` (one of `computers`) makes new sessions start there: its row comes
+first in `⌘N`, so Enter starts there, and the control socket's `open` (a pane's, say) starts a
+session the app does not know there too, in the same folder under that computer's home
+(`/Users/me/code/app` becomes `~/code/app`). A session the app knows reopens where it runs, and a
+web pane's `open` checks its folder on the computer it starts on.
+
 The other computer needs:
 
 - SSH by key with no prompt (the app runs ssh with `BatchMode=yes`): Remote Login on, and this
@@ -291,7 +297,7 @@ environment. `binder attach` pipes the host's socket, so the session works as on
 
 What stays here: panes, the clipboard, links (they open in this Mac's browser, so a `localhost`
 link from a session there points here), the control socket (its `open` starts sessions on this
-Mac), and Settings, which edit this Mac's config.json. A session on another computer reads that
+Mac unless `defaultComputer` says otherwise), and Settings, which edit this Mac's config.json. A session on another computer reads that
 computer's config.json (`permissionMode`, `configDirs`), and `sidebar.script` runs there, where
 the files it reads are. Choose a folder… browses this Mac; type a path for another computer.
 
