@@ -74,11 +74,11 @@ test("runs a session on another computer beside this Mac's, labeled, and brings 
   await expect(miniRow.locator('.computer')).toHaveText('mini', { timeout: 20000 });
   await expect(back.locator('.session-row.active .title')).toHaveText(/Summarize it$/, { timeout: 20000 });
 
-  // ⌘W lets the mini's session go; Recent lists it with its computer, and ⌘K finds it by the computer's name.
+  // ⌘W lets the mini's session go, and ⌘K finds it by the computer's name.
   await miniRow.click();
   await expect(back.locator('.session:not([hidden]) .md h1')).toHaveText('Table rendering');
   await back.keyboard.press('Meta+w');
-  await expect(back.locator('.session-row', { hasText: 'Fix the table alignment' }).locator('.computer')).toHaveText('mini');
+  await expect(miniRow).toHaveCount(0);
   await back.keyboard.press('Meta+k');
   await back.locator('.picker-search').fill('mini');
   await expect(back.locator('.picker-item.picked .label')).toHaveText('Fix the table alignment');
@@ -131,6 +131,7 @@ test("a computer that cannot be reached says why, and this Mac's sessions still 
   await page.keyboard.press('Enter');
   await expect(page.locator('.md h1')).toHaveText('Table rendering', { timeout: 20000 });
   await page.keyboard.press('Meta+w');
-  await expect(page.locator('.session-row', { hasText: 'Fix the table alignment' })).toBeVisible();
-  await expect(page.locator('.sidebar')).toContainText('offline: ssh: connect to host offline port 22: Operation timed out');
+  await page.keyboard.press('Meta+k');
+  await expect(page.locator('.picker-item', { hasText: 'Fix the table alignment' })).toBeVisible();
+  await expect(page.locator('.picker')).toContainText('offline: ssh: connect to host offline port 22: Operation timed out');
 });

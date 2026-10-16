@@ -115,7 +115,7 @@ export function App() {
   const close = () => setAppPanel(null);
   return (
     <div className={`app${sidebar ? '' : ' no-sidebar'}`}>
-      {sidebar && <Sidebar onNew={() => setAppPanel({ kind: 'new' })} onSwitcher={() => setAppPanel({ kind: 'switcher', scope: 'all' })} onSettings={() => setAppPanel({ kind: 'settings' })} />}
+      {sidebar && <Sidebar onNew={() => setAppPanel({ kind: 'new' })} onGuide={() => setAppPanel({ kind: 'guide' })} />}
       <main className="main">
         {conns.map((c) => (
           <SessionView key={c.id} conn={c} visible={c.id === active} appPanelOpen={appPanel !== null} onSwitcher={(scope) => setAppPanel({ kind: 'switcher', scope })} onSettings={() => setAppPanel({ kind: 'settings' })} />

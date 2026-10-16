@@ -1,24 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { baseName, ago } from '../lib/format';
 import { sidebarTemplates, sidebarText, usesField } from '../lib/sidebarText';
-import { openSession, paneId, sameComputer, sessionFacts, setState, useApp } from '../store';
+import { paneId, sessionFacts, setState, useApp } from '../store';
 
-// The panes and open sessions (⌘1-9, panes first), then recent sessions from
-// `binder sessions`: live ones first, then what /resume would offer. An open
-// session's row says what config.json's sidebar templates make of it (by
-// default its status icon, how long its turn ran, and its first prompt), and
-// pulses while it opens. A session on another computer (config.json's
-// computers) carries that computer's name. Drag the sidebar's edge to resize
-// it (remembered); double-click the edge for the default.
+// The panes, then the open sessions (⌘1-9 in that order). A session's row says
+// what config.json's sidebar templates make of it (by default its status icon,
+// how long its turn ran, and its first prompt), and pulses while it opens. A
+// session on another computer (config.json's computers) carries that
+// computer's name. Drag the sidebar's edge to resize it (remembered);
+// double-click the edge for the default.
 
 const MIN_WIDTH = 180;
 
-export function Sidebar({ onNew, onSwitcher, onSettings }: { onNew: () => void; onSwitcher: () => void; onSettings: () => void }) {
+export function Sidebar({ onNew, onGuide }: { onNew: () => void; onGuide: () => void }) {
   const conns = useApp((s) => s.conns);
   const panes = useApp((s) => s.panes);
   const active = useApp((s) => s.active);
-  const sessions = useApp((s) => s.sessions);
-  const error = useApp((s) => s.sessionsError);
   const templates = sidebarTemplates(useApp((s) => s.sidebar));
   // {elapsed} counts up while a turn runs.
   const ticking = (usesField(templates.title, 'elapsed') || usesField(templates.subtitle, 'elapsed')) && conns.some((c) => c.state?.running != null);
@@ -36,22 +32,20 @@ export function Sidebar({ onNew, onSwitcher, onSettings }: { onNew: () => void; 
   }, [width]);
   // While dragging: the sidebar's width less the pointer's x when the drag began.
   const dragFrom = useRef<number | null>(null);
-  const recent = sessions.filter((r) => !conns.some((c) => c.sessionId === r.id && sameComputer(c.computer, r.computer))).slice(0, 40);
   return (
     <aside className="sidebar" style={width ? { width } : undefined}>
       <div className="sidebar-top" />
       <div className="sidebar-scroll">
-        {panes.map((name, i) => (
+        {panes.map((name) => (
           <button key={name} className={`session-row${active === paneId(name) ? ' active' : ''}`} onClick={() => setState({ active: paneId(name) })}>
             <span className="dot square" />
             <span className="body">
               <div className="title">{name}</div>
             </span>
-            {i < 9 && <span className="num">⌘{i + 1}</span>}
           </button>
         ))}
         {conns.length > 0 && <div className="sidebar-section">Open</div>}
-        {conns.map((c, i) => {
+        {conns.map((c) => {
           const text = sidebarText(templates, sessionFacts(c), Date.now());
           return (
             <button key={c.id} className={`session-row${c.id === active ? ' active' : ''}${c.status === 'opening' ? ' opening' : ''}`} onClick={() => setState({ active: c.id })} title={[text.title, text.subtitle].filter(Boolean).join('\n')}>
@@ -60,39 +54,16 @@ export function Sidebar({ onNew, onSwitcher, onSettings }: { onNew: () => void; 
                 {text.subtitle && <div className="sub">{text.subtitle}</div>}
               </span>
               {c.computer && <span className="computer">{c.computer}</span>}
-              {panes.length + i < 9 && <span className="num">⌘{panes.length + i + 1}</span>}
             </button>
           );
         })}
-        <div className="sidebar-section">
-          <span>Recent</span>
-        </div>
-        {error && <div className="session-row sub">{error}</div>}
-        {recent.map((r) => (
-          <button key={`${r.computer ?? ''}:${r.id}`} className="session-row" onClick={() => openSession({ cwd: r.cwd, sessionId: r.id, resume: true, title: r.title, computer: r.computer })} title={`${r.computer ? `${r.computer}: ` : ''}${r.cwd}\n${r.id}`}>
-            <span className="body">
-              <div className="title">
-                {r.running ? '⏳ ' : ''}
-                {r.title || '(no prompt yet)'}
-              </div>
-              <div className="sub">
-                {baseName(r.cwd)}
-                {r.branch ? ` · ${r.branch}` : ''} · {r.live ? 'live' : ago(r.lastUsedAt)}
-              </div>
-            </span>
-            {r.computer && <span className="computer">{r.computer}</span>}
-          </button>
-        ))}
       </div>
       <div className="sidebar-foot">
         <button onClick={onNew}>
           New session <kbd>⌘N</kbd>
         </button>
-        <button onClick={onSwitcher}>
-          Open a session <kbd>⌘K</kbd>
-        </button>
-        <button onClick={onSettings}>
-          Settings <kbd>⌘,</kbd>
+        <button onClick={onGuide}>
+          Help <kbd>⌘/</kbd>
         </button>
       </div>
       <div

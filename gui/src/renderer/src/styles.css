@@ -222,12 +222,6 @@ kbd {
   text-overflow: ellipsis;
 }
 
-.session-row .num {
-  font-size: 10px;
-  color: var(--text-faint);
-  margin-top: 2px;
-}
-
 /* The computer a session runs on, when it is not this Mac. */
 .session-row .computer {
   font-size: 10px;

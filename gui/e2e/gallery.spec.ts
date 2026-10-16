@@ -15,7 +15,7 @@ test.afterEach(async () => {
 
 const g = (name: string) => shot(`gallery-${name}`);
 
-// Claude Code transcripts for the sidebar's recent list, newest first.
+// Claude Code transcripts for the switcher and the new-session panel, newest first.
 function transcripts(tmp: string, project: string) {
   const rows: [string, string, string][] = [
     [project, 'Fix the flaky upload test on CI', 'main'],
@@ -35,15 +35,14 @@ function transcripts(tmp: string, project: string) {
   });
 }
 
-test('sidebar with recent sessions, and the switcher and new-session panels', async () => {
+test('the empty window, and the switcher and new-session panels', async () => {
   run = await launch(SHOWCASE);
   transcripts(run.tmp, run.project);
   const { page } = run;
+  await page.screenshot({ path: g('empty') });
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.locator('.session-row')).toHaveCount(6, { timeout: 15000 });
-  await page.screenshot({ path: g('empty-with-recent') });
   await page.keyboard.press('Meta+k');
-  await expect(page.locator('.picker-item')).toHaveCount(6);
+  await expect(page.locator('.picker-item')).toHaveCount(6, { timeout: 15000 });
   await page.screenshot({ path: g('switcher') });
   await page.keyboard.press('Escape');
   await page.keyboard.press('Meta+n');
@@ -51,7 +50,8 @@ test('sidebar with recent sessions, and the switcher and new-session panels', as
   await page.screenshot({ path: g('new-session') });
   await page.keyboard.press('Escape');
   // A session whose folder is gone fails to open.
-  await page.locator('.session-row', { hasText: 'Migrate the users table' }).click();
+  await page.keyboard.press('Meta+k');
+  await page.locator('.picker-item', { hasText: 'Migrate the users table' }).click();
   await expect(page.locator('.banner')).toContainText('Could not open', { timeout: 15000 });
   await page.screenshot({ path: g('failed-open') });
 });

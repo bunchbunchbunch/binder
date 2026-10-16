@@ -40,13 +40,12 @@ icon from the TUI's pixel logo.
 ## Layout
 
 - **Sidebar:** the panes, if config.json has any, and the sessions open in the app (`⌘1` to
-  `⌘9`, panes first), then recent ones from
-  `binder sessions`: live sessions first (⏳ while a turn runs), then what `/resume` offers,
-  across every config dir in `configDirs`. An open session's row shows its status (⏳ working,
+  `⌘9`, panes first). `⌘K` finds the rest. A session's row shows its status (⏳ working,
   ❓ waiting for you, 🐝 background tasks, ✅ done since you last looked, ⚠️ stopped), how long
   its turn has run, its first prompt and its folder, unless config.json's `sidebar` says
-  otherwise (see [Sidebar text](#sidebar-text)). Drag its right edge to resize it (the app
-  remembers the width); double-click the edge for the default.
+  otherwise (see [Sidebar text](#sidebar-text)). Below them: New session (`⌘N`) and Help
+  (`⌘/`). Drag its right edge to resize it (the app remembers the width); double-click the
+  edge for the default.
 - **Tab bar:** each prompt and its response is a tab, as in the TUI.
 - **Transcript:** the prompt, the work (thinking and tool calls) folded into a one-line summary
   once the answer lands, then the answer. Tool calls have the TUI's views: Edit as a diff (blue
@@ -153,8 +152,7 @@ show when the app next comes to the front.
   `[]` behind. A backslash makes the next character plain text: `\(`.
 - Spaces left by empty fields collapse. An empty subtitle hides the second line; a title that
   comes out empty shows the first prompt. A misspelled field shows as written.
-- The defaults are `{status} {elapsed} {title}` and `{folder}( · {waiting})`. Recent sessions
-  keep their fixed text.
+- The defaults are `{status} {elapsed} {title}` and `{folder}( · {waiting})`.
 
 | Field | Shows |
 |-------|-------|

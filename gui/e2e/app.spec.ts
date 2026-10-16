@@ -319,7 +319,7 @@ test('brings open sessions back after a relaunch; ⌘W closes one and ⌘K reope
 
   await page.keyboard.press('Meta+w');
   await expect(page.locator('.empty-main')).toBeVisible();
-  await expect(page.locator('.session-row .title', { hasText: 'Fix the table alignment' })).toBeVisible();
+  await expect(page.locator('.session-row')).toHaveCount(0);
   await page.keyboard.press('Meta+k');
   await page.locator('.picker-search').fill('table');
   await expect(page.locator('.picker-item.picked .label')).toHaveText('Fix the table alignment');
@@ -566,12 +566,11 @@ test("⌘T opens the new-session panel, which picks the folder named by the sear
     utimesSync(file, t, t);
   });
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.locator('.session-row')).toHaveCount(3, { timeout: 15000 });
 
   // ⌘T opens it, as ⌘N does.
   await page.keyboard.press('Meta+t');
   const labels = page.locator('.picker-item .label');
-  await expect(labels).toHaveText(['foobar', 'barbaz', 'projects']);
+  await expect(labels).toHaveText(['foobar', 'barbaz', 'projects'], { timeout: 15000 });
   await expect(page.locator('.picker-hint')).toContainText('⌘O choose in Finder');
 
   // Typing keeps the cursor on the top row, the folder whose own name matches.
