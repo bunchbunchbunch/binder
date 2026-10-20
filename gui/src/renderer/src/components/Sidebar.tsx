@@ -36,16 +36,17 @@ export function Sidebar({ onNew, onGuide }: { onNew: () => void; onGuide: () => 
     <aside className="sidebar" style={width ? { width } : undefined}>
       <div className="sidebar-top" />
       <div className="sidebar-scroll">
-        {panes.map((name) => (
+        {panes.map((name, i) => (
           <button key={name} className={`session-row${active === paneId(name) ? ' active' : ''}`} onClick={() => setState({ active: paneId(name) })}>
             <span className="dot square" />
             <span className="body">
               <div className="title">{name}</div>
             </span>
+            {i < 9 && <span className="num">⌘{i + 1}</span>}
           </button>
         ))}
         {conns.length > 0 && <div className="sidebar-section">Open</div>}
-        {conns.map((c) => {
+        {conns.map((c, i) => {
           const text = sidebarText(templates, sessionFacts(c), Date.now());
           return (
             <button key={c.id} className={`session-row${c.id === active ? ' active' : ''}${c.status === 'opening' ? ' opening' : ''}`} onClick={() => setState({ active: c.id })} title={[text.title, text.subtitle].filter(Boolean).join('\n')}>
@@ -54,6 +55,7 @@ export function Sidebar({ onNew, onGuide }: { onNew: () => void; onGuide: () => 
                 {text.subtitle && <div className="sub">{text.subtitle}</div>}
               </span>
               {c.computer && <span className="computer">{c.computer}</span>}
+              {panes.length + i < 9 && <span className="num">⌘{panes.length + i + 1}</span>}
             </button>
           );
         })}

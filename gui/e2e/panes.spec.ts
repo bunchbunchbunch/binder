@@ -48,6 +48,7 @@ test('a pane opens a session through the control socket, and closing it shows th
   // terminal of the pane's size, in the pane's folder, with the socket.
   const row = page.locator('.session-row', { hasText: 'Todos' });
   await expect(row).toHaveClass(/active/);
+  await expect(row.locator('.num')).toHaveText('⌘1');
   const screen = page.locator('.pane:not(.off) .xterm-rows');
   await expect(screen).toContainText('in Binder with socket set');
   await expect(screen).not.toContainText('80x24');
@@ -59,7 +60,7 @@ test('a pane opens a session through the control socket, and closing it shows th
   const box = page.locator('.session:not([hidden]) .composer textarea');
   await expect(box).toHaveValue('Write the report', { timeout: 30000 });
   await expect(box).toBeFocused();
-  await expect(page.locator('.session-row').nth(1)).toHaveClass(/active/);
+  await expect(page.locator('.session-row.active .num')).toHaveText('⌘2');
   expect(JSON.parse(readFileSync(argsOut, 'utf8'))).toEqual(expect.arrayContaining(['-n', 'Write the report']));
 
   // ⌘1 and ⌘2 move between the pane and the session, and keys reach whichever is on screen.
@@ -196,6 +197,7 @@ test('a web pane shows its page with the keyboard, passes the window its ⌘ key
   const row = page.locator('.session-row', { hasText: 'Desk' });
   await expect(row).toHaveClass(/active/);
   await expect(page.locator('.session-row .title')).toHaveText(['Desk', 'Todos']);
+  await expect(page.locator('.session-row .num')).toHaveText(['⌘1', '⌘2']);
 
   // The page loads in a view over the pane, under its title bar, and has the keyboard.
   const pane = await paneAt(app, `${origin}/desk`);
@@ -270,7 +272,7 @@ test('a web pane shows its page with the keyboard, passes the window its ⌘ key
   await open({ cwd: `${home}/code/app/`, sessionId, draft: 'Write the report', name: 'Write the report' });
   const composer = page.locator('.session:not([hidden]) .composer textarea');
   await expect(composer).toHaveValue('Write the report', { timeout: 30000 });
-  await expect(page.locator('.session-row').nth(2)).toHaveClass(/active/);
+  await expect(page.locator('.session-row.active .num')).toHaveText('⌘3');
   expect(JSON.parse(readFileSync(argsOut, 'utf8'))).toEqual(expect.arrayContaining(['-n', 'Write the report']));
   await expect.poll(desk).toMatchObject({ visible: false, keyboard: 'window' });
 
@@ -287,7 +289,7 @@ test('a web pane shows its page with the keyboard, passes the window its ⌘ key
   await expect.poll(desk).toMatchObject({ visible: true, keyboard: 'page' });
   await expect.poll(() => pane.evaluate(() => (window as unknown as Counted).shown)).toBe(1);
   await open({ cwd: join(home, 'code/app'), sessionId, resume: true });
-  await expect(page.locator('.session-row').nth(2)).toHaveClass(/active/);
+  await expect(page.locator('.session-row.active .num')).toHaveText('⌘3');
   await expect(page.locator('.session-row')).toHaveCount(3);
 
   // Closing it through the control socket shows the web pane named in `show`, with the keyboard.
