@@ -185,7 +185,7 @@ session or directory the child is on, or they need a picker:
 | `/clear` (`/reset`, `/new`) | start a fresh session; the current one stays resumable with `/resume` |
 | `/fork [title]` (`/branch`) | continue in a new session forked from this one (`--fork-session`); the original stays resumable |
 | `/rewind` (`/checkpoint`, or `Esc` twice) | pick an earlier prompt, then restore the code, the conversation, or both to just before it. The prompt comes back in the composer. Binder turns on Claude Code's file checkpoints for this (`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`) |
-| `/cd <path>` | move the session to another directory (asks to trust a new folder first); a folder that `configDirs` gives another config dir is refused |
+| `/cd <path>` | move the session to another directory (asks to trust a new folder first); a folder that `configDirs` gives another config dir is refused. When Claude changes folder itself (a `cd` in Bash, a worktree), binder shows its new folder; prompt history stays with the session's folder |
 | `/model [model]` | pick from the models the child offers, or set one by name. `Ctrl+L` opens the same picker |
 | `/effort [level]` | pick the effort level for this session, or set one by name. `Shift+Tab` steps to the next one |
 | `/mcp` | MCP servers and their status; pick one to authenticate (opens the sign-in page), reconnect, enable or disable it, or clear its authentication |

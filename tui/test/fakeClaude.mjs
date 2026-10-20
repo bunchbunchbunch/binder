@@ -11,7 +11,10 @@
 //
 // A user message with a uuid gets command_lifecycle frames, and a send_now
 // interrupt cuts the running turn short with an aborted result, as the real
-// binary does for Ctrl+Enter. Control requests binder sends for its panels
+// binary does for Ctrl+Enter. Init lines report the folder the fake runs in
+// where the recording reported its own (its first init's), as the real binary
+// reports where it runs; a folder the recording moved to stays as recorded.
+// Control requests binder sends for its panels
 // (initialize, list_models, mcp_status, rewind_*, set_cwd, get_task_output,
 // stop_task, ...) get canned answers.
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,6 +33,7 @@ const caps = process.env.BINDER_FAKE_CAPS ? process.env.BINDER_FAKE_CAPS.split('
 const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 
 const lines = readFileSync(fixture, 'utf8').split('\n').filter((l) => l.trim());
+const recordedCwd = lines.map((l) => JSON.parse(l)).find((e) => e.type === 'system' && e.subtype === 'init')?.cwd;
 const turns = [];
 let current = [];
 for (const line of lines) {
@@ -64,7 +68,8 @@ async function emitTurn(uuid) {
       break;
     }
     const e = JSON.parse(line);
-    process.stdout.write((caps && e.type === 'system' && e.subtype === 'init' ? JSON.stringify({ ...e, capabilities: caps }) : line) + '\n');
+    const init = e.type === 'system' && e.subtype === 'init';
+    process.stdout.write((init ? JSON.stringify({ ...e, ...(e.cwd === recordedCwd && { cwd: process.cwd() }), ...(caps && { capabilities: caps }) }) : line) + '\n');
     // A recorded can_use_tool request blocks the turn until the host answers,
     // like the real binary does.
     if (e.type === 'control_request') {

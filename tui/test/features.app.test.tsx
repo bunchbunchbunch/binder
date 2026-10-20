@@ -1,14 +1,15 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { App } from '../src/ui/App.js';
 import { Session } from '../src/session.js';
 import { SessionHost } from '../src/host.js';
 import { initialState } from '../src/store.js';
 import { logPath, replay } from '../src/eventLog.js';
+import { findSession } from '../src/sessions.js';
 import { plainLines } from '../src/ui/panels.js';
 import { FAKE_BIN, FIXTURES } from './helpers.js';
 
@@ -37,7 +38,7 @@ function start(name: string, opts: { cwd?: string; fixture?: string; delay?: num
   Object.assign(process.env, {
     BINDER_STATE_DIR: stateDir,
     BINDER_CLAUDE_BIN: FAKE_BIN,
-    BINDER_FAKE_FIXTURE: join(FIXTURES, opts.fixture ?? 'two-turns-stdin.jsonl'),
+    BINDER_FAKE_FIXTURE: resolve(FIXTURES, opts.fixture ?? 'two-turns-stdin.jsonl'),
     BINDER_FAKE_INPUT_OUT: inputOut,
     BINDER_FAKE_ARGS_OUT: argsOut,
   });
@@ -51,7 +52,8 @@ function start(name: string, opts: { cwd?: string; fixture?: string; delay?: num
   const sessionId = `00000000-0000-4000-8000-${String(Math.floor(Math.random() * 1e12)).padStart(12, '0')}`;
   const session = new Session({ sessionId, resume: false, cwd, passthrough: [] });
   session.start();
-  const ui = render(<App host={new SessionHost(session, initialState(sessionId), cwd, configDir)} configDir={configDir} onQuit={() => {}} />);
+  const host = new SessionHost(session, initialState(sessionId), cwd, configDir);
+  const ui = render(<App host={host} configDir={configDir} onQuit={() => {}} />);
   const sent = () => (existsSync(inputOut) ? readFileSync(inputOut, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
   const requests = (subtype: string) => sent().filter((m) => m.type === 'control_request' && m.request.subtype === subtype).map((m) => m.request);
   const args = () => JSON.parse(readFileSync(argsOut, 'utf8')) as string[];
@@ -73,7 +75,7 @@ function start(name: string, opts: { cwd?: string; fixture?: string; delay?: num
     await session.close();
     ui.unmount();
   };
-  return { ui, session, sessionId, stateDir, configDir, cwd, type, key, frame, wait, sent, requests, args, stop };
+  return { ui, session, host, sessionId, stateDir, configDir, cwd, type, key, frame, wait, sent, requests, args, stop };
 }
 
 describe('prompt history', () => {
@@ -272,6 +274,36 @@ describe('/cd', () => {
     expect(t.session.cwd).toBe(join(t.cwd, 'test'));
     await t.type('/cd /definitely/not/here');
     await t.wait(() => t.frame().includes('Not a directory'));
+    await t.stop();
+  });
+
+  it("follows claude's own cd, keeping history and the session's folder where they were", async () => {
+    // The real path, which is what claude (and the fake) report as their folder.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'binder-follow-')));
+    const sub = join(dir, 'sub');
+    mkdirSync(sub);
+    // The second turn's init reports the folder a Bash cd in the first turn left claude in.
+    let inits = 0;
+    const lines = readFileSync(join(FIXTURES, 'two-turns-stdin.jsonl'), 'utf8').trim().split('\n').map((l) => {
+      const e = JSON.parse(l);
+      return e.type === 'system' && e.subtype === 'init' ? JSON.stringify({ ...e, cwd: inits++ ? sub : dir }) : l;
+    });
+    const fixture = join(dir, 'fixture.jsonl');
+    writeFileSync(fixture, lines.join('\n') + '\n');
+    const t = start('follow', { cwd: dir, fixture });
+    await t.type('first prompt');
+    await t.wait(() => t.frame().includes('1 ● first prompt'));
+    expect(t.host.cwd).toBe(dir);
+    await t.type('second prompt');
+    await t.wait(() => t.host.cwd === sub);
+    expect(t.session.cwd).toBe(dir);
+    expect(findSession(t.sessionId)?.cwd).toBe(dir);
+    await t.wait(() => !t.host.busy);
+    await t.type('draft', false);
+    await t.key(UP);
+    await t.wait(() => t.frame().includes('❯ second prompt'));
+    await t.key(UP);
+    await t.wait(() => t.frame().includes('❯ first prompt'));
     await t.stop();
   });
 });

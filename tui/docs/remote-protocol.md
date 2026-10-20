@@ -163,7 +163,7 @@ snapshot, then patches at most every 120 ms while something changes.
 `ended` means the host is shutting down (its binder quit); the gateway then reports
 `detached`.
 
-`state` fields: `sessionId`, `cwd`, `model`, `permissionMode`, `usage`, `contextTokens`,
+`state` fields: `sessionId`, `cwd` (the folder Claude is in, which follows its own `cd`), `model`, `permissionMode`, `usage`, `contextTokens`,
 `running` (tab id or null), `runningSince` (when the running turn started, in ms since the
 epoch, or null), `activity`, `interrupting`, `canSteer`, `queue`
 (`[{tabId, prompt, followup, auto?}]`; `auto` marks binder's own follow-up about background

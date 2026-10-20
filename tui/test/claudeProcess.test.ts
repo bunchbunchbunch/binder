@@ -63,8 +63,10 @@ describe('ClaudeProcess with the fake binary', () => {
     await proc.close();
     const events = await done;
 
+    // The init names the folder the fake ran in, as claude's does.
     const expected = readFileSync(join(FIXTURES, 'single-turn-partial.jsonl'), 'utf8')
-      .split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+      .split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
+      .map((e) => (e.type === 'system' && e.subtype === 'init' ? { ...e, cwd: here } : e));
     expect(events).toEqual(expected);
     expect((result as { result: string }).result).toBe('ok');
   });

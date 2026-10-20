@@ -228,7 +228,7 @@ export class HostServer {
       this.write(v, {
         t: 'info',
         sessionId: this.host.sessionId,
-        cwd: this.host.cwd,
+        cwd: this.host.session.cwd,
         title: this.host.title,
         running: this.host.busy,
         model: s.model ?? null,
@@ -238,7 +238,7 @@ export class HostServer {
     }
     if (msg.want !== 'attach') return void v.socket.destroy();
     if (Array.isArray(msg.roots)) v.roots = msg.roots.filter((r): r is string => typeof r === 'string');
-    if (!insideRoots(this.host.cwd, v.roots)) {
+    if (!insideRoots(this.host.session.cwd, v.roots)) {
       this.write(v, { t: 'error', error: 'This session is outside the allowed folders' });
       return void v.socket.end();
     }
@@ -265,13 +265,13 @@ export class HostServer {
       case 'send': {
         const text = str(m.text, 'text');
         if (!text.trim()) throw new Error('Nothing to send');
-        addHistory(host.cwd, text);
+        addHistory(host.session.cwd, text);
         return { tabId: host.send(text, images(m.images), typeof m.tabId === 'number' ? m.tabId : undefined) };
       }
       case 'edit_queued': {
         const text = str(m.text, 'text');
         host.editQueued(Number(m.tabId), str(m.prompt, 'prompt'), text);
-        if (text.trim()) addHistory(host.cwd, text);
+        if (text.trim()) addHistory(host.session.cwd, text);
         return;
       }
       case 'interrupt':
@@ -347,7 +347,7 @@ export class HostServer {
       case 'artifacts':
         return { artifacts: sessionArtifacts(host.state.tabs) };
       case 'history':
-        return { prompts: loadHistory(host.cwd, 200) };
+        return { prompts: loadHistory(host.session.cwd, 200) };
       case 'complete': {
         const partial = str(m.partial, 'partial');
         if (m.command) return { items: completeCommand(partial, 50) };

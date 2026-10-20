@@ -95,7 +95,9 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   const [sticky, setSticky] = useState(stickyPrompt === true);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [cwd, setCwd] = useState(host.cwd);
-  const [history, setHistory] = useState<string[]>(() => loadHistory(host.cwd));
+  // Prompt history belongs to the session's folder, not wherever claude has cd'd to.
+  const home = host.session.cwd;
+  const [history, setHistory] = useState<string[]>(() => loadHistory(home));
   const [effort, setEffortLevel] = useState<string | undefined>(host.effort);
   const [plan, setPlan] = useState<string | undefined>(host.plan);
   // Remounting the prompt with new text (a rewind puts the prompt back).
@@ -104,7 +106,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   const [editing, setEditing] = useState<{ tabId: number; prompt: string } | null>(null);
   const lastEsc = useRef(0);
 
-  useEffect(() => setHistory(loadHistory(cwd)), [cwd]);
+  useEffect(() => setHistory(loadHistory(home)), [home]);
 
   // What the host learns from the child, or from a remote viewer's commands.
   useEffect(() => {
@@ -286,7 +288,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   const active = state.tabs[state.active];
 
   const remember = (text: string) => {
-    addHistory(cwd, text);
+    addHistory(home, text);
     setHistory((h) => (h[h.length - 1] === text ? h : h.concat(text)));
   };
 

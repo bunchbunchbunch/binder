@@ -24,7 +24,7 @@ type HostEvents = {
   change: [];
   // The slash commands the child runs, merged with binder's own.
   commands: [SlashCommand[]];
-  // The working directory changed (/cd, or a resume into another folder).
+  // The folder claude is in changed (/cd, a resume into another folder, or claude's own cd).
   cwd: [string];
   // The host moved to another session id (/clear, /fork, /resume).
   session: [string];
@@ -161,7 +161,14 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.flushTimer = null;
     const events = this.batch;
     this.batch = [];
-    if (events.length) this.dispatch({ type: 'events', events });
+    if (!events.length) return;
+    const was = this.current.cwd;
+    this.dispatch({ type: 'events', events });
+    // Claude moved itself (a cd in Bash, a worktree): each turn's init names its
+    // folder. The session's own folder (session.cwd), where history, the session
+    // index and respawns live, stays put, as it does in Claude Code.
+    const cwd = this.current.cwd;
+    if (cwd && cwd !== was && cwd !== this.dir) this.moveTo(cwd);
   };
 
   // Send the next queued prompt whenever the child is idle, with any bash
@@ -172,7 +179,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.lastSent = next;
     const uuid = this.session.sendPrompt(next.prompt, next.tabId, next.images, next.followup, this.current.bashContext.join('\n'), next.auto?.text);
     this.dispatch({ type: 'sent', tabId: next.tabId, uuid, auto: Boolean(next.auto) });
-    upsertSession({ id: this.sessionId, cwd: this.dir, configDir: this.configDir, firstPrompt: next.prompt });
+    upsertSession({ id: this.sessionId, cwd: this.session.cwd, configDir: this.configDir, firstPrompt: next.prompt });
   }
 
   private nextTabId(): number {
@@ -294,7 +301,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
   // Codex has one account (CODEX_HOME), not one per folder.
   private sameAccount(dir: string): boolean {
     if (this.session.agent === 'codex') return true;
-    return configDirFor(childEnv(dir)) === configDirFor(childEnv(this.dir));
+    return configDirFor(childEnv(dir)) === configDirFor(childEnv(this.session.cwd));
   }
 
   private moveTo(cwd: string): void {
@@ -311,8 +318,9 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.lastSent = null;
     this.session.switchTo(id, opts);
     this.dispatch({ type: 'reset', state: next });
-    if (opts.cwd) this.moveTo(opts.cwd);
-    upsertSession({ id, cwd: opts.cwd ?? this.dir, configDir: this.configDir, agent: this.session.agent });
+    // The new child starts in the session's folder, wherever the old one had moved to.
+    if (this.session.cwd !== this.dir) this.moveTo(this.session.cwd);
+    upsertSession({ id, cwd: this.session.cwd, configDir: this.configDir, agent: this.session.agent });
     this.emit('session', id);
   }
 
@@ -328,7 +336,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.requireIdle('/resume');
     const next = existsSync(logPath(s.id)) ? replay(s.id) : replayTranscript(s.id, s.path);
     // Follow the session to its folder when it is another one this account can run in.
-    const dir = s.cwd && s.cwd !== this.dir && existsSync(s.cwd) && this.sameAccount(s.cwd) ? s.cwd : undefined;
+    const dir = s.cwd && s.cwd !== this.session.cwd && existsSync(s.cwd) && this.sameAccount(s.cwd) ? s.cwd : undefined;
     this.switchSession(s.id, { resume: true, cwd: dir }, next);
     return `Resumed ${s.id.slice(0, 8)}${dir ? ` in ${dir}` : ''}`;
   }
@@ -347,7 +355,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
     const id = randomUUID();
     if (existsSync(logPath(from))) copyFileSync(logPath(from), logPath(id));
     this.switchSession(id, { resume: true, fork: true }, existsSync(logPath(id)) ? replay(id) : { ...s, sessionId: id });
-    upsertSession({ id, cwd: this.dir, configDir: this.configDir, firstPrompt: firstPrompt(s.tabs[0]) });
+    upsertSession({ id, cwd: this.session.cwd, configDir: this.configDir, firstPrompt: firstPrompt(s.tabs[0]) });
     if (title) this.session.request('rename_session', { title, source: 'host' }).catch(() => {});
     return `Forked into ${id.slice(0, 8)}. /resume ${from.slice(0, 8)} goes back to the original.`;
   }
