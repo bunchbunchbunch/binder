@@ -32,14 +32,17 @@ if [ "$what" != tui ]; then
   step "building gui"
   (cd "$ROOT/gui" && npm run build)
   if pgrep -qf "$APP_PROC"; then
-    step "quitting Binder (it asks first when a session is mid-turn)"
-    osascript -e 'ignoring application responses' -e 'tell application id "dev.bindertui.binder" to quit' -e 'end ignoring'
-    for _ in $(seq 120); do
+    # A quit, by AppleScript or SIGTERM, asks first while a session is mid-turn.
+    # SIGKILL skips that: the turns keep running in their hosts, and the pane
+    # programs still get the hangup a closed terminal sends.
+    step "quitting Binder"
+    pkill -KILL -f "$APP_PROC"
+    for _ in $(seq 10); do
       pgrep -qf "$APP_PROC" || break
       sleep 1
     done
     if pgrep -qf "$APP_PROC"; then
-      echo "Binder did not quit within 2 minutes; nothing was packaged" >&2
+      echo "Binder did not quit; nothing was packaged" >&2
       exit 1
     fi
   fi

@@ -9,9 +9,8 @@ argument-hint: "[tui|gui]"
 Both apps run build output, not source: `binder` runs `tui/dist/`, and Binder.app runs the
 bundle in `gui/release/`. This builds them and relaunches the Mac app in front of other windows.
 
-1. Unless the argument is `tui`, tell the user in one line that Binder will quit and reopen,
-   and that it asks first if a session is mid-turn (click Quit; the turn keeps running in its
-   host).
+1. Unless the argument is `tui`, tell the user in one line that Binder will quit and reopen
+   without asking, and that a turn mid-run keeps running in its host.
 2. Run `"${CLAUDE_SKILL_DIR}/rebuild.sh" $ARGUMENTS` with
    a 600000 ms timeout. No argument does both; `tui` or `gui` does one.
 3. Report from its output:
