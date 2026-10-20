@@ -37,6 +37,14 @@ npm run dist             # builds release/mac-arm64/Binder.app (ad-hoc signed)
 Copy `release/mac-arm64/Binder.app` to `/Applications` to keep it. `npm run icon` redraws the
 icon from the TUI's pixel logo.
 
+An ad-hoc signature changes with every build, so macOS treats each rebuild as a new app and
+drops the privacy permissions you gave it (Screen Recording, Automation and the like). To keep
+them, sign with a certificate from your keychain: set `BINDER_SIGN_IDENTITY` to its SHA-1 hash
+(from `security find-identity -v -p codesigning`; a free Apple Development certificate from
+Xcode works) before `npm run dist`. The app then keeps the same identity across rebuilds, and you
+grant each permission once. If that certificate is gone (expired, or renewed under a new hash),
+the build stops and says so instead of producing an app macOS would treat as new.
+
 ## Layout
 
 - **Sidebar:** the panes, if config.json has any, and the sessions open in the app (`⌘1` to

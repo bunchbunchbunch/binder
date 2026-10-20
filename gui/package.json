@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "e2e": "electron-vite build && playwright test",
-    "dist": "electron-vite build && electron-builder --mac --dir",
+    "dist": "electron-vite build && electron-builder --mac --dir ${BINDER_SIGN_IDENTITY:+\"-c.mac.identity=$BINDER_SIGN_IDENTITY\"}",
     "icon": "node scripts/make-icon.mjs",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
   },
@@ -55,6 +55,7 @@
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
       "identity": "-",
+      "forceCodeSigning": true,
       "hardenedRuntime": false
     },
     "asarUnpack": [
