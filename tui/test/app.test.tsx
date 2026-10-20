@@ -199,6 +199,8 @@ describe('App', () => {
     await type(ui, 'clean up');
     await until(() => plainFrame(ui).includes('Allow Bash?'), 8000, () => ui.lastFrame());
     expect(plainFrame(ui).replace(/[│\s]+/g, ' ')).toContain('Dangerous rm operation on possibly-empty variable path');
+    // The prompt shows the exact command, so the approval is of what will run.
+    expect(plainFrame(ui).replace(/[│\s]+/g, ' ')).toContain('rm -f $S/$SID.events.jsonl');
     await sleep(50); // let the picker's input hook attach after its first paint
     ui.stdin.write('1');
     await until(() => plainFrame(ui).includes('Removed the log.'), 8000, () => ui.lastFrame());

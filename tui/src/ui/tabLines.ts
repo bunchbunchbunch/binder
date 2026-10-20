@@ -1,7 +1,7 @@
 import type { Block, Tab, Turn } from '../store.js';
 import { renderTool, toolWidth } from './toolView.js';
 import { splitWork, workSummary } from './workSplit.js';
-import { truncate, width as strWidth, wrap } from './md/text.js';
+import { clean, truncate, width as strWidth, wrap } from './md/text.js';
 import { styled, type Style } from './md/theme.js';
 import { keywordColors, ultrathinkRanges } from './ultrathink.js';
 import { flattenBig } from './lineAttrs.js';
@@ -43,7 +43,8 @@ function fit(lines: string[], w: number): string[] {
 
 export type TextRenderer = (block: Extract<Block, { kind: 'text' }>, width: number) => string[];
 
-function thinkingLines(text: string, w: number, detail: boolean): string[] {
+function thinkingLines(raw: string, w: number, detail: boolean): string[] {
+  const text = clean(raw);
   const body = detail ? text : text.split('\n').slice(0, 3).join('\n');
   return ('✻ ' + body).split('\n').flatMap((l) => wrap(styled(l, THINK), w));
 }
@@ -104,7 +105,8 @@ function fmtDuration(ms: number): string {
 const promptCache = new Map<string, string[]>();
 
 // A prompt line, with "ultrathink" in rainbow letters.
-function promptText(line: string): string {
+function promptText(raw: string): string {
+  const line = clean(raw);
   const colors = keywordColors(line.length, ultrathinkRanges(line));
   let out = '';
   for (let i = 0; i < line.length; ) {
@@ -150,7 +152,7 @@ export type TabLinesOptions = {
 // expanding can scroll the work into view.
 function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean, renderText: TextRenderer, out: string[], pinned?: Turn): number {
   if (turn !== pinned) {
-    const head = turn.auto ? wrap(styled(`⏺ ${turn.prompt}`, AUTO), width) : promptLines(turn.prompt, width);
+    const head = turn.auto ? wrap(styled(`⏺ ${clean(turn.prompt)}`, AUTO), width) : promptLines(turn.prompt, width);
     for (const l of head) out.push(l);
     out.push('');
   }
@@ -198,7 +200,7 @@ export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = fa
   for (const p of pending) {
     if (out[out.length - 1] !== '') out.push('');
     if (p.auto) {
-      for (const l of wrap(styled(`⏺ ${p.prompt}`, AUTO), width)) out.push(l);
+      for (const l of wrap(styled(`⏺ ${clean(p.prompt)}`, AUTO), width)) out.push(l);
       out.push(styled('Claude carries on with it here once the current turn ends', DIM));
       continue;
     }

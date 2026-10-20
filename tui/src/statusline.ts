@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import { childEnv, stateDir } from './paths.js';
+import { childEnv, stateDir, STATE_FILE_MODE } from './paths.js';
 import type { Usage } from './store.js';
 
 // The status bar runs the user's own statusLine command from settings.json
@@ -119,5 +119,5 @@ export function loadCachedUsage(configDir: string): Usage | undefined {
 }
 
 export function saveCachedUsage(configDir: string, usage: Usage): void {
-  writeFileSync(usageCachePath(configDir), JSON.stringify(usage));
+  writeFileSync(usageCachePath(configDir), JSON.stringify(usage), { mode: STATE_FILE_MODE });
 }

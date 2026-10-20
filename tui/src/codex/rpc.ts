@@ -55,8 +55,8 @@ export class CodexRpc extends EventEmitter<RpcEvents> {
 
   start(): void {
     if (this.opts.stderrPath) {
-      mkdirSync(dirname(this.opts.stderrPath), { recursive: true });
-      this.stderrLog = createWriteStream(this.opts.stderrPath, { flags: 'a' });
+      mkdirSync(dirname(this.opts.stderrPath), { recursive: true, mode: 0o700 });
+      this.stderrLog = createWriteStream(this.opts.stderrPath, { flags: 'a', mode: 0o600 });
     }
     const child = spawn(this.opts.bin, this.opts.args, { cwd: this.opts.cwd, env: this.opts.env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;

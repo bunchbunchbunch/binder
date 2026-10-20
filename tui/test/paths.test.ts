@@ -1,9 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { childEnv } from '../src/paths.js';
+import { childEnv, stateDir, STATE_FILE_MODE } from '../src/paths.js';
 import { readConfig, saveConfig } from '../src/config.js';
+
+describe('state dir is private to the user', () => {
+  it('creates the state dir 0700 and self-heals a dir left 0755 by an older binder', () => {
+    const dir = join(mkdtempSync('/tmp/binder-state-'), 'bindertui');
+    const prev = process.env.BINDER_STATE_DIR;
+    process.env.BINDER_STATE_DIR = dir;
+    try {
+      expect(statSync(stateDir()).mode & 0o777).toBe(0o700);
+      chmodSync(dir, 0o755); // as an older binder would have left it
+      expect(statSync(stateDir()).mode & 0o777).toBe(0o700); // self-healed
+    } finally {
+      if (prev === undefined) delete process.env.BINDER_STATE_DIR;
+      else process.env.BINDER_STATE_DIR = prev;
+    }
+  });
+
+  it('writes state files readable only by the user', () => {
+    const dir = mkdtempSync('/tmp/binder-state-');
+    const f = join(dir, 'x.jsonl');
+    writeFileSync(f, 'secret transcript\n', { mode: STATE_FILE_MODE });
+    expect(statSync(f).mode & 0o777).toBe(0o600);
+  });
+});
 
 describe('account routing', () => {
   const config = { configDirs: { '~/work': '~/.claude-alt' } };

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput, useWindowSize, type Key } from 'ink';
+import { clean } from './md/text.js';
 
 export type PickerItem = {
   key: string;
@@ -64,14 +65,14 @@ export function Picker({ title, items, onSelect, onCancel, search, hint, subtitl
 
   const first = Math.max(0, Math.min(at - Math.floor(rows / 2), items.length - rows));
   const shown = items.slice(first, first + rows);
-  const labelWidth = Math.min(48, Math.max(0, ...shown.map((i) => i.label.length)));
+  const labelWidth = Math.min(48, Math.max(0, ...shown.map((i) => clean(i.label).length)));
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#C9A0FF" paddingX={1}>
       <Text>
         <Text bold color="#FFD580">{title}</Text>
         {items.length > rows ? <Text dimColor>{`  ${at + 1}/${items.length}`}</Text> : null}
       </Text>
-      {subtitle ? <Text dimColor wrap="truncate-end">{subtitle}</Text> : null}
+      {subtitle ? <Text dimColor wrap="truncate-end">{clean(subtitle)}</Text> : null}
       {search ? (
         <Text>
           <Text color="#7CC4FF" bold>{'⌕ '}</Text>
@@ -87,8 +88,8 @@ export function Picker({ title, items, onSelect, onCancel, search, hint, subtitl
             <Text key={it.key} wrap="truncate-end">
               <Text color="#7CC4FF">{selected ? '❯ ' : '  '}</Text>
               {it.mark !== undefined ? <Text color={it.markColor}>{it.mark + ' '}</Text> : null}
-              <Text bold={selected} color={selected ? '#7CC4FF' : undefined}>{it.label.padEnd(labelWidth)}</Text>
-              {it.description ? <Text dimColor>{'  ' + it.description}</Text> : null}
+              <Text bold={selected} color={selected ? '#7CC4FF' : undefined}>{clean(it.label).padEnd(labelWidth)}</Text>
+              {it.description ? <Text dimColor>{'  ' + clean(it.description)}</Text> : null}
             </Text>
           );
         })

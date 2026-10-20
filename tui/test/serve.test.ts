@@ -251,6 +251,33 @@ describe('gateway end to end', () => {
     await until(() => p.closed());
     expect(p.msgs[0]).toMatchObject({ t: 'closed' });
   });
+
+  it('drops a connected phone when it is revoked, without waiting for its next request', async () => {
+    const { relay, config, phone: me, macPublic } = await setup();
+    gateway(config).connect();
+    await connected(config);
+    const p = await phone(relay.port, me, macPublic);
+    expect((await p.request('list')).ok).toBe(true);
+    // Revoke: rewrite the config with no enrolled devices. The phone sends nothing more.
+    const raw = JSON.parse(readFileSync(config, 'utf8'));
+    raw.devices = [];
+    writeFileSync(config, JSON.stringify(raw));
+    await until(() => p.closed(), 6000);
+    expect(p.msgs.at(-1)).toMatchObject({ t: 'closed', reason: expect.stringContaining('no longer enrolled') });
+  }, 15000);
+
+  it('drops a connected phone when remote control is paused mid-session', async () => {
+    const { relay, config, phone: me, macPublic } = await setup();
+    gateway(config).connect();
+    await connected(config);
+    const p = await phone(relay.port, me, macPublic);
+    expect((await p.request('list')).ok).toBe(true);
+    const raw = JSON.parse(readFileSync(config, 'utf8'));
+    raw.paused = true;
+    writeFileSync(config, JSON.stringify(raw));
+    await until(() => p.closed(), 6000);
+    expect(p.msgs.at(-1)).toMatchObject({ t: 'closed', reason: expect.stringContaining('paused') });
+  }, 15000);
 });
 
 describe('binder sessions', () => {

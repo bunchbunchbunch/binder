@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { BackgroundTask } from '../store.js';
 import { elapsed } from './tabLayout.js';
+import { clean } from './md/text.js';
 
 // Background shells and agents still running, one row each under the status
 // row: what each is doing, and its kind, tab and running time, so one that
@@ -23,8 +24,8 @@ export function BackgroundTasks({ tasks }: { tasks: BackgroundTask[] }) {
       {shown.map((t) => (
         <Box key={t.id} justifyContent="space-between" height={1} paddingLeft={1}>
           <Text wrap="truncate-end">
-            <Text color="#7CC4FF">{`◷ ${t.description}`}</Text>
-            {t.progress && <Text dimColor>{` · ${t.progress}`}</Text>}
+            <Text color="#7CC4FF">{`◷ ${clean(t.description)}`}</Text>
+            {t.progress && <Text dimColor>{` · ${clean(t.progress)}`}</Text>}
           </Text>
           <Box flexShrink={0} marginLeft={2}>
             <Text dimColor>{taskMeta(t, now)}</Text>

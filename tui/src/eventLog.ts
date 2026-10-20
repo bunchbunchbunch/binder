@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stateDir } from './paths.js';
+import { stateDir, STATE_FILE_MODE } from './paths.js';
 import { parseEventLine } from './events.js';
 import { initialState, reduce, type State } from './store.js';
 
@@ -34,15 +34,15 @@ export function appendRaw(sessionId: string, line: string): void {
     const e = parseEventLine(line);
     if (e?.type === 'stream_event') return;
   }
-  appendFileSync(logPath(sessionId), line + '\n');
+  appendFileSync(logPath(sessionId), line + '\n', { mode: STATE_FILE_MODE });
 }
 
 export function appendPrompt(sessionId: string, marker: Omit<PromptMarker, 'type'>): void {
-  appendFileSync(logPath(sessionId), JSON.stringify({ type: 'hc_prompt', ...marker }) + '\n');
+  appendFileSync(logPath(sessionId), JSON.stringify({ type: 'hc_prompt', ...marker }) + '\n', { mode: STATE_FILE_MODE });
 }
 
 export function appendLocal(sessionId: string, marker: LocalMarker): void {
-  appendFileSync(logPath(sessionId), JSON.stringify(marker) + '\n');
+  appendFileSync(logPath(sessionId), JSON.stringify(marker) + '\n', { mode: STATE_FILE_MODE });
 }
 
 export function replay(sessionId: string): State {

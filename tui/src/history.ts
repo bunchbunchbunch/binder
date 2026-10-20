@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stateDir } from './paths.js';
+import { stateDir, STATE_FILE_MODE } from './paths.js';
 
 // Prompt history for Up/Down in the composer, per directory, oldest first.
 
@@ -24,5 +24,5 @@ export function loadHistory(cwd: string, limit = 500): string[] {
 }
 
 export function addHistory(cwd: string, prompt: string): void {
-  appendFileSync(historyPath(), JSON.stringify({ cwd, prompt, at: new Date().toISOString() }) + '\n');
+  appendFileSync(historyPath(), JSON.stringify({ cwd, prompt, at: new Date().toISOString() }) + '\n', { mode: STATE_FILE_MODE });
 }

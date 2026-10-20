@@ -6,6 +6,8 @@ import { renderMarkdown } from '../src/ui/markdown.js';
 import { fitColumns } from '../src/ui/md/table.js';
 import { diffLines, withContext } from '../src/ui/diff.js';
 import { renderTool } from '../src/ui/toolView.js';
+import { clean } from '../src/ui/md/text.js';
+import type { Block } from '../src/store.js';
 import { FIXTURES } from './helpers.js';
 import { setMarkdownStyle } from '../src/ui/md/theme.js';
 import { BIG_BOTTOM, BIG_TOP, bigText, flattenBig, setBigText, setBigViewport, stampRows, unstampRows } from '../src/ui/lineAttrs.js';
@@ -245,5 +247,58 @@ describe('double-height rows', () => {
     setBigViewport(viewport as unknown as DOMElement);
     expect(stampRows()).toBe('\x1b7\x1b[3;1H\x1b#3\x1b[6;1H\x1b#4\x1b8');
     unstampRows();
+  });
+});
+
+describe('control-sequence sanitization', () => {
+  // An OSC 8 hyperlink whose URI aborts early (embedded ESC) and smuggles an
+  // OSC 52 clipboard write, plus a lone C1 OSC introducer. Ink keeps OSC tokens
+  // verbatim, so without binder's own stripping these reach the terminal.
+  const OSC52 = '\x1b]8;;x\x1b]52;c;cm0gLXJmIH4=\x07L\x1b]8;;\x1b\\';
+  const C1_OSC = '\x9d52;c;cm0gLXJmIH4=\x07';
+  const ERASE = '\x1b]8;;x\x1b[2J\x1b[1;1H\x1b\\';
+
+  // Binder legitimately emits SGR color, its own OSC 8 links (with a cleaned,
+  // ESC-free URI), and DEC double-height attributes. Everything else is an
+  // injection; after removing binder's own sequences none may remain.
+  const injected = (s: string) =>
+    s
+      .replace(/\x1b\[[0-9;:]*m/g, '')
+      .replace(/\x1b\]8;;[^\x1b\x07]*\x1b\\/g, '')
+      .replace(/\x1b#[0-9]/g, '');
+  const unsafe = (s: string) => /[\x00-\x08\x0b-\x1f\x7f-\x9f]/.test(injected(s));
+
+  it('strips introducer bytes but keeps tab and newline', () => {
+    expect(clean('a\tb\nc')).toBe('a\tb\nc');
+    expect(clean(OSC52)).toBe(']8;;x]52;c;cm0gLXJmIH4=L]8;;\\');
+    expect(clean(C1_OSC)).toBe('52;c;cm0gLXJmIH4=');
+    expect(/[\x1b\x07\u0080-\u009f]/.test(clean(OSC52 + C1_OSC + ERASE))).toBe(false);
+  });
+
+  it('renders model markdown without a smuggled escape sequence', () => {
+    for (const payload of [OSC52, C1_OSC, ERASE]) {
+      const out = renderMarkdown(`here is output: ${payload} done`, 80);
+      expect(out).not.toContain('\x1b]52');
+      expect(out).not.toContain('\x1b[2J');
+      expect(unsafe(out)).toBe(false);
+    }
+  });
+
+  it('renders Bash tool output and command without a smuggled escape sequence', () => {
+    const block: Extract<Block, { kind: 'tool_use' }> = {
+      kind: 'tool_use',
+      id: 't1',
+      name: 'Bash',
+      input: { command: `echo hi${OSC52}` },
+      inputJson: '',
+      final: true,
+      children: [],
+      result: { content: `ordinary${OSC52}\nmore${C1_OSC}`, isError: false },
+    };
+    const r = renderTool(block, 80);
+    const out = [r.title, ...r.body].join('\n');
+    expect(out).not.toContain('\x1b]52');
+    expect(out).not.toContain('\x07');
+    expect(unsafe(out)).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import type { Block } from '../store.js';
 import { diffLines, withContext } from './diff.js';
 import { highlightCode } from './md/highlight.js';
-import { truncate, width as strWidth, wrap } from './md/text.js';
+import { clean, truncate, width as strWidth, wrap } from './md/text.js';
 import { styled, theme, type Style } from './md/theme.js';
 import { toolSummary } from './toolSummary.js';
 
@@ -36,7 +36,17 @@ function args(block: ToolBlock): Record<string, unknown> {
 }
 
 function str(v: unknown): string {
-  return typeof v === 'string' ? v : v == null ? '' : String(v);
+  return clean(typeof v === 'string' ? v : v == null ? '' : String(v));
+}
+
+// Strip escape-forming bytes from every string in a tool's input (file paths,
+// commands, file contents, diffs, todo text, question text) so none can inject
+// a terminal sequence. Clones, so the shared block is left untouched.
+function cleanDeep<T>(v: T): T {
+  if (typeof v === 'string') return clean(v) as T;
+  if (Array.isArray(v)) return v.map((x) => cleanDeep(x)) as T;
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) as T;
+  return v;
 }
 
 function shortPath(p: string): string {
@@ -54,7 +64,7 @@ function langFromPath(p: string): string | undefined {
 function resultLines(block: ToolBlock, w: number, style: Style = MUTED): string[] {
   const r = block.result;
   if (!r) return [];
-  const text = r.content.replace(/\s+$/, '');
+  const text = clean(r.content).replace(/\s+$/, '');
   if (!text) return [];
   return text.split('\n').flatMap((l) => wrap(styled(l, r.isError ? { fg: '#E06C75' } : style), w));
 }
@@ -88,7 +98,7 @@ function renderUnifiedDiff(diff: string, kind: string, w: number): string[] {
 }
 
 export function renderTool(block: ToolBlock, w: number): ToolRendering {
-  const a = args(block);
+  const a = cleanDeep(args(block));
   const name = block.name;
   const done = Boolean(block.result);
 
@@ -163,13 +173,13 @@ export function renderTool(block: ToolBlock, w: number): ToolRendering {
       return { title: `Skill ${styled('/' + str(a.skill), { fg: '#C9A0FF' })}${a.args ? ' ' + str(a.args) : ''}`, body: [], preview: 0 };
     case 'AskUserQuestion': {
       const qs = Array.isArray(a.questions) ? (a.questions as Array<{ question: string }>) : [];
-      const answered = block.result?.content.match(/"([^"]+)"="([^"]+)"/g) ?? [];
+      const answered = clean(block.result?.content ?? '').match(/"([^"]+)"="([^"]+)"/g) ?? [];
       const body = answered.map((m) => styled(m.replace(/"([^"]+)"="([^"]+)"/, '$1 → $2'), { fg: '#98C379' }));
       return { title: `Question ${styled(qs.map((q) => q.question).join(' · '), { fg: '#C9A0FF' })}`, body, preview: 4 };
     }
     default: {
       const title = toolSummary(name, block.input, block.inputJson);
-      return { title: styled(title, { bold: true }), body: resultLines(block, w), preview: 4 };
+      return { title: styled(clean(title), { bold: true }), body: resultLines(block, w), preview: 4 };
     }
   }
 }

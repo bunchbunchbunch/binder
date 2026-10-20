@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { Tab } from '../store.js';
 import { tabLabel, visibleTabs } from './tabLayout.js';
+import { clean } from './md/text.js';
 
 export function TabBar({ tabs, active, width, frame }: { tabs: Tab[]; active: number; width: number; frame: number }) {
   if (!tabs.length) {
@@ -11,7 +12,7 @@ export function TabBar({ tabs, active, width, frame }: { tabs: Tab[]; active: nu
       </Box>
     );
   }
-  const labels = tabs.map((t) => tabLabel(t, frame));
+  const labels = tabs.map((t) => clean(tabLabel(t, frame)));
   const { indices, left, right } = visibleTabs(labels, active, width);
   return (
     <Box height={1}>

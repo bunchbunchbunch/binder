@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { connect, type Socket } from 'node:net';
-import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, unlinkSync, unwatchFile, watchFile } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -393,6 +393,19 @@ class Client {
     h?.socket.destroy();
   }
 
+  /**
+   * Called when the config changes: drop this client at once if it has been
+   * revoked or remote control has been paused, rather than waiting for its next
+   * request. An attached client that only watches would otherwise keep
+   * receiving the session's output after being revoked.
+   */
+  enforce(cfg: RemoteConfig | null): void {
+    if (this.done || !this.device) return;
+    if (cfg && !cfg.paused && cfg.devices.some((d) => d.publicKey.equals(this.device!.publicKey))) return;
+    this.post({ t: 'closed', reason: cfg?.paused ? 'Remote control is paused on the computer' : 'This client is no longer enrolled' });
+    this.close();
+  }
+
   /** We end it: tell the relay. */
   close(): void {
     if (this.done) return;
@@ -417,8 +430,22 @@ export class Gateway {
   private backoff = 1000;
   private failing = false;
   private stopped = false;
+  private watching = false;
 
   constructor(readonly path = configPath()) {}
+
+  /** Drop any client the current config no longer allows (revoked, or paused). */
+  private enforce(): void {
+    const cfg = this.config();
+    for (const c of [...this.clients.values()]) c.enforce(cfg);
+  }
+
+  /** Watch the config so a revoke or pause takes effect on live clients, not just the next request. */
+  private watch(): void {
+    if (this.watching) return;
+    this.watching = true;
+    watchFile(this.path, { interval: 1000 }, () => this.enforce());
+  }
 
   /** The current config, reloaded when the file changes; null (refuse everything) when it is invalid. */
   config(): RemoteConfig | null {
@@ -473,6 +500,7 @@ export class Gateway {
 
   connect(): void {
     if (this.stopped) return;
+    this.watch();
     const cfg = this.config();
     if (!cfg) {
       setTimeout(() => this.connect(), 30000);
@@ -517,6 +545,7 @@ export class Gateway {
 
   stop(): void {
     this.stopped = true;
+    if (this.watching) unwatchFile(this.path);
     for (const c of [...this.clients.values()]) c.gone();
     this.ws?.close();
   }

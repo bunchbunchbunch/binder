@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { Question } from '../store.js';
+import { clean } from './md/text.js';
+
+// What a permission prompt is asking to run, shown in full so the approval is
+// of the real command, not just "Allow Bash?". Mirrors the Mac app's card.
+function permissionDetail(toolName: string | undefined, input: Record<string, unknown> | undefined): string {
+  if (!input) return '';
+  if (toolName === 'Bash' && typeof input.command === 'string') return clean(input.command);
+  if (typeof input.file_path === 'string') return clean(input.file_path);
+  return clean(JSON.stringify(input, null, 2));
+}
 
 type Props = {
   question: Question;
@@ -22,6 +32,8 @@ export function QuestionView({ question, onAnswer, onDeny }: Props) {
 
   const q = question.questions[qi];
   const labels = q.options.map((o) => o.label).concat(question.toolUseId ? [OTHER] : []);
+  // Permission prompts (not AskUserQuestion) show the exact command or input.
+  const detail = question.toolUseId ? '' : permissionDetail(question.toolName, question.toolInput);
 
   const finish = (label: string) => {
     const next = { ...answers, [q.question]: label };
@@ -75,13 +87,18 @@ export function QuestionView({ question, onAnswer, onDeny }: Props) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="#C9A0FF" paddingX={1}>
       <Box marginBottom={1}>
-        <Text color="#FFD580" bold>{q.header ? `${q.header}  ` : ''}</Text>
-        <Text bold>{q.question}</Text>
+        <Text color="#FFD580" bold>{q.header ? `${clean(q.header)}  ` : ''}</Text>
+        <Text bold>{clean(q.question)}</Text>
         {question.questions.length > 1 ? <Text dimColor>  ({qi + 1}/{question.questions.length})</Text> : null}
       </Box>
+      {detail ? (
+        <Box marginBottom={1} borderStyle="round" borderColor="#4A6A8A" paddingX={1}>
+          <Text>{detail}</Text>
+        </Box>
+      ) : null}
       {question.reason ? (
         <Box marginBottom={1}>
-          <Text color="#E8C07D">{question.reason}</Text>
+          <Text color="#E8C07D">{clean(question.reason)}</Text>
         </Box>
       ) : null}
       {labels.map((label, i) => {
@@ -92,8 +109,8 @@ export function QuestionView({ question, onAnswer, onDeny }: Props) {
           <Text key={label}>
             <Text color="#7CC4FF">{` ${mark} `}</Text>
             <Text color="#7CC4FF" dimColor={!selected}>{`${i + 1}. `}</Text>
-            <Text bold={selected} inverse={selected} color={label === OTHER ? '#7F848E' : undefined}>{` ${label} `}</Text>
-            {desc ? <Text dimColor>{' '.repeat(Math.max(1, labelWidth - label.length + 1))}{desc}</Text> : null}
+            <Text bold={selected} inverse={selected} color={label === OTHER ? '#7F848E' : undefined}>{` ${clean(label)} `}</Text>
+            {desc ? <Text dimColor>{' '.repeat(Math.max(1, labelWidth - label.length + 1))}{clean(desc)}</Text> : null}
           </Text>
         );
       })}

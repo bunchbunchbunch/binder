@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { stateDir } from './paths.js';
+import { stateDir, STATE_FILE_MODE } from './paths.js';
 import type { Agent } from './session.js';
 import type { SessionSummary } from './transcripts.js';
 import { logPath } from './eventLog.js';
@@ -47,7 +47,7 @@ export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'config
   } else {
     all.push({ ...update, createdAt: now, lastUsedAt: now });
   }
-  writeFileSync(indexPath(), JSON.stringify(all, null, 2) + '\n');
+  writeFileSync(indexPath(), JSON.stringify(all, null, 2) + '\n', { mode: STATE_FILE_MODE });
 }
 
 export function latestSessionForCwd(cwd: string): SessionRecord | undefined {

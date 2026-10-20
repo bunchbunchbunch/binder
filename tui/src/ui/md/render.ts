@@ -1,7 +1,7 @@
 import { Lexer, type Token, type Tokens } from 'marked';
 import { highlightCode } from './highlight.js';
 import { renderStripedTable, renderTable, type Cell } from './table.js';
-import { indent, padEnd, width, wrap } from './text.js';
+import { clean, indent, padEnd, width, wrap } from './text.js';
 import { FG_OFF, markdownStyle, off, on, styled, theme, type Style } from './theme.js';
 import { BIG_BOTTOM, BIG_TOP, bigText } from '../lineAttrs.js';
 
@@ -16,7 +16,7 @@ const vivid = () => markdownStyle === 'vivid';
 
 export function renderMarkdown(text: string, w: number): string {
   // A Lexer instance accumulates tokens across calls, so make a fresh one.
-  const tokens = new Lexer({ gfm: true, breaks: false }).lex(text.replace(/\t/g, '  '));
+  const tokens = new Lexer({ gfm: true, breaks: false }).lex(clean(text).replace(/\t/g, '  '));
   const width = Math.max(16, w);
   return renderBlocks(tokens, vivid() ? Math.min(width, MEASURE) : width).join('\n');
 }
@@ -76,7 +76,9 @@ function inline(tokens: Token[] | undefined, outer: Style = {}): string {
 }
 
 function hyperlink(href: string, label: string): string {
-  return `\x1b]8;;${href}\x1b\\${label}\x1b]8;;\x1b\\`;
+  // clean(href) keeps a control byte in the URL from closing this OSC early and
+  // smuggling another sequence; the label is already-styled, cleaned text.
+  return `\x1b]8;;${clean(href)}\x1b\\${label}\x1b]8;;\x1b\\`;
 }
 
 function shortUrl(href: string): string {
