@@ -57,7 +57,11 @@ function inline(tokens: Token[] | undefined, outer: Style = {}): string {
         const l = t as Tokens.Link;
         const label = inline(l.tokens, { ...outer, ...theme.link }) || l.href;
         out += hyperlink(l.href, styled(label, theme.link, outer));
-        if (!vivid() && label !== l.href && !/^#/.test(l.href)) out += styled(` (${shortUrl(l.href)})`, theme.linkUrl, outer);
+        // Disclose the real URL when the visible text differs from it. The vivid
+        // style normally skips this to stay clean, but a link whose text poses as
+        // a URL (containing ://) must never hide a different destination.
+        const spoof = /:\/\//.test(l.text ?? '') && l.text !== l.href;
+        if (label !== l.href && !/^#/.test(l.href) && (!vivid() || spoof)) out += styled(` (${shortUrl(l.href)})`, theme.linkUrl, outer);
         break;
       }
       case 'image': {

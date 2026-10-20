@@ -10,6 +10,14 @@ import type { ControlReply, ControlRequest } from '../shared/api';
 
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The only passthrough a caller may set is the session name (-n). The socket is
+// inherited by every program the app starts (a pane, a session's Bash tool), so
+// without this a prompt-injected command could open a session with
+// --dangerously-skip-permissions or --permission-mode bypassPermissions.
+const safeArgs = (args: string[]): boolean => args.length === 0 || (args.length === 2 && args[0] === '-n' && !args[1].startsWith('-'));
+
 /** A request as the window takes it, or what is wrong with it. */
 export function parseControl(line: string): ControlRequest | string {
   let m: Record<string, unknown>;
@@ -20,9 +28,10 @@ export function parseControl(line: string): ControlRequest | string {
   }
   if (m?.t === 'open') {
     if (typeof m.cwd !== 'string' || !m.cwd) return 'open needs cwd';
-    if (m.sessionId !== undefined && typeof m.sessionId !== 'string') return 'sessionId must be a string';
+    if (m.sessionId !== undefined && (typeof m.sessionId !== 'string' || !UUID.test(m.sessionId))) return 'sessionId must be a UUID';
     if (m.draft !== undefined && typeof m.draft !== 'string') return 'draft must be a string';
     if (m.args !== undefined && !strings(m.args)) return 'args must be strings';
+    if (m.args !== undefined && !safeArgs(m.args as string[])) return 'args may only set the session name (-n <name>)';
     return { t: 'open', cwd: m.cwd, sessionId: m.sessionId, resume: m.resume === true, draft: m.draft, args: m.args };
   }
   if (m?.t === 'close') {

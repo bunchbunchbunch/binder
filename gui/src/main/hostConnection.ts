@@ -18,7 +18,9 @@ export function socketStream(path: string): HostStream {
 /** A child whose stdin and stdout are the host's socket; the last line of its errors is why it closed. */
 export function processStream(child: ChildProcess): HostStream {
   let err = '';
-  child.stderr?.on('data', (d) => (err += d));
+  // A misbehaving remote computer could stream unbounded stderr; keep only
+  // enough to report the closing reason.
+  child.stderr?.on('data', (d) => void (err.length < 64 * 1024 && (err += d)));
   child.stdin!.on('error', () => {});
   child.on('error', (e) => (err += `\n${e.message}`));
   return {
@@ -53,6 +55,14 @@ export class HostConnection {
       let attached = false;
       const lines = createInterface({ input: this.stream.input, crlfDelay: Infinity });
       lines.on('error', () => {});
+      // readline buffers a line with no newline without bound; drop the stream
+      // if a remote computer floods one, so it cannot grow memory without limit.
+      let sinceNewline = 0;
+      this.stream.input.on('data', (chunk: Buffer) => {
+        const nl = chunk.lastIndexOf(0x0a);
+        sinceNewline = nl === -1 ? sinceNewline + chunk.length : chunk.length - nl - 1;
+        if (sinceNewline > 16 * 1024 * 1024) this.stream.input.destroy();
+      });
       lines.on('line', (line) => {
         let m: Record<string, unknown>;
         try {

@@ -82,6 +82,7 @@ type Phone = {
   msgs: Record<string, unknown>[];
   closed: () => boolean;
   request: (t: string, f?: Record<string, unknown>) => Promise<{ ok: boolean; result?: Record<string, unknown>; error?: string }>;
+  raw: (text: string) => void;
 };
 
 async function phone(port: number, me: KeyPair, macPublic: Buffer): Promise<Phone> {
@@ -100,6 +101,9 @@ async function phone(port: number, me: KeyPair, macPublic: Buffer): Promise<Phon
       const id = nextId++;
       for (const c of seal(hs.send!, JSON.stringify({ t, id, ...f }))) ws.send(c);
       return new Promise((r) => replies.set(id, r));
+    },
+    raw: (text: string) => {
+      for (const c of seal(hs.send!, text)) ws.send(c);
     },
   };
   let nextId = 1;
@@ -265,6 +269,38 @@ describe('gateway end to end', () => {
     await until(() => p.closed(), 6000);
     expect(p.msgs.at(-1)).toMatchObject({ t: 'closed', reason: expect.stringContaining('no longer enrolled') });
   }, 15000);
+
+  it('survives a client sending a non-object JSON message', async () => {
+    const { relay, config, phone: me, macPublic } = await setup();
+    gateway(config).connect();
+    await connected(config);
+    const p = await phone(relay.port, me, macPublic);
+    expect((await p.request('list')).ok).toBe(true);
+    p.raw('null'); // valid JSON, not a request: must not crash the gateway
+    await until(() => p.closed(), 6000);
+    // The gateway is still alive: a fresh phone can connect and list.
+    const p2 = await phone(relay.port, me, macPublic);
+    expect((await p2.request('list')).ok).toBe(true);
+  }, 15000);
+
+  it('confines path completion to the allowed roots', async () => {
+    const { relay, config, phone: me, macPublic } = await setup();
+    gateway(config).connect();
+    await connected(config);
+    const p = await phone(relay.port, me, macPublic);
+    const sessionId = '00000000-0000-4000-8000-0000000000e5';
+    cleanup.push(() => {
+      if (existsSync(lockPath(sessionId))) process.kill(Number(readFileSync(lockPath(sessionId), 'utf8')), 'SIGTERM');
+    });
+    await p.request('open', { cwd: ROOT, sessionId });
+    await until(() => p.state !== null);
+    const inside = await p.request('complete', { partial: 'src/' });
+    expect(inside.ok).toBe(true);
+    expect((inside.result!.items as string[]).length).toBeGreaterThan(0);
+    for (const partial of ['/etc/pa', '~/', '../../']) {
+      expect((await p.request('complete', { partial })).result!.items).toEqual([]);
+    }
+  }, 60000);
 
   it('drops a connected phone when remote control is paused mid-session', async () => {
     const { relay, config, phone: me, macPublic } = await setup();

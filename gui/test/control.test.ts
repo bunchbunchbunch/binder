@@ -25,4 +25,14 @@ describe('control requests', () => {
     expect(parseControl(JSON.stringify({ t: 'open', cwd: '/p', args: '-n x' }))).toBe('args must be strings');
     expect(parseControl(JSON.stringify({ t: 'close' }))).toBe('close needs sessionId');
   });
+
+  it('rejects a non-name flag and a non-UUID session id, so an opener cannot escalate', () => {
+    for (const args of [['--dangerously-skip-permissions'], ['--permission-mode', 'bypassPermissions'], ['-n', '-x'], ['-n', 'a', '-n', 'b']]) {
+      expect(parseControl(JSON.stringify({ t: 'open', cwd: '/p', args }))).toBe('args may only set the session name (-n <name>)');
+    }
+    expect(parseControl(JSON.stringify({ t: 'open', cwd: '/p', sessionId: 'not-a-uuid' }))).toBe('sessionId must be a UUID');
+    // The name flag and a bare open are still fine.
+    expect(parseControl(JSON.stringify({ t: 'open', cwd: '/p', args: ['-n', 'My task'] }))).toMatchObject({ args: ['-n', 'My task'] });
+    expect(parseControl(JSON.stringify({ t: 'open', cwd: '/p' }))).toMatchObject({ t: 'open', cwd: '/p' });
+  });
 });

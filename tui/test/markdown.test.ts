@@ -284,6 +284,18 @@ describe('control-sequence sanitization', () => {
     }
   });
 
+  it('discloses the real URL for a link whose text poses as a different URL, even in vivid', () => {
+    for (const style of ['vivid', 'classic'] as const) {
+      setMarkdownStyle(style);
+      const spoof = plain('[https://github.com/login](https://evil.example/login)', 100).join(' ');
+      expect(spoof).toContain('evil.example/login');
+      // A plainly-titled link stays clean in vivid (no URL noise).
+      const titled = plain('[the docs](https://example.com/docs)', 100).join(' ');
+      if (style === 'vivid') expect(titled).not.toContain('example.com');
+    }
+    setMarkdownStyle('vivid');
+  });
+
   it('renders Bash tool output and command without a smuggled escape sequence', () => {
     const block: Extract<Block, { kind: 'tool_use' }> = {
       kind: 'tool_use',

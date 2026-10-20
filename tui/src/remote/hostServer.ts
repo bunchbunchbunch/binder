@@ -209,6 +209,9 @@ export class HostServer {
       } catch {
         return socket.destroy();
       }
+      // JSON.parse("null"/"5"/"true") is valid but not a request; reading .t or
+      // .id off it would throw and take the process down.
+      if (!msg || typeof msg !== 'object') return socket.destroy();
       if (first) {
         first = false;
         this.hello(viewer, msg);
@@ -347,7 +350,15 @@ export class HostServer {
         return { prompts: loadHistory(host.cwd, 200) };
       case 'complete': {
         const partial = str(m.partial, 'partial');
-        return { items: m.command ? completeCommand(partial, 50) : completePath(partial, host.cwd, 50) };
+        if (m.command) return { items: completeCommand(partial, 50) };
+        // Path completion would otherwise list any directory (an absolute, `~`,
+        // or `..` partial escapes the session folder), so confine it to roots.
+        if (v.roots) {
+          const slash = partial.lastIndexOf('/');
+          const base = (slash >= 0 ? partial.slice(0, slash + 1) : '').replace(/^~(?=$|\/)/, homedir());
+          if (!insideRoots(resolve(host.cwd, base), v.roots)) return { items: [] };
+        }
+        return { items: completePath(partial, host.cwd, 50) };
       }
       case 'tool_detail': {
         const tab = host.state.tabs.find((t) => t.id === m.tabId);

@@ -11,7 +11,7 @@ import { configPath, expandHome, loadConfig, logPathFor, type Device, type Remot
 import { lockPath, socketPath, socketSessionIds } from './sockets.js';
 import { insideRoots } from './hostServer.js';
 import { readSessions } from '../sessions.js';
-import { listTranscripts } from '../transcripts.js';
+import { findTranscript, listTranscripts, summarize } from '../transcripts.js';
 import { configDir, stateDir } from '../paths.js';
 import { logPath } from '../eventLog.js';
 
@@ -189,6 +189,16 @@ function realTarget(dir: string): string {
   return join(realpathSync(base), relative(base, dir));
 }
 
+// The folder a resume target lives in, from binder's index or Claude Code's
+// transcript. Undefined for an id binder has never seen (a fresh resume starts
+// a new session in the launch dir, which open() has already confined to roots).
+function sessionCwd(sessionId: string): string | undefined {
+  const rec = readSessions().find((s) => s.id === sessionId);
+  if (rec?.cwd) return rec.cwd;
+  const transcript = findTranscript(configDir(), sessionId);
+  return transcript ? summarize(transcript)?.cwd || undefined : undefined;
+}
+
 type Msg = Record<string, unknown> & { t?: string; id?: number };
 
 class Client {
@@ -284,6 +294,8 @@ class Client {
     } catch {
       return this.close();
     }
+    // Valid JSON that is not an object (null, a number) would throw on m.t/m.id.
+    if (!m || typeof m !== 'object') return this.close();
     const cfg = this.gw.config();
     // Revoking a client or pausing ends its connection at its next request.
     if (!cfg || cfg.paused || !cfg.devices.some((d) => d.publicKey.equals(this.device!.publicKey))) {
@@ -373,6 +385,13 @@ class Client {
     if (!insideRoots(dir, cfg.roots)) throw new Error(`${dir} is outside the allowed folders`);
     const sessionId = m.sessionId === undefined ? randomUUID() : m.sessionId;
     if (typeof sessionId !== 'string' || !UUID.test(sessionId)) throw new Error('Bad session id');
+    // Resuming replays that session's own transcript, which may be from a folder
+    // outside the roots even when the launch dir is inside them. Confine it, as
+    // the host's own `resume` request already does.
+    if (m.resume === true) {
+      const home = sessionCwd(sessionId);
+      if (home && !insideRoots(home, cfg.roots)) throw new Error('That session is outside the allowed folders');
+    }
     if (!(await hostInfo(sessionId))) {
       const other = sessionProcess(sessionId);
       if (other) throw new Error(`That session is open in another program on the Mac (${other}). Quit it there first.`);
