@@ -36,7 +36,7 @@ function insideHome(path: string, home: string): string {
 }
 
 /** Folder names in `dir`, following symlinks; unreadable means none. */
-function subfolders(dir: string): string[] {
+export function subfolders(dir: string): string[] {
   try {
     return readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isDirectory() || (e.isSymbolicLink() && statSync(join(dir, e.name), { throwIfNoEntry: false })?.isDirectory()))

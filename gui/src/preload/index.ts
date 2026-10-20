@@ -20,6 +20,7 @@ const api: BinderApi = {
   repoInfo: (cwd, computer) => ipcRenderer.invoke('repoInfo', cwd, computer),
   sidebarScript: (input, computer) => ipcRenderer.invoke('sidebarScript', input, computer),
   isDirectory: (path, computer) => ipcRenderer.invoke('isDirectory', path, computer),
+  subfolders: (dirs, computer) => ipcRenderer.invoke('subfolders', dirs, computer),
   chooseFolder: (opts) => ipcRenderer.invoke('chooseFolder', opts),
   pathForFile: (file) => webUtils.getPathForFile(file),
   clipboardImage: () => ipcRenderer.invoke('clipboardImage'),

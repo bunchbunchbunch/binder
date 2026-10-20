@@ -132,6 +132,8 @@ export type BinderApi = {
   /** The first line config.json's sidebar.script prints for a session (run where the session runs); empty without one, or when it fails. */
   sidebarScript(input: SidebarScriptInput, computer?: string): Promise<string>;
   isDirectory(path: string, computer?: string): Promise<boolean>;
+  /** The folders in each of `dirs` (but hidden ones), there; none for a folder it cannot read. */
+  subfolders(dirs: string[], computer?: string): Promise<string[]>;
   /** A Finder dialog; `hidden` shows hidden folders (config dirs are). */
   chooseFolder(opts?: { buttonLabel?: string; hidden?: boolean }): Promise<string | null>;
   /** Where a file dropped on the window lives. */

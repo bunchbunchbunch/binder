@@ -92,6 +92,16 @@ export function recentFolders(sessions: SessionRow[], first: Folder | null): Fol
   return out;
 }
 
+/** The folders holding `folders`, by computer: a new folder sits beside ones sessions ran in. */
+function parentFolders(folders: Folder[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const { dir, computer } of folders) {
+    const parent = dir.replace(/\/+[^/]+\/*$/, '') || '/';
+    if (!(out[computer] ??= []).includes(parent)) out[computer].push(parent);
+  }
+  return out;
+}
+
 /** How well a folder matches search `q` (lowercase), best first: its own name
  *  is `q`, starts with it, holds it; last, only a parent's name does. */
 export function folderRank(dir: string, q: string): number {
@@ -121,9 +131,27 @@ export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; 
     };
   }, [query, computers, defaultComputer]);
   const folders = useMemo(() => recentFolders(sessions, cwd ? { dir: cwd, computer: computer ?? '' } : null), [sessions, cwd, computer]);
+  // The folders beside those, read as the panel opens, for a search: no session has run in a new one yet.
+  const parents = useMemo(() => JSON.stringify(parentFolders(folders)), [folders]);
+  const [nearby, setNearby] = useState<Folder[]>([]);
+  useEffect(() => {
+    let live = true;
+    setNearby([]);
+    for (const [k, dirs] of Object.entries(JSON.parse(parents) as Record<string, string[]>)) {
+      window.binder.subfolders(dirs, k || undefined).then(
+        (found) => live && setNearby((n) => n.concat(found.map((dir) => ({ dir, computer: k })))),
+        () => {},
+      );
+    }
+    return () => {
+      live = false;
+    };
+  }, [parents]);
   const q = query.toLowerCase();
   const typedOn = typed?.on ?? [];
-  const matches = folders.filter((f) => !q || `${f.dir} ${f.computer}`.toLowerCase().includes(q));
+  const known = new Set(folders.map((f) => JSON.stringify([f.computer, f.dir])));
+  const pool = q ? folders.concat(nearby.filter((f) => !known.has(JSON.stringify([f.computer, f.dir])))) : folders;
+  const matches = pool.filter((f) => !q || `${f.dir} ${shortPath(f.dir)} ${f.computer}`.toLowerCase().includes(q));
   if (q) matches.sort((a, b) => folderRank(a.dir, q) - folderRank(b.dir, q));
   const items: PickerItem[] = [
     ...typedOn.map((k) => ({ key: JSON.stringify([k, typed!.path]), label: `Start in ${typed!.path}${on(k)}` })),

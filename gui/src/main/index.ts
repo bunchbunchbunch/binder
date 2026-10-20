@@ -7,6 +7,7 @@ import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, Rect, SavedLa
 import type { HostMessage } from '../shared/wire';
 import { binder, ensureHost, listSessions, readComputers, readDefaultComputer, readPanes, readSettings, repoInfo, runSidebarScript, stateDir, writeSettings, type PaneConfig, type WebPaneConfig } from './binder';
 import { listenControl } from './control';
+import { subfolders } from './paneBridge';
 import { HostConnection, processStream, socketStream, type HostStream } from './hostConnection';
 import { Remote } from './remote';
 import { paneInput, resizePane, startPane, stopPanes } from './panes';
@@ -144,6 +145,10 @@ function registerIpc(): void {
     if (computer) return (await remote(computer)).isDirectory(path);
     const p = resolve(path.replace(/^~(?=$|\/)/, homedir()));
     return existsSync(p) && statSync(p).isDirectory();
+  });
+  ipcMain.handle('subfolders', async (_e, dirs: string[], computer?: string) => {
+    if (computer) return (await remote(computer)).subfolders(dirs);
+    return dirs.flatMap((d) => subfolders(d).filter((n) => !n.startsWith('.')).map((n) => join(d, n)));
   });
   ipcMain.handle('chooseFolder', async (_e, opts?: { buttonLabel?: string; hidden?: boolean }) => {
     const r = await dialog.showOpenDialog(win!, {

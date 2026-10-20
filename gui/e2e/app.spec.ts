@@ -573,9 +573,21 @@ test("⌘T opens the new-session panel, which picks the folder named by the sear
   await expect(labels).toHaveText(['foobar', 'barbaz', 'projects'], { timeout: 15000 });
   await expect(page.locator('.picker-hint')).toContainText('⌘O choose in Finder');
 
+  // A search also finds the folders beside those, read as the panel opens: here
+  // one no session has run in yet, made after the app started.
+  await page.keyboard.press('Escape');
+  mkdirSync(join(top, 'fresh'));
+  mkdirSync(join(top, '.hidden'));
+  await page.keyboard.press('Meta+t');
+  await expect(labels).toHaveText(['foobar', 'barbaz', 'projects']);
+  await page.keyboard.type('fres');
+  await expect(labels).toHaveText(['fresh']);
+  await page.keyboard.press('Escape');
+
   // Typing keeps the cursor on the top row, the folder whose own name matches.
+  await page.keyboard.press('Meta+t');
   await page.keyboard.type('projects');
-  await expect(labels).toHaveText(['projects', 'foobar', 'barbaz']);
+  await expect(labels).toHaveText(['projects', 'foobar', 'barbaz', 'fresh']);
   await expect(page.locator('.picker-item.picked .label')).toHaveText('projects');
   await page.keyboard.press('Enter');
   await page.locator('.session:not([hidden]) .composer textarea').waitFor({ state: 'visible', timeout: 30000 });

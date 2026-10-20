@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readComputers, readDefaultComputer } from '../src/main/binder';
@@ -59,6 +59,15 @@ describe('another computer', () => {
     expect(await r.isDirectory(tmp)).toBe(true);
     expect(await r.isDirectory(join(tmp, 'nope'))).toBe(false);
     expect((await r.sessions()).home).toBe(homedir());
+  });
+
+  it('lists the folders in folders there, but hidden ones', async () => {
+    const top = join(tmp, 'top');
+    for (const d of ['b', 'a', '.hidden', 'with space']) mkdirSync(join(top, d), { recursive: true });
+    writeFileSync(join(top, 'file'), '');
+    symlinkSync(join(top, 'a'), join(top, 'link'));
+    expect(await mini().subfolders([top, `${top}/a/`, join(tmp, 'nope')])).toEqual(['a', 'b', 'link', 'with space'].map((d) => join(top, d)));
+    expect(await new Remote('offline', FAKE_SSH, join(tmp, 'ssh')).subfolders([top])).toEqual([]);
   });
 
   it("reads a folder's checkouts and branch there", async () => {

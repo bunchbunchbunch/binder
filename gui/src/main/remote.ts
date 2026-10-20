@@ -124,6 +124,16 @@ export class Remote {
     }
   }
 
+  /** The folders in each of `dirs` there (but hidden ones); none for a folder it cannot read, or when the computer cannot say. */
+  async subfolders(dirs: string[]): Promise<string[]> {
+    const list = `for d in ${sh(dirs)}; do for f in "\${d%/}"/*/; do [ -d "$f" ] && printf '%s\\n' "\${f%/}"; done; done; exit 0`;
+    try {
+      return (await this.exec(`exec /bin/sh -c ${shellQuote(list)}`)).split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   async repoInfo(cwd: string): Promise<{ worktrees: string[]; branch: string | null }> {
     try {
       const out = await this.exec(await this.withPath(`cd ${shellQuote(cwd)} || exit 1; git worktree list --porcelain 2>/dev/null; printf ${MARK}; git branch --show-current 2>/dev/null`));
