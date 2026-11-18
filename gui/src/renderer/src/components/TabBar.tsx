@@ -29,8 +29,20 @@ export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: nu
   // The active tab in view, then the counts. Again on resize: a count
   // appearing narrows the strip and can cut the active tab off. Not once
   // scrolled by hand, or the count that scroll brings in snaps it back.
+  // Computed scrolls, not scrollIntoView: settle must be a no-op when the
+  // active tab is already in view, or the pixel it moves can toggle a ‹ N
+  // count, which resizes the strip, which settles again, rocking the tabs
+  // left and right.
   const settle = () => {
-    if (follow.current) box.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const el = box.current;
+    if (!el) return;
+    const t = el.querySelector<HTMLElement>('.tab.active');
+    if (follow.current && t) {
+      const from = el.scrollLeft;
+      const to = from + el.clientWidth;
+      if (t.offsetLeft < from - 1) el.scrollLeft = t.offsetLeft;
+      else if (t.offsetLeft + t.offsetWidth > to + 1) el.scrollLeft = t.offsetLeft + t.offsetWidth - el.clientWidth;
+    }
     measure();
   };
   // Only a new active tab or a new tab moves the strip; patches (every
