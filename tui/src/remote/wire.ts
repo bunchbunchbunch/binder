@@ -57,6 +57,8 @@ export type WireMeta = {
   suggestion: string | null;
   // Background shells and agents still running.
   backgroundTasks: { id: string; type: string; description: string }[];
+  // The session's name (/rename), or null.
+  title: string | null;
 };
 
 export type WireState = WireMeta & { tabs: WireTab[] };
@@ -142,6 +144,7 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   effort: [(s) => s.effort, (s) => s.effort ?? null],
   suggestion: [(s) => s.state.suggestion, (s) => s.state.suggestion ?? null],
   backgroundTasks: [(s) => s.state.backgroundTasks, (s) => s.state.backgroundTasks],
+  title: [(s) => s.state.title, (s) => s.state.title ?? null],
 };
 
 export function wireState(src: Source): WireState {

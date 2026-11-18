@@ -230,6 +230,20 @@ describe('host server', () => {
     await until(() => v.state!.permissionMode === 'default');
   });
 
+  it('names the session for every viewer', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl');
+    const id = '00000000-0000-4000-8000-0000000000ad';
+    await startHost(id, stateDir);
+    const a = viewer(id);
+    const b = viewer(id);
+    await until(() => a.state !== null && b.state !== null);
+    expect(a.state!.title).toBeNull();
+    expect(await a.request('rename', { title: '  ' })).toMatchObject({ ok: false, error: 'Give the session a title: /rename <title>' });
+    expect((await a.request('rename', { title: ' Pay\trent ' })).ok).toBe(true);
+    // As the child tidied it.
+    await until(() => a.state!.title === 'Pay rent' && b.state!.title === 'Pay rent');
+  });
+
   it('refuses a viewer whose roots do not hold the session, and a cd outside them', async () => {
     const stateDir = setup('two-turns-stdin.jsonl');
     const id = '00000000-0000-4000-8000-0000000000a4';

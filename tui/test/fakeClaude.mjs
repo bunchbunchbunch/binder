@@ -16,7 +16,7 @@
 // reports where it runs; a folder the recording moved to stays as recorded.
 // Control requests binder sends for its panels
 // (initialize, list_models, mcp_status, rewind_*, set_cwd, get_task_output,
-// stop_task, ...) get canned answers.
+// stop_task, rename_session, ...) get canned answers.
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -101,6 +101,11 @@ const CONTROL = {
   set_model: () => ({}),
   apply_flag_settings: () => ({}),
   set_permission_mode: (r) => ({ mode: r.mode === 'manual' ? 'default' : r.mode }),
+  // The real binary names the session (tidied) before it answers.
+  rename_session: (r) => {
+    emit({ type: 'system', subtype: 'session_title_changed', title: String(r.title).replace(/\s+/g, ' ').trim(), uuid: 'fake-title', session_id: 'fake' });
+    return {};
+  },
   mcp_status: () => ({ mcpServers: mcp }),
   mcp_toggle: (r) => {
     const s = mcp.find((x) => x.name === r.serverName);

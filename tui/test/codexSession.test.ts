@@ -287,12 +287,14 @@ describe('CodexSession on the fake app-server', () => {
   });
 
   it('names a new thread from -n, as the phone starts a named session', async () => {
-    const { session, sent } = codex('answer.jsonl', { passthrough: ['-n', 'Pay rent'] });
+    const { session, sessionId, sent } = codex('answer.jsonl', { passthrough: ['-n', 'Pay rent'] });
     const applied = once<unknown>(session, 'applied');
     session.start();
     await applied;
     await session.close();
     expect(sent().find((m) => m.method === 'thread/name/set')?.params).toMatchObject({ name: 'Pay rent' });
+    // Reported as Claude Code reports a name, so it shows above the tabs, after a resume too.
+    expect(replay(sessionId).title).toBe('Pay rent');
     const spawned = JSON.parse(readFileSync(join(process.env.BINDER_STATE_DIR!, 'args.json'), 'utf8'));
     expect(spawned).toEqual(['app-server']);
   });

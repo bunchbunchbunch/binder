@@ -360,6 +360,12 @@ export class SessionHost extends EventEmitter<HostEvents> {
     return `Forked into ${id.slice(0, 8)}. /resume ${from.slice(0, 8)} goes back to the original.`;
   }
 
+  /** /rename: the child keeps the name and reports it (session_title_changed), tidied, into state.title. */
+  async rename(title: string): Promise<void> {
+    if (!title.trim()) throw new Error('Give the session a title: /rename <title>');
+    await this.session.request('rename_session', { title });
+  }
+
   /** Restores code and/or conversation to just before the prompt sent as `uuid`; returns the prompt to put back. */
   async rewind(uuid: string, mode: RewindMode): Promise<{ prefill?: string; message: string }> {
     this.requireIdle('/rewind');

@@ -479,6 +479,27 @@ kbd {
   flex: 1;
 }
 
+/* The session's title (/rename), above its tabs; the tabs' bar gives up the
+   height it adds. Both drag the window. */
+.session-title {
+  flex-shrink: 0;
+  padding: 14px 16px 0;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-app-region: drag;
+}
+
+.session-title + .titlebar {
+  height: 44px;
+}
+
+.app.no-sidebar .session-title {
+  padding-left: 84px;
+}
+
 /* ───────── Transcript ───────── */
 
 .scroller {

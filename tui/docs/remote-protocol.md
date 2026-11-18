@@ -86,7 +86,7 @@ reply:
 inside an allowed root are listed, attachable or startable. For `open` without
 `sessionId`, the gateway makes a new id; with `sessionId` and `resume: false` it starts a
 new session with that id (so a client can link it first); with `resume: true` it resumes
-it. `name` names a new session. With `create: true` a missing `cwd` is made first (with
+it. `name` names the session (a resumed one is renamed). With `create: true` a missing `cwd` is made first (with
 any missing parents), as long as it would be inside an allowed root.
 
 The gateway sends `{"t":"detached","reason":"..."}` when the attached host goes away, and
@@ -111,6 +111,7 @@ paused, or this client revoked).
 | `rewind` | `uuid`, `mode` (`both`, `conversation`, `code`) | `{prefill?}`: the prompt to put back in the composer |
 | `clear` | | `{sessionId}` |
 | `fork` | `title?` | `{sessionId}` |
+| `rename` | `title` | `{}`; names the session. The name Claude Code keeps (tidied) arrives as `title` in the state. Refused when `title` is blank |
 | `resume` | `id` | `{sessionId}` |
 | `cd` | `path`, `trust?` | `{status: "ok", cwd}`, `{status: "needs_trust", directory}` (repeat with `trust: directory`), or `{status: "rejected", message}` |
 | `models` | | `{models: [{value, displayName, description?, resolvedModel?, supportedEffortLevels?}]}` |
@@ -172,7 +173,8 @@ work another tab's turn took in, which the user cannot edit), `steer` (`{tabId, 
 predicts after a turn, or null), `backgroundTasks` (`[{id, type, description, toolUseId?,
 tabId?, startedAt?, progress?}]`, shells and agents still running: the tool call that
 started each and the tab whose turn made it, when it started in ms since the epoch, and an
-agent's latest step), `tabs`.
+agent's latest step), `title` (the session's name, from `rename`, `fork`'s title, or
+Claude Code, or null; a session's name can change but never goes back to null), `tabs`.
 
 `question` is null or `{requestId, kind, toolName, toolInput?, reason?, questions}`, where `kind`
 is `ask` (AskUserQuestion) or `permission` (allow or deny `toolName` with `toolInput`; `reason`

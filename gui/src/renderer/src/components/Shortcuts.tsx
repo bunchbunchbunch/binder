@@ -106,7 +106,7 @@ export function HelpView({ commandCount }: { commandCount: number }) {
       <KeyTable keys={[...KEYS, ...WINDOW_KEYS]} />
       <h2>Commands</h2>
       <p>
-        Type / to browse all {commandCount}. Binder runs /help, /resume, /clear, /fork, /rewind, /cd, /model, /effort, /mcp, /chrome, /artifacts and /exit itself; the rest
+        Type / to browse all {commandCount}. Binder runs /help, /resume, /clear, /fork, /rename, /rewind, /cd, /model, /effort, /mcp, /chrome, /artifacts and /exit itself; the rest
         go to Claude Code.
       </p>
       <p style={{ color: 'var(--text-faint)' }}>Esc closes this.</p>

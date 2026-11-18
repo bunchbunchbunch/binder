@@ -54,7 +54,8 @@ the build stops and says so instead of producing an app macOS would treat as new
   otherwise (see [Sidebar text](#sidebar-text)). Below them: New session (`⌘N`) and Help
   (`⌘/`). Drag its right edge to resize it (the app remembers the width); double-click the
   edge for the default.
-- **Tab bar:** each prompt and its response is a tab, as in the TUI.
+- **Tab bar:** each prompt and its response is a tab, as in the TUI. A session with a title
+  (`/rename <title>`, `/fork <title>`, or a name it was started with) shows it above the tabs.
 - **Transcript:** the prompt, the work (thinking and tool calls) folded into a one-line summary
   once the answer lands, then the answer. Tool calls have the TUI's views: Edit as a diff (blue
   added, orange removed), Write as the new file, Bash with its output, TodoWrite as a checklist,

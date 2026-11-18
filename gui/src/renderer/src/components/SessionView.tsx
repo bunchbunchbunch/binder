@@ -185,6 +185,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
           .catch((e) => toast(`/${name}: ${errText(e)}`, true));
         return;
       }
+      case 'rename':
+        return void request(c.id, 'rename', { title: args }).catch((e) => toast(`/rename: ${errText(e)}`, true));
       case 'resume': {
         if (!args) return onSwitcher('folder');
         const hit = getState().sessions.find((r) => r.id.startsWith(args));
@@ -378,6 +380,11 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
 
   return (
     <div className="session" hidden={!visible}>
+      {s?.title && (
+        <div className="session-title" title={s.title}>
+          {s.title}
+        </div>
+      )}
       <div className="titlebar">
         {s ? <TabBar tabs={s.tabs} active={tab?.id ?? null} onSelect={(id) => setActiveTab(c.id, id)} /> : <div className="no-tabs" />}
       </div>

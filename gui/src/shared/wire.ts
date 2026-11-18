@@ -64,6 +64,8 @@ export type WireMeta = {
   backgroundTasks?: BackgroundTask[];
   // When the running turn started (ms), so the clock survives the app quitting.
   runningSince?: number | null;
+  // The session's name (/rename), or null.
+  title?: string | null;
 };
 
 // A background shell or agent still running. toolUseId is the call that

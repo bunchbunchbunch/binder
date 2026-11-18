@@ -175,6 +175,31 @@ test('opens the command menu and the model panel', async () => {
   await expect(page.locator('.composer textarea')).toBeFocused();
 });
 
+test('/rename puts a title above the tabs, and it drags the window', async () => {
+  run = await launch(SHOWCASE);
+  const { page, project } = run;
+  await newSession(page, project);
+  const title = page.locator('.session:not([hidden]) .session-title');
+  await page.keyboard.type('Fix the table alignment');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.tab')).toHaveCount(1);
+  await expect(title).toHaveCount(0);
+
+  await page.keyboard.type('/rename');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.toast')).toHaveText('/rename: Give the session a title: /rename <title>');
+  await page.keyboard.type('/rename Table   fixes');
+  await page.keyboard.press('Enter');
+  // As Claude Code tidied it; no tab for the command.
+  await expect(title).toHaveText('Table fixes');
+  await expect(page.locator('.tab')).toHaveCount(1);
+  const t = (await title.boundingBox())!;
+  const bar = (await page.locator('.session:not([hidden]) .titlebar').boundingBox())!;
+  expect(t.y + t.height).toBeLessThanOrEqual(bar.y);
+  expect(await dragsAt(page, t.x + t.width / 2, t.y + t.height / 2)).toBe(true);
+  await page.screenshot({ path: shot('session-title') });
+});
+
 test('a click on the permission mode badge switches the mode', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;

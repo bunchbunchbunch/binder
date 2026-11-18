@@ -22,6 +22,7 @@ import { Welcome } from './Welcome.js';
 import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, SettingsPanel, TasksPanel, rewindTargets } from './panels.js';
 import { SPINNER, elapsed, turnVerb } from './tabLayout.js';
 import { MARKDOWN_STYLES, markdownStyle, setMarkdownStyle, type MarkdownStyle } from './md/theme.js';
+import { clean } from './md/text.js';
 
 
 // "──────── title ─", with the title right-aligned like Claude Code's composer.
@@ -259,6 +260,8 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
         return args ? setModel(args) : setPanel({ kind: 'model' });
       case 'effort':
         return args ? applyEffort(args) : setPanel({ kind: 'effort' });
+      case 'rename':
+        return void host.rename(args).catch((e) => flash(`/rename: ${errText(e)}`));
       case 'markdown': {
         // A named style, or the next one in turn.
         const named = MARKDOWN_STYLES.find((s) => s === args);
@@ -436,6 +439,11 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   const mode = permissionModeLine(state.permissionMode);
   return (
     <Box flexDirection="column" width={columns} height={rows}>
+      {state.title && (
+        <Box height={1} paddingX={1}>
+          <Text bold wrap="truncate-end">{clean(state.title)}</Text>
+        </Box>
+      )}
       <TabBar tabs={state.tabs} active={state.active} width={columns} frame={frame} />
       {/* flexBasis 0: the transcript takes only leftover rows, so a long response can never squeeze the tab bar, prompt or status line out of view. */}
       <Box flexGrow={1} flexBasis={0} flexDirection="column" borderStyle="single" borderColor="gray" borderLeft={false} borderRight={false} borderBottom={false}>

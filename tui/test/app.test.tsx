@@ -754,6 +754,32 @@ describe('slash commands', () => {
     ui.unmount();
   });
 
+  it('/rename puts a title above the tabs, and a resume keeps it', async () => {
+    const cwd = process.cwd();
+    setup('two-turns-stdin.jsonl');
+    const sessionId = '00000000-0000-4000-8000-000000000024';
+    const session = new Session({ sessionId, resume: false, cwd, passthrough: [] });
+    session.start();
+    const { ui } = mount(session, sessionId, cwd);
+    await type(ui, 'first prompt');
+    await until(() => plainFrame(ui).includes('1 ● first prompt'), 8000, () => ui.lastFrame());
+    expect(plainFrame(ui).split('\n')[0]).toContain('1 ● first prompt'); // no title: the tabs stay on top
+
+    await type(ui, '/rename');
+    await until(() => plainFrame(ui).includes('Give the session a title: /rename <title>'), 8000, () => ui.lastFrame());
+    await type(ui, '/rename Pay  the rent');
+    await until(() => plainFrame(ui).split('\n')[0].trim() === 'Pay the rent', 8000, () => ui.lastFrame());
+    expect(plainFrame(ui).split('\n')[1]).toContain('1 ● first prompt');
+    expect(plainFrame(ui)).not.toMatch(/\d [●◌] \/rename/); // no tab, nothing sent
+    await session.close();
+    ui.unmount();
+
+    // The child's word on the name is in the session's log.
+    const again = mount(new Session({ sessionId, resume: true, cwd, passthrough: [] }), sessionId, cwd, replay(sessionId)).ui;
+    expect(plainFrame(again).split('\n')[0].trim()).toBe('Pay the rent');
+    again.unmount();
+  });
+
   it('/clear starts a fresh session and /resume brings the previous one back', async () => {
     const cwd = process.cwd();
     const stateDir = setup('two-turns-stdin.jsonl');

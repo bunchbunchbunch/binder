@@ -280,6 +280,18 @@ describe('permission mode', () => {
   });
 });
 
+describe('session title', () => {
+  // As the real binary sends it: at startup for a named session, and after each rename.
+  const named = (title: unknown) => ({ type: 'system', subtype: 'session_title_changed', title, uuid: 'u', session_id: 'sid' }) as ClaudeEvent;
+
+  it('takes the name the child reports, keeps it through turns, and drops it with /clear', () => {
+    const s = play(initialState('sid'), [named('Pay rent'), ...fixture('two-turns-stdin.jsonl'), named('')]);
+    expect(s.title).toBe('Pay rent');
+    expect(play(s, [named('Pay the rent')]).title).toBe('Pay the rent');
+    expect(reduce(s, { type: 'reset', state: initialState('other') }).title).toBeUndefined();
+  });
+});
+
 // Recorded from the real binary: a prompt starts background work and the turn
 // ends; when the work finishes the child starts a turn of its own about it.
 describe('background work', () => {

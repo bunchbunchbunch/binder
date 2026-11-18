@@ -300,6 +300,8 @@ export class HostServer {
         return { message: host.clear(), sessionId: host.sessionId };
       case 'fork':
         return { message: host.fork(typeof m.title === 'string' ? m.title : ''), sessionId: host.sessionId };
+      case 'rename':
+        return void (await host.rename(str(m.title, 'title')));
       case 'resume': {
         const found = host.findSession(str(m.id, 'id'));
         if (!found) throw new Error(`No session ${String(m.id)}`);

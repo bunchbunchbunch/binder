@@ -225,7 +225,7 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
     this.forkFrom = undefined;
     this.threadId = (r.thread as { id: string }).id;
     this.model = String(r.model ?? '');
-    if (this.name && !resume && !forkFrom) await rpc.request('thread/name/set', { threadId: this.threadId, name: this.name }).catch(() => {});
+    if (this.name && !resume && !forkFrom) await this.setName(rpc, this.name).catch(() => {});
     upsertSession({ id, cwd: this.dir, configDir: codexHome(), agent: 'codex', threadId: this.threadId });
     this.emit('applied', { model: this.model, ...(typeof r.reasoningEffort === 'string' && { effort: r.reasoningEffort }) });
     const limits = await rpc.request('account/rateLimits/read', {}).catch(() => undefined);
@@ -312,11 +312,17 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
       }
       case 'rename_session':
         await this.ready;
-        await rpc.request('thread/name/set', { threadId: this.threadId, name: String(fields.title ?? '') }, timeoutMs);
+        await this.setName(rpc, String(fields.title ?? ''), timeoutMs);
         return {};
       default:
         throw new Error(`Not available in a Codex session (${subtype})`);
     }
+  }
+
+  // Names the thread, and reports the name as Claude Code does, so it shows above the tabs.
+  private async setName(rpc: CodexRpc, name: string, timeoutMs?: number): Promise<void> {
+    await rpc.request('thread/name/set', { threadId: this.threadId, name }, timeoutMs);
+    if (this.rpc === rpc) this.forward({ type: 'system', subtype: 'session_title_changed', title: name, session_id: this.id });
   }
 
   respawn(): void {

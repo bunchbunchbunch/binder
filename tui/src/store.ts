@@ -130,6 +130,8 @@ export type State = {
   messageAt?: number;
   // The next prompt Claude Code predicts after a turn, until anything is sent.
   suggestion?: string;
+  // The session's name (/rename, /fork's title, claude -n), shown above the tabs.
+  title?: string;
 };
 
 export type Action =
@@ -514,6 +516,12 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
       // A mode change mid-turn (EnterPlanMode, ExitPlanMode) comes as a status event.
       const { status, permissionMode } = ev as { status?: unknown; permissionMode?: unknown };
       return { ...state, activity: String(status ?? ''), ...(typeof permissionMode === 'string' && { permissionMode }) };
+    }
+    // The child names the session at startup when it has a name, and after
+    // each rename. Claude Code never clears one, so neither does this.
+    if (sub === 'session_title_changed') {
+      const { title } = ev as { title?: unknown };
+      return typeof title === 'string' && title && title !== state.title ? { ...state, title } : state;
     }
     if (sub === 'background_tasks_changed') {
       const tasks = (ev as { tasks?: { task_id: string; task_type?: string; description?: string }[] }).tasks ?? [];

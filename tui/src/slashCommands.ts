@@ -4,7 +4,7 @@
 
 export type SlashCommand = { name: string; description: string; argumentHint?: string; aliases?: string[] };
 
-export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'tasks' | 'markdown' | 'settings';
+export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rename' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'tasks' | 'markdown' | 'settings';
 
 const LOCAL: Array<SlashCommand & { name: LocalCommandName }> = [
   { name: 'help', description: 'Show keys and commands' },
@@ -12,6 +12,7 @@ const LOCAL: Array<SlashCommand & { name: LocalCommandName }> = [
   { name: 'clear', description: 'Start a new session with empty context; this one stays resumable with /resume', aliases: ['reset', 'new'] },
   { name: 'exit', description: 'Quit binder', aliases: ['quit'] },
   { name: 'fork', description: 'Fork the conversation into a new session and continue there; the original stays resumable', argumentHint: '[title]', aliases: ['branch'] },
+  { name: 'rename', description: 'Give this session a title, shown above the tabs', argumentHint: '<title>' },
   { name: 'rewind', description: 'Restore the conversation and/or code to before an earlier prompt', aliases: ['checkpoint'] },
   { name: 'cd', description: 'Change the working directory', argumentHint: '<path>' },
   { name: 'mcp', description: 'MCP servers: status, authenticate, reconnect, enable or disable' },
