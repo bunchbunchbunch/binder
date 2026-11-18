@@ -157,7 +157,7 @@ end run`;
  * control iTerm; a refusal makes osascript fail), it falls back to a host.
  */
 export function launch(kind: RemoteConfig['launcher'], dir: string, sessionId: string, resume: boolean, name?: string, log?: (line: string) => void): void {
-  const args = [resume ? '--resume' : '--session-id', sessionId, ...(name && !resume ? ['--', '-n', oneLine(name).slice(0, 100)] : [])];
+  const args = [resume ? '--resume' : '--session-id', sessionId, ...(name ? ['--', '-n', oneLine(name).slice(0, 100)] : [])];
   if (kind === 'iterm') {
     const cmd = `cd ${shellQuote(dir)} && binder ${args.map(shellQuote).join(' ')}`;
     const osa = spawn('osascript', ['-e', ITERM_SCRIPT, cmd], { stdio: ['ignore', 'ignore', 'pipe'] });
