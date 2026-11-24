@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { WireBlock } from '../src/shared/wire';
 import { lastToolIndex, splitWork, turnVerb, ultrathinkParts, workSummary } from '../src/renderer/src/lib/work';
-import { diffLines, withContext } from '../src/renderer/src/lib/diff';
+import { diffLines, unifiedDiffRows, withContext } from '../src/renderer/src/lib/diff';
 import { commonPrefix, localCommand, matchCommands, visibleCommands, wordAt } from '../src/renderer/src/lib/commands';
-import { elapsed, fmtTokens, modelDisplayName } from '../src/renderer/src/lib/format';
+import { elapsed, fmtCost, fmtTokens, modelDisplayName } from '../src/renderer/src/lib/format';
 import { findModel, stepEffort, stepModel } from '../src/renderer/src/lib/models';
 
 const text = (t: string, final = true): WireBlock => ({ kind: 'text', text: t, final });
@@ -42,6 +42,14 @@ describe('work and response', () => {
   });
 });
 
+describe('cost', () => {
+  it('shows dollars to the cent, and less than a cent as such', () => {
+    expect(fmtCost(0.004)).toBe('<$0.01');
+    expect(fmtCost(0.42)).toBe('$0.42');
+    expect(fmtCost(12.3)).toBe('$12.30');
+  });
+});
+
 describe('diff', () => {
   it('marks changed lines and collapses far context', () => {
     const before = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].join('\n');
@@ -55,6 +63,25 @@ describe('diff', () => {
       { kind: 'same', text: 'e' },
       { kind: 'skip', count: 2 },
     ]);
+  });
+  it("reads Codex's unified diffs: hunks, the lines between them, and new files", () => {
+    const diff = ['--- a/x.ts', '+++ b/x.ts', '@@ -1,3 +1,3 @@', ' a', '-b', '+B', ' c', '@@ -10,2 +10,3 @@', ' j', '+J', ' k', '\\ No newline at end of file', ''].join('\n');
+    expect(unifiedDiffRows(diff, 'update')).toEqual([
+      { kind: 'same', text: 'a' },
+      { kind: 'del', text: 'b' },
+      { kind: 'add', text: 'B' },
+      { kind: 'same', text: 'c' },
+      { kind: 'skip', count: 6 },
+      { kind: 'same', text: 'j' },
+      { kind: 'add', text: 'J' },
+      { kind: 'same', text: 'k' },
+    ]);
+    expect(unifiedDiffRows('one\ntwo\n', 'add')).toEqual([
+      { kind: 'add', text: 'one' },
+      { kind: 'add', text: 'two' },
+    ]);
+    expect(unifiedDiffRows('@@ -0,0 +1,1 @@\n+only\n', 'add')).toEqual([{ kind: 'add', text: 'only' }]);
+    expect(unifiedDiffRows('', 'update')).toEqual([]);
   });
 });
 

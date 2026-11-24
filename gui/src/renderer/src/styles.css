@@ -797,6 +797,13 @@ kbd {
   font-family: var(--font);
 }
 
+.diff-row.file {
+  color: var(--text);
+  font-family: var(--font);
+  font-weight: 600;
+  padding-top: 4px;
+}
+
 .diff-row .sign {
   display: inline-block;
   width: 1.4em;

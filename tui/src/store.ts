@@ -108,6 +108,14 @@ export type State = {
   question?: Question;
   // Prompt size of the latest API call (input + cache tokens), like Claude Code's context counter.
   contextTokens?: number;
+  // The main model's context window, from the latest result's modelUsage.
+  contextWindow?: number;
+  // What the session has cost, in dollars at API list prices, across every
+  // child it ran: Claude Code counts from zero in each one (processCost), so
+  // the children before this one are summed in costBase.
+  costUsd?: number;
+  costBase?: number;
+  processCost?: number;
   // The streamed blocks of the in-progress assistant message, by content index.
   streamIndex: Record<number, number>;
   // Send order counter for Turn.seq.
@@ -469,7 +477,34 @@ function applyStream(tab: Tab, state: State, ev: StreamEvent): { tab: Tab; strea
   return { tab: { ...tab, blocks }, streamIndex };
 }
 
+// The main model's context window in a result's modelUsage: the entry for the
+// model the session runs, else the largest (subagents may use smaller models).
+function contextWindowOf(modelUsage: unknown, model: string | undefined): number | undefined {
+  if (!modelUsage || typeof modelUsage !== 'object') return undefined;
+  const entries = Object.entries(modelUsage as Record<string, { contextWindow?: unknown; canonicalModel?: unknown }>)
+    .filter(([, u]) => typeof u?.contextWindow === 'number' && u.contextWindow > 0)
+    .map(([name, u]) => ({ name, canonical: u.canonicalModel, window: u.contextWindow as number }));
+  const own = model ? entries.find((e) => e.name === model || e.canonical === model || model.startsWith(e.name)) : undefined;
+  return own?.window ?? (entries.length ? Math.max(...entries.map((e) => e.window)) : undefined);
+}
+
+function noteCost(state: State, ev: ClaudeEvent): State {
+  const r = ev as { total_cost_usd?: unknown; modelUsage?: unknown };
+  let next = state;
+  if (typeof r.total_cost_usd === 'number') {
+    const prev = state.processCost ?? 0;
+    // A lower total is a new child counting from zero (logs from before hc_spawn).
+    const base = (state.costBase ?? 0) + (r.total_cost_usd < prev ? prev : 0);
+    next = { ...next, costBase: base, processCost: r.total_cost_usd, costUsd: base + r.total_cost_usd };
+  }
+  const window = contextWindowOf(r.modelUsage, state.model);
+  return window && window !== state.contextWindow ? { ...next, contextWindow: window } : next;
+}
+
 function applyEvent(state: State, ev: ClaudeEvent): State {
+  // Binder started a new child, which counts cost from zero.
+  if (ev.type === 'hc_spawn') return state.processCost ? { ...state, costBase: (state.costBase ?? 0) + state.processCost, processCost: 0 } : state;
+  if (ev.type === 'result') state = noteCost(state, ev);
   if (isInit(ev)) {
     const caps = ev.capabilities ?? [];
     const canSteer = caps.includes('interrupt_send_now_v1') && caps.includes('msg_lifecycle_v1');

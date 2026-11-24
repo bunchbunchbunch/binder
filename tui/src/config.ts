@@ -10,6 +10,8 @@ import { dirname, join } from 'node:path';
 //   markdownStyle   how responses render: vivid (the default) or classic
 //   agent           what new sessions run: claude (the default) or codex
 //   artifacts       let Claude publish artifacts (live claude.ai pages); on unless false
+//   statusText      the status row's right end, a template: {context}, {maxTokens},
+//                   {percent}, {cost}; "{context}(/{maxTokens})( {percent})" by default
 export type BinderConfig = {
   permissionMode?: string;
   configDirs?: Record<string, string>;
@@ -17,6 +19,7 @@ export type BinderConfig = {
   markdownStyle?: string;
   agent?: 'claude' | 'codex';
   artifacts?: boolean;
+  statusText?: string;
 };
 
 export const configPath = () => process.env.BINDER_CONFIG || join(homedir(), '.config', 'binder', 'config.json');

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { BackgroundTask, ToolBlock, WireBlock, WireState, WireTab } from '@shared/wire';
-import { baseName, elapsed, firstLine, modelDisplayName, shortPath } from '../lib/format';
+import { baseName, elapsed, firstLine, fmtTokens, modelDisplayName, shortPath } from '../lib/format';
 import { errText, getState, request, sameComputer, toast, useApp } from '../store';
 import { findModel, stepEffort, stepModel } from '../lib/models';
 import { Picker, type PickerItem } from '../components/Picker';
@@ -494,6 +494,34 @@ export function TasksPanel({ conn, close, active, tasks, tabs, cwd, initial, onG
         return t ? <TaskDetail key={t.id} conn={conn} task={t} tabs={tabs} cwd={cwd} onStop={() => void stop(t)} /> : null;
       }}
       hint="↑↓ move · ⏎ go to its tab · x stop it · esc close"
+    />
+  );
+}
+
+type ContextUsage = { categories: { name: string; tokens: number; kind: string }[]; totalTokens: number; maxTokens: number; percentage: number };
+
+/** What the context holds, by category, as Claude Code's /context counts it. */
+export function ContextPanel({ conn, close, active }: Common) {
+  const [usage, setUsage] = useState<ContextUsage | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    request(conn, 'context_usage')
+      .then((r) => setUsage(r as unknown as ContextUsage))
+      .catch((e) => setError(errText(e)));
+  }, [conn]);
+  const share = (n: number) => (usage?.maxTokens ? `${((n / usage.maxTokens) * 100).toFixed(1)}%` : '');
+  const items: PickerItem[] = (usage?.categories ?? [])
+    .filter((c) => c.tokens > 0)
+    .map((c) => ({ key: c.name, label: c.name, description: [`${fmtTokens(c.tokens)} tokens`, c.kind === 'deferred' ? 'loaded when used' : share(c.tokens)].filter(Boolean).join(' · ') }));
+  return (
+    <Picker active={active}
+      title={usage ? `Context: ${fmtTokens(usage.totalTokens)} of ${fmtTokens(usage.maxTokens)} tokens (${usage.percentage}%)` : 'Context'}
+      subtitle={error || (usage ? undefined : 'Loading…')}
+      items={items}
+      onSelect={close}
+      onCancel={close}
+      empty="Nothing to show until the first turn"
+      hint="esc close"
     />
   );
 }

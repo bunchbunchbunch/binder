@@ -12,9 +12,9 @@ Features binder needs to keep up with Claude Code's desktop app and terminal UI,
 ## High
 
 1. [x] **Artifacts, Docs, and Sheets in binder sessions.** Claude Code turns the Artifact tool off under `-p` (`sdk_default_off`). Binder now sets `CLAUDE_CODE_ARTIFACT=1` for the child, so sessions get `Artifact`, `ArtifactComments`, `ArtifactData`, `/slides`, and the artifact skills. Setting: `artifacts` (on unless false). The claude.ai Claude Docs connector already loaded headlessly, so docs and sheets worked before this change.
-2. [ ] **Session names everywhere.** The Mac app's sidebar, `⌘K`, and `/resume` show the first prompt instead of the session's name. Show the name, falling back to the first prompt.
-3. [ ] **Codex patch diffs in the Mac app.** Codex `Patch` calls have no view in the Mac app, so their diffs aren't shown. Render them like the terminal app does. Mac app only.
-4. [ ] **Cost and context display.** Show context as a percentage of the window with a breakdown (like `/context`), and session cost (`total_cost_usd` is already stored). Setting: show or hide cost.
+2. [x] **Session names everywhere.** The Mac app's sidebar, `⌘K`, `/resume` in both apps, and the phone's list show the session's name (from Claude Code's `custom-title` lines, or binder's index for Codex), falling back to the first prompt.
+3. [x] **Codex patch diffs in the Mac app.** Codex `Patch` calls have no view in the Mac app, so their diffs aren't shown. Render them like the terminal app does. Mac app only.
+4. [x] **Cost and context display.** Context as a share of the model's window (from `modelUsage`), a breakdown on click in the Mac app (`get_context_usage`), and the session's cost summed across every child binder ran. Setting: `statusText`, a template (`{context}`, `{maxTokens}`, `{percent}`, `{cost}`); the default leaves cost out.
 5. [ ] **Fast mode toggle.** A key and a status-bar indicator to turn fast mode on and off, using the `fastMode` setting and the result's `fast_mode_state`.
 6. [ ] **Live permission mode switch in the terminal app.** The Mac app can change mode mid-session; the terminal app can't. Add a key and a picker. Mac app already done.
 7. [ ] **"Always allow" on permission prompts.** Show the rules Claude suggests with each prompt as extra choices, and send the chosen one back as `updatedPermissions`.

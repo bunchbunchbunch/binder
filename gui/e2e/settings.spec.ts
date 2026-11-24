@@ -22,7 +22,7 @@ test('changes config.json from the menu, ⌘, and /settings', async () => {
 
   // The menu bar's Settings… opens it.
   await app.evaluate(({ Menu }) => Menu.getApplicationMenu()!.getMenuItemById('settings')!.click());
-  await expect(picker.locator('.picker-title')).toHaveText('Settings');
+  await expect(picker.locator('.picker-title')).toHaveText(/^Settings/);
   await expect(row('Permission mode').locator('.desc')).toHaveText('plan');
   await expect(row('Sticky prompt').locator('.desc')).toHaveText('On');
   await page.screenshot({ path: shot('settings') });
@@ -68,7 +68,7 @@ test('changes config.json from the menu, ⌘, and /settings', async () => {
   await newSession(page, project);
   await page.keyboard.type('/settings');
   await page.keyboard.press('Enter');
-  await expect(picker.locator('.picker-title')).toHaveText('Settings');
+  await expect(picker.locator('.picker-title')).toHaveText(/^Settings/);
   await page.keyboard.press('Escape');
   await expect(picker).toHaveCount(0);
   await expect(page.locator('.composer textarea')).toBeFocused();
@@ -80,10 +80,10 @@ test('says why when config.json does not parse, and leaves it alone', async () =
   run = await launch(SHOWCASE, { BINDER_CONFIG: config });
   const { page } = run;
   await page.keyboard.press('Meta+Comma');
-  await expect(page.locator('.picker-sub')).toContainText(config);
+  await expect(page.locator('div.picker-sub')).toContainText(config);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  await expect(page.locator('.picker-sub')).toContainText(config);
+  await expect(page.locator('div.picker-sub')).toContainText(config);
   expect(readFileSync(config, 'utf8')).toBe('{');
 });
 

@@ -348,6 +348,16 @@ export class HostServer {
         return { message: host.setChrome(Boolean(m.on)) };
       case 'artifacts':
         return { artifacts: sessionArtifacts(host.state.tabs) };
+      case 'context_usage': {
+        // What the context holds by category, as /context counts it; 'summary'
+        // answers from the last response's usage, without token-count calls.
+        const r = await host.session.request('get_context_usage', { detail: 'summary' });
+        const num = (v: unknown) => (typeof v === 'number' ? v : 0);
+        const categories = (Array.isArray(r.categories) ? (r.categories as Record<string, unknown>[]) : [])
+          .filter((c) => typeof c.name === 'string' && typeof c.tokens === 'number')
+          .map((c) => ({ name: c.name as string, tokens: c.tokens as number, kind: typeof c.kind === 'string' ? c.kind : 'used' }));
+        return { categories, totalTokens: num(r.totalTokens), maxTokens: num(r.maxTokens), percentage: num(r.percentage) };
+      }
       case 'history':
         return { prompts: loadHistory(host.session.cwd, 200) };
       case 'complete': {

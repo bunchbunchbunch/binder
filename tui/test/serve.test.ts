@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import WebSocket from 'ws';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 // @ts-expect-error plain JavaScript, no types
 import { startRelay } from '../relay/relay.mjs';
@@ -331,6 +331,9 @@ describe('binder sessions', () => {
     transcript(main, '00000000-0000-4000-8000-0000000000b1', 'fix the parser', 'cli');
     transcript(main, '00000000-0000-4000-8000-0000000000b2', 'a hook run', 'sdk-cli');
     transcript(work, '00000000-0000-4000-8000-0000000000b3', 'review the PR', 'cli');
+    // Renamed in Claude Code: the list shows the name, not the first prompt.
+    transcript(main, '00000000-0000-4000-8000-0000000000b4', 'look into the flaky test', 'cli');
+    appendFileSync(join(main, 'projects', '-private-tmp', '00000000-0000-4000-8000-0000000000b4.jsonl'), JSON.stringify({ type: 'custom-title', customTitle: 'Flaky test hunt' }) + '\n');
     const config = join(dir, 'config.json');
     writeFileSync(config, JSON.stringify({ configDirs: { [join(dir, 'w')]: work } }));
     const out = execFileSync(process.execPath, [join(ROOT, 'bin/binder.mjs'), 'sessions'], {
@@ -338,7 +341,7 @@ describe('binder sessions', () => {
       env: { ...process.env, BINDER_STATE_DIR: join(dir, 's'), CLAUDE_CONFIG_DIR: main, BINDER_CONFIG: config },
     });
     const rows = JSON.parse(out) as { id: string; title: string; cwd: string; branch?: string; live: boolean }[];
-    expect(rows.map((r) => r.title).sort()).toEqual(['fix the parser', 'review the PR']);
+    expect(rows.map((r) => r.title).sort()).toEqual(['Flaky test hunt', 'fix the parser', 'review the PR']);
     expect(rows[0]).toMatchObject({ cwd: '/private/tmp', branch: 'main', live: false });
   });
 });

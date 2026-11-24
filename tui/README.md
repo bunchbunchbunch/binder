@@ -72,6 +72,12 @@ elsewhere). `/settings` shows and changes them, or edit the file:
   overrides it, and `/md` switches for the running session only.
 - `agent` is `claude` (the default) or `codex`: what new sessions run, including ones started
   from the phone. A session keeps the agent it started with.
+- `statusText` is what the right end of the status row shows, as a template: `{context}`
+  (tokens in context), `{maxTokens}` (the model's window), `{percent}` (the share in use) and
+  `{cost}` (what the session has cost, at API list prices); text in `( )` shows only when a
+  field inside it has a value. The default, `{context}(/{maxTokens})( {percent})`, reads
+  `36.9k/1M 4%`; `{context}( · {cost})` reads `36.9k · $0.42`. The Mac app's status bar reads
+  it too, and knows its sidebar fields as well.
 - `artifacts` lets Claude publish artifacts: live pages on claude.ai that update in place.
   Claude Code leaves the Artifact tool off when run headless, as binder runs it, so binder
   turns it on with `CLAUDE_CODE_ARTIFACT=1`. On unless set to `false`; a
@@ -79,7 +85,7 @@ elsewhere). `/settings` shows and changes them, or edit the file:
   through the claude.ai Claude Docs connector and don't depend on this setting.
 
 `/settings` saves to the file in place (a symlink into a dotfiles repo stays a symlink) and
-keeps keys it does not know. Sticky prompt and markdown style change at once; a running
+keeps keys it does not know. Sticky prompt, markdown style and status text change at once; a running
 binder keeps the permission mode, artifacts and config dirs it started with, so they apply
 to sessions opened from then on.
 
@@ -155,7 +161,10 @@ tested against Codex 0.160.1, the version `fixtures/codex/` was recorded with.
 While a turn runs, its work streams in full, and a row above the prompt shows what it is
 doing and for how long (`Thinking… (12s · esc to interrupt)`, `Running Bash…`). When the
 response arrives, or the model asks a question, the work folds into a one-line summary
-above the response; `Ctrl+E` unfolds it.
+above the response; `Ctrl+E` unfolds it. The right end of that row shows the context:
+`36.9k/1M 4%` (tokens, the model's window once a turn has reported it, and the share in use),
+or what config.json's `statusText` asks for, the session's cost included (see
+Configuration). `/context` breaks the context down by category.
 
 Background shells and agents (a command or agent Claude starts in the background, or one
 moved there with `Ctrl+B`) get a row each under the status row: what it is doing, its kind,
@@ -189,7 +198,7 @@ session or directory the child is on, or they need a picker:
 | `/resume [id]` | pick a session to resume, with search: this folder by default, `Ctrl+A` all projects, `Ctrl+W` this repo's worktrees, `Ctrl+B` this branch. Lists interactive Claude Code sessions and binder's own, not other headless `claude -p` runs. A session from another folder resumes there |
 | `/clear` (`/reset`, `/new`) | start a fresh session; the current one stays resumable with `/resume` |
 | `/fork [title]` (`/branch`) | continue in a new session forked from this one (`--fork-session`); the original stays resumable |
-| `/rename <title>` | give the session a title, shown above the tabs from then on. Claude Code keeps it, so a resumed session shows it again, and tidies it: spaces collapse, the ends are trimmed. A session started with `-n <name>`, or named in Claude Code, shows its name the same way. Claude Code can rename a session but not clear its name, so neither can binder |
+| `/rename <title>` | give the session a title, shown above the tabs from then on, and in `/resume`, the Mac app's sidebar and `⌘K`, and the phone's list in place of the first prompt. Claude Code keeps it, so a resumed session shows it again, and tidies it: spaces collapse, the ends are trimmed. A session started with `-n <name>`, or named in Claude Code, shows its name the same way. Claude Code can rename a session but not clear its name, so neither can binder |
 | `/rewind` (`/checkpoint`, or `Esc` twice) | pick an earlier prompt, then restore the code, the conversation, or both to just before it. The prompt comes back in the composer. Binder turns on Claude Code's file checkpoints for this (`CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING`) |
 | `/cd <path>` | move the session to another directory (asks to trust a new folder first); a folder that `configDirs` gives another config dir is refused. When Claude changes folder itself (a `cd` in Bash, a worktree), binder shows its new folder; prompt history stays with the session's folder |
 | `/model [model]` | pick from the models the child offers, or set one by name. `Ctrl+L` opens the same picker |

@@ -12,6 +12,8 @@ export type SessionRecord = {
   createdAt: string;
   lastUsedAt: string;
   firstPrompt?: string;
+  // The session's name (/rename, /fork's title), once it has one.
+  title?: string;
   // Absent for Claude Code sessions, which predate the field.
   agent?: Agent;
   // A Codex session's thread, which Codex names itself (binder's id is its own).
@@ -33,7 +35,7 @@ export function readSessions(): SessionRecord[] {
   }
 }
 
-export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'configDir'> & Partial<Pick<SessionRecord, 'firstPrompt' | 'agent' | 'threadId'>>): void {
+export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'configDir'> & Partial<Pick<SessionRecord, 'firstPrompt' | 'title' | 'agent' | 'threadId'>>): void {
   const now = new Date().toISOString();
   const all = readSessions();
   const existing = all.find((s) => s.id === update.id);
@@ -42,6 +44,7 @@ export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'config
     existing.cwd = update.cwd;
     existing.configDir = update.configDir;
     if (update.firstPrompt && !existing.firstPrompt) existing.firstPrompt = update.firstPrompt;
+    if (update.title) existing.title = update.title;
     if (update.agent) existing.agent = update.agent;
     if (update.threadId) existing.threadId = update.threadId;
   } else {
@@ -64,6 +67,6 @@ export function findSession(id: string): SessionRecord | undefined {
 export function codexSessions(): SessionSummary[] {
   return readSessions()
     .filter((s) => s.agent === 'codex' && s.firstPrompt)
-    .map((s) => ({ id: s.id, path: logPath(s.id), cwd: s.cwd, prompt: s.firstPrompt!, modified: Date.parse(s.lastUsedAt) }))
+    .map((s) => ({ id: s.id, path: logPath(s.id), cwd: s.cwd, prompt: s.firstPrompt!, ...(s.title && { title: s.title }), modified: Date.parse(s.lastUsedAt) }))
     .sort((a, b) => b.modified - a.modified);
 }

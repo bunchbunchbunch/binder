@@ -1,6 +1,6 @@
 import type { SidebarConfig } from '@shared/api';
 import type { WireState } from '@shared/wire';
-import { baseName, firstLine, fmtTokens, modelDisplayName, shortPath } from './format';
+import { baseName, firstLine, fmtCost, fmtTokens, modelDisplayName, shortPath } from './format';
 import { turnVerb } from './work';
 
 // An open session's row in the sidebar, from config.json's `sidebar`
@@ -13,13 +13,16 @@ export type SidebarTemplates = { title: string; subtitle: string };
 
 export const DEFAULT_SIDEBAR: SidebarTemplates = { title: '{status} {elapsed} {title}', subtitle: '{folder}( · {waiting})' };
 
+// The status bar's context text (config.json statusText), from the same fields.
+export const DEFAULT_STATUS = '{context}(/{maxTokens})( {percent})';
+
 export const sidebarTemplates = (c: SidebarConfig): SidebarTemplates => ({ title: c.title ?? DEFAULT_SIDEBAR.title, subtitle: c.subtitle ?? DEFAULT_SIDEBAR.subtitle });
 
 // What a row is made from: an open session as the window knows it.
 export type SessionFacts = {
   state: WireState | null;
   cwd: string;
-  // The first prompt, or what the session was opened as.
+  // The session's name, else the first prompt, else what it was opened as.
   title: string;
   // Its host went away or claude exited.
   problem: boolean;
@@ -47,7 +50,7 @@ const STATUS_ICON: Record<Status, string> = { stopped: '⚠️', waiting: '❓',
 
 export const FIELDS: { name: string; about: string }[] = [
   { name: 'status', about: '⏳ working ❓ asking 🐝 tasks ✅ done, unseen ⚠️ stopped' },
-  { name: 'title', about: 'The first prompt' },
+  { name: 'title', about: "The session's name, or the first prompt" },
   { name: 'prompt', about: 'The latest prompt' },
   { name: 'folder', about: "The session's folder" },
   { name: 'path', about: "The folder's path" },
@@ -59,6 +62,9 @@ export const FIELDS: { name: string; about: string }[] = [
   { name: 'activity', about: 'What the running turn does: Thinking, Running Bash' },
   { name: 'waiting', about: '"waiting for you" while a question is open' },
   { name: 'context', about: 'Tokens in context' },
+  { name: 'maxTokens', about: "The model's context window" },
+  { name: 'percent', about: 'How much of the window the context fills' },
+  { name: 'cost', about: 'What the session has cost, at API list prices' },
   { name: 'tabs', about: 'How many tabs' },
   { name: 'tasks', about: 'Background tasks running' },
   { name: 'script', about: "The first line config.json's sidebar.script prints" },
@@ -93,6 +99,9 @@ export function sessionFields(f: SessionFacts, now: number): Record<string, stri
     activity: running ? turnVerb(running.blocks, s!.activity, s!.interrupting) : '',
     waiting: s?.question ? 'waiting for you' : '',
     context: s?.contextTokens ? fmtTokens(s.contextTokens) : '',
+    maxTokens: s?.contextWindow ? fmtTokens(s.contextWindow) : '',
+    percent: s?.contextTokens && s.contextWindow ? `${Math.round((s.contextTokens / s.contextWindow) * 100)}%` : '',
+    cost: s?.costUsd ? fmtCost(s.costUsd) : '',
     tabs: count(s?.tabs.length),
     tasks: count(s?.backgroundTasks?.length),
     script: f.script ?? '',

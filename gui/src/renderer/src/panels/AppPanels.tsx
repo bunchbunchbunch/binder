@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Appearance, SessionRow, Settings, SettingsPatch, SidebarConfig } from '@shared/api';
 import { ago, baseName, shortPath } from '../lib/format';
-import { DEFAULT_SIDEBAR, FIELDS, sessionFields, sidebarTemplates, sidebarText } from '../lib/sidebarText';
+import { DEFAULT_SIDEBAR, DEFAULT_STATUS, FIELDS, renderTemplate, sessionFields, sidebarTemplates, sidebarText } from '../lib/sidebarText';
 import { errText, openSession, refreshSessions, sameComputer, sessionFacts, setState, toast, useApp } from '../store';
 import { Picker, type PickerItem } from '../components/Picker';
 
@@ -224,8 +224,9 @@ function useIsDirectory(path: string): boolean | null {
   return ok;
 }
 
-type SidebarLine = 'title' | 'subtitle' | 'script';
-const SIDEBAR_LABEL: Record<SidebarLine, string> = { title: 'Sidebar title', subtitle: 'Sidebar subtitle', script: 'Sidebar script' };
+// The sidebar's lines, and the status bar's context text (config.json statusText), edited alike.
+type SidebarLine = 'title' | 'subtitle' | 'script' | 'status';
+const SIDEBAR_LABEL: Record<SidebarLine, string> = { title: 'Sidebar title', subtitle: 'Sidebar subtitle', script: 'Sidebar script', status: 'Status bar text' };
 
 type SettingsView = { kind: 'list' | 'mode' | 'appearance' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string } | { kind: 'sidebar'; line: SidebarLine };
 
@@ -258,7 +259,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
       const s = await window.binder.saveSettings(patch);
       setSettings(s);
       setError(null);
-      setState({ stickyPrompt: s.stickyPrompt, sidebar: s.sidebar });
+      setState({ stickyPrompt: s.stickyPrompt, statusText: s.statusText, sidebar: s.sidebar });
       toast(msg);
       return true;
     } catch (e) {
@@ -310,12 +311,17 @@ export function SettingsPanel({ close }: { close: () => void }) {
     const { line } = view;
     const label = SIDEBAR_LABEL[line];
     const value = query.trim();
-    const fallback = line === 'script' ? '' : DEFAULT_SIDEBAR[line];
+    const fallback = line === 'script' ? '' : line === 'status' ? DEFAULT_STATUS : DEFAULT_SIDEBAR[line];
     const saveLine = (v: string) => {
-      const next: SidebarConfig = { ...settings?.sidebar };
-      if (v === fallback) delete next[line];
-      else next[line] = v;
-      void save({ sidebar: Object.keys(next).length ? next : null }, `${label}: ${v || 'none'}`).then((ok) => {
+      let patch: SettingsPatch;
+      if (line === 'status') patch = { statusText: v === fallback ? null : v };
+      else {
+        const next: SidebarConfig = { ...settings?.sidebar };
+        if (v === fallback) delete next[line];
+        else next[line] = v;
+        patch = { sidebar: Object.keys(next).length ? next : null };
+      }
+      void save(patch, `${label}: ${v || 'none'}`).then((ok) => {
         if (!ok) return;
         setLast(`sidebar:${line}`);
         back();
@@ -325,8 +331,8 @@ export function SettingsPanel({ close }: { close: () => void }) {
     const sample = conns.find((c) => c.id === active) ?? conns[0];
     const facts = sample && sessionFacts(sample);
     const now = Date.now();
-    const preview = facts && line !== 'script' ? sidebarText({ ...sidebarTemplates(settings?.sidebar ?? {}), [line]: value }, facts, now)[line] : null;
     const values = facts ? sessionFields(facts, now) : null;
+    const preview = !facts || line === 'script' ? null : line === 'status' ? renderTemplate(value, values!) : sidebarText({ ...sidebarTemplates(settings?.sidebar ?? {}), [line]: value }, facts, now)[line];
     const items: PickerItem[] = [
       { key: 'save', label: 'Save', description: line === 'script' ? 'Its first line is the {script} field' : undefined },
       ...(value !== fallback ? [{ key: 'default', label: line === 'script' ? 'Remove' : 'Use the default', description: fallback || undefined }] : []),
@@ -354,7 +360,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
           )
         }
         items={items}
-        search={{ query, onChange: setQuery, placeholder: line === 'script' ? 'cat ~/notes/$(jq -r .session_id).txt' : line === 'title' ? '{status} {title}' : '{folder}( · {branch})' }}
+        search={{ query, onChange: setQuery, placeholder: line === 'script' ? 'cat ~/notes/$(jq -r .session_id).txt' : line === 'title' ? '{status} {title}' : line === 'status' ? '{context}(/{maxTokens})( {percent})( · {cost})' : '{folder}( · {branch})' }}
         onSelect={pick}
         onCancel={back}
         hint="⏎ save · ↑↓ then ⏎ adds a field · esc back"
@@ -436,6 +442,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
         { key: 'sidebar:title', label: SIDEBAR_LABEL.title, description: sidebarTemplates(settings.sidebar).title },
         { key: 'sidebar:subtitle', label: SIDEBAR_LABEL.subtitle, description: sidebarTemplates(settings.sidebar).subtitle || 'None' },
         { key: 'sidebar:script', label: SIDEBAR_LABEL.script, description: settings.sidebar.script ?? 'None: a command whose output is the {script} field' },
+        { key: 'sidebar:status', label: SIDEBAR_LABEL.status, description: settings.statusText ?? DEFAULT_STATUS },
         ...Object.entries(dirs).map(([f, d]) => ({ key: `dir:${f}`, label: `Config dir for ${f}`, description: d })),
         { key: 'add', label: 'Add a config dir…', description: Object.keys(dirs).length ? undefined : 'For a second account: Claude in a folder you pick uses another config dir' },
       ]
@@ -446,7 +453,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
     if (item.key === 'appearance') return setView({ kind: 'appearance' });
     if (item.key.startsWith('sidebar:')) {
       const line = item.key.slice('sidebar:'.length) as SidebarLine;
-      setQuery(line === 'script' ? (settings!.sidebar.script ?? '') : sidebarTemplates(settings!.sidebar)[line]);
+      setQuery(line === 'script' ? (settings!.sidebar.script ?? '') : line === 'status' ? (settings!.statusText ?? DEFAULT_STATUS) : sidebarTemplates(settings!.sidebar)[line]);
       return setView({ kind: 'sidebar', line });
     }
     if (item.key === 'sticky') {

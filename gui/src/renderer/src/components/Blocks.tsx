@@ -1,6 +1,6 @@
 import { memo, useState, type ReactNode } from 'react';
 import type { ToolBlock, WireBlock } from '@shared/wire';
-import { diffLines, withContext, type DiffRow } from '../lib/diff';
+import { diffLines, unifiedDiffRows, withContext, type DiffRow } from '../lib/diff';
 import { plural, shortPath } from '../lib/format';
 import { errText, request, toast } from '../store';
 import { highlight, Markdown } from './Markdown';
@@ -78,7 +78,7 @@ function diffRows(rows: DiffRow[]): ReactNode[] {
   return rows.map((r, i) =>
     r.kind === 'skip' ? (
       <div key={i} className="diff-row skip">
-        ⋯ {plural(r.count, 'unchanged line')}
+        ⋯{r.count ? ` ${plural(r.count, 'unchanged line')}` : ''}
       </div>
     ) : (
       <div key={i} className={`diff-row ${r.kind}`}>
@@ -122,6 +122,19 @@ function describe(block: ToolBlock, cwd: string): View {
         ...diffRows(withContext(diffLines(str(e.old_string), str(e.new_string)))).map((r, j) => <div key={`${i}-${j}`}>{r}</div>),
       ]);
       return { name: 'Edit', arg: { text: shortPath(str(a.file_path), cwd), kind: 'path' }, meta: a.replace_all ? 'all occurrences' : undefined, rows, preview: 12, frame: 'diff' };
+    }
+    case 'Patch': {
+      // A Codex file change: one or more files, each a unified diff.
+      const changes = Array.isArray(a.changes) ? (a.changes as { path?: unknown; kind?: unknown; diff?: unknown }[]) : [];
+      const many = changes.length > 1;
+      const note = (kind: string) => (kind === 'add' ? 'new file' : kind === 'delete' ? 'deleted' : undefined);
+      const rows = changes.flatMap((c, i) => [
+        ...(many ? [<div key={`file${i}`} className="diff-row file">{[shortPath(str(c.path), cwd), note(str(c.kind))].filter(Boolean).join(' · ')}</div>] : []),
+        ...diffRows(unifiedDiffRows(str(c.diff), str(c.kind) || 'update')).map((r, j) => <div key={`${i}-${j}`}>{r}</div>),
+      ]);
+      const one = changes.length === 1 ? changes[0] : undefined;
+      const arg = one ? shortPath(str(one.path), cwd) : changes.length ? plural(changes.length, 'file') : shortPath(str(a.file_path), cwd);
+      return { name: 'Patch', arg: { text: arg, kind: 'path' }, meta: one ? note(str(one.kind)) : undefined, rows, preview: 12, frame: 'diff' };
     }
     case 'Write': {
       const path = str(a.file_path);

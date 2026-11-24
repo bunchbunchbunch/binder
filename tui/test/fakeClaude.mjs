@@ -92,6 +92,17 @@ const mcp = [
 const CONTROL = {
   initialize: () => ({ commands: FAKE_COMMANDS, account: { subscriptionType: 'Claude Max' } }),
   get_settings: () => ({ applied: { model: 'claude-opus-5-5', effort: 'xhigh' } }),
+  get_context_usage: () => ({
+    categories: [
+      { name: 'System prompt', tokens: 3500, kind: 'used' },
+      { name: 'MCP tools (deferred)', tokens: 30000, kind: 'deferred' },
+      { name: 'Messages', tokens: 46500, kind: 'used' },
+      { name: 'Free space', tokens: 117000, kind: 'free' },
+    ],
+    totalTokens: 50000,
+    maxTokens: 200000,
+    percentage: 25,
+  }),
   list_models: () => ({
     models: [
       { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)', description: 'Opus 5.5', supportedEffortLevels: ['low', 'medium', 'high'] },

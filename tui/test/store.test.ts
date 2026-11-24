@@ -526,3 +526,55 @@ describe('background work', () => {
     });
   });
 });
+
+describe('cost and context window', () => {
+  const result = (cost: number, usage: Record<string, unknown> = {}) =>
+    ({ type: 'result', subtype: 'success', is_error: false, duration_ms: 10, num_turns: 1, total_cost_usd: cost, modelUsage: usage }) as unknown as ClaudeEvent;
+  const turn = (s: State, cost: number, usage?: Record<string, unknown>) => {
+    s = reduce(s, { type: 'submit', prompt: 'go' });
+    s = reduce(s, { type: 'sent', tabId: s.tabs.at(-1)!.id });
+    return play(s, [result(cost, usage)]);
+  };
+  const spawn = { type: 'hc_spawn' } as ClaudeEvent;
+
+  it("sums Claude Code's per-child totals across the children binder ran", () => {
+    let s = play(initialState('sid'), [spawn]);
+    s = turn(s, 0.01);
+    s = turn(s, 0.03); // the same child: its total so far
+    expect(s.costUsd).toBeCloseTo(0.03);
+    s = play(s, [spawn]); // /chrome, Ctrl+R or a resume starts another, counting from zero
+    s = turn(s, 0.05);
+    expect(s.costUsd).toBeCloseTo(0.08);
+    // A log from before the marker: a lower total still means a new child.
+    s = turn(s, 0.02);
+    expect(s.costUsd).toBeCloseTo(0.1);
+  });
+
+  it("takes the model's context window from modelUsage, preferring the session's model", () => {
+    let s = play(initialState('sid'), [{ type: 'system', subtype: 'init', model: 'claude-opus-5-5[1m]', cwd: '/p', permissionMode: 'default' } as unknown as ClaudeEvent]);
+    s = turn(s, 0.01, { 'claude-haiku-5-5': { contextWindow: 200_000 }, 'claude-opus-5-5': { contextWindow: 1_000_000 } });
+    expect(s.contextWindow).toBe(1_000_000);
+    s = turn(s, 0.02, { 'claude-sonnet-x': { contextWindow: 200_000 }, 'claude-other': { contextWindow: 400_000 } });
+    expect(s.contextWindow).toBe(400_000);
+  });
+
+  it('replays the marker from the event log', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'binder-cost-'));
+    const before = process.env.BINDER_STATE_DIR;
+    process.env.BINDER_STATE_DIR = dir;
+    try {
+      const lines = [
+        { type: 'hc_prompt', prompt: 'a', tabId: 1 },
+        result(0.04),
+        { type: 'hc_spawn' },
+        { type: 'hc_prompt', prompt: 'b', tabId: 2 },
+        result(0.04),
+      ];
+      writeFileSync(logPath('cost'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+      expect(replay('cost').costUsd).toBeCloseTo(0.08);
+    } finally {
+      if (before === undefined) delete process.env.BINDER_STATE_DIR;
+      else process.env.BINDER_STATE_DIR = before;
+    }
+  });
+});

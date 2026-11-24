@@ -126,6 +126,7 @@ paused, or this client revoked).
 | `chrome` | `on` | `{}`; restarts claude with or without Claude in Chrome |
 | `chrome_status` | | `{status}`: Claude in Chrome's state (`installed`, `connected`, `paired_browser`, `urls`, ...) as Claude Code reports it |
 | `artifacts` | | `{artifacts: [{url, title, tabId}]}` |
+| `context_usage` | | `{categories: [{name, tokens, kind}], totalTokens, maxTokens, percentage}`: what the context holds, as `/context` counts it. `kind` is `used`, `deferred` (loaded when used), `buffer` (kept free for compaction) or `free`. Refused in a Codex session |
 | `history` | | `{prompts: string[]}` oldest first, at most 200 |
 | `complete` | `partial`, `command?` | `{items: string[]}`: paths in the session folder, or command names |
 | `tool_detail` | `tabId`, `toolUseId` | `{block}`: the tool call untruncated |
@@ -164,7 +165,9 @@ snapshot, then patches at most every 120 ms while something changes.
 `ended` means the host is shutting down (its binder quit); the gateway then reports
 `detached`.
 
-`state` fields: `sessionId`, `cwd` (the folder Claude is in, which follows its own `cd`), `model`, `permissionMode`, `usage`, `contextTokens`,
+`state` fields: `sessionId`, `cwd` (the folder Claude is in, which follows its own `cd`), `model`, `permissionMode`, `usage`, `contextTokens`, `contextWindow` (the model's context window,
+once a turn has reported it, or null), `costUsd` (what the session has cost, in dollars at
+API list prices, summed across every child binder ran for it, or null),
 `running` (tab id or null), `runningSince` (when the running turn started, in ms since the
 epoch, or null), `activity` (Claude Code's latest status: `requesting` while an API request
 waits for its response to start streaming, `compacting`, or empty), `thinkingTokens` (Claude

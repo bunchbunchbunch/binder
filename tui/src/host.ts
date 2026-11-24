@@ -140,7 +140,10 @@ export class SessionHost extends EventEmitter<HostEvents> {
     return s.running !== null || s.queue.length > 0 || s.steer !== undefined || s.unstarted !== undefined;
   }
 
+  /** The session's name, or else its first prompt's first line. */
   get title(): string {
+    const name = this.current.title?.trim();
+    if (name) return name.slice(0, 80);
     return this.current.tabs[0] ? firstPrompt(this.current.tabs[0]).split('\n')[0].trim().slice(0, 80) : '';
   }
 
@@ -152,6 +155,8 @@ export class SessionHost extends EventEmitter<HostEvents> {
     // Before pump(): a queued prompt it sends starts a turn of its own.
     if (next.running !== prev.running) this.runningSince = next.running === null ? undefined : Date.now();
     if (next.usage && next.usage !== prev.usage) saveCachedUsage(this.configDir, next.usage);
+    // Kept in binder's index too: Codex sessions have no transcript to read it from.
+    if (next.title && next.title !== prev.title) upsertSession({ id: this.sessionId, cwd: this.session.cwd, configDir: this.configDir, title: next.title });
     this.pump();
     this.emit('change');
   }

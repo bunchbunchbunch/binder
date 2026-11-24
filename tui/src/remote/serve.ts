@@ -95,12 +95,12 @@ export async function listSessions(roots: string[] | undefined, { configDirs = [
     .filter((t) => !interactiveOnly || !t.entrypoint?.startsWith('sdk') || existsSync(logPath(t.id)))
     .sort((a, b) => b.modified - a.modified);
   for (const t of transcripts.slice(0, 300)) {
-    rows.set(t.id, { id: t.id, cwd: t.cwd, title: oneLine(t.prompt).slice(0, 100), live: false, running: false, lastUsedAt: new Date(t.modified).toISOString(), branch: t.branch });
+    rows.set(t.id, { id: t.id, cwd: t.cwd, title: oneLine(t.title ?? t.prompt).slice(0, 100), live: false, running: false, lastUsedAt: new Date(t.modified).toISOString(), branch: t.branch });
   }
   for (const r of readSessions()) {
     const prev = rows.get(r.id);
     const last = prev && prev.lastUsedAt > r.lastUsedAt ? prev.lastUsedAt : r.lastUsedAt;
-    rows.set(r.id, { id: r.id, cwd: r.cwd, title: prev?.title || oneLine(r.firstPrompt ?? '').slice(0, 100), live: false, running: false, lastUsedAt: last, branch: prev?.branch });
+    rows.set(r.id, { id: r.id, cwd: r.cwd, title: oneLine(r.title ?? '').slice(0, 100) || prev?.title || oneLine(r.firstPrompt ?? '').slice(0, 100), live: false, running: false, lastUsedAt: last, branch: prev?.branch });
   }
   const live = await Promise.all(socketSessionIds().map(async (id) => [id, await hostInfo(id)] as const));
   for (const [id, info] of live) {

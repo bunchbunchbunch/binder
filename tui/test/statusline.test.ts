@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { buildPayload, modelDisplayName, readStatusLineCommand, runStatusLine, fallbackStatusLine } from '../src/statusline.js';
-import { visibleTabs, tabLabel, turnVerb, elapsed, thinkingCount } from '../src/ui/tabLayout.js';
+import { visibleTabs, tabLabel, turnVerb, elapsed, thinkingCount, statusText } from '../src/ui/tabLayout.js';
 import { toolSummary } from '../src/ui/toolSummary.js';
 import { parseArgs } from '../src/cli.js';
 
@@ -75,6 +75,16 @@ describe('tab layout', () => {
     expect(thinkingCount(372)).toBe('372 thinking tokens');
     expect(thinkingCount(1234)).toBe('1.2k thinking tokens');
     expect(thinkingCount(123_456)).toBe('123k thinking tokens');
+  });
+  it('fills the status text template: context and its share of the window by default, cost when asked', () => {
+    expect(statusText(undefined, {})).toBe('');
+    expect(statusText(undefined, { contextTokens: 950 })).toBe('950');
+    expect(statusText(undefined, { contextTokens: 36_887, contextWindow: 1_000_000, costUsd: 0.0085 })).toBe('36.9k/1M 4%');
+    expect(statusText('{context} tokens( · {cost})', { contextTokens: 150_000, costUsd: 12.3 })).toBe('150k tokens · $12.30');
+    expect(statusText('{context} tokens( · {cost})', { contextTokens: 150_000, costUsd: 0.004 })).toBe('150k tokens · <$0.01');
+    expect(statusText('{context} tokens( · {cost})', { contextTokens: 150_000 })).toBe('150k tokens');
+    // A misspelled field shows as written; a backslash keeps a paren as text.
+    expect(statusText('{contxt} \\({percent}\\)', { contextTokens: 50, contextWindow: 100 })).toBe('{contxt} (50%)');
   });
   it('formats elapsed time in whole seconds', () => {
     expect(elapsed(900)).toBe('0s');

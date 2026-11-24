@@ -47,3 +47,37 @@ export function withContext(lines: DiffLine[], context = 2): DiffRow[] {
   if (skipping) out.push({ kind: 'skip', count: skipping });
   return out;
 }
+
+const HUNK = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/;
+
+/**
+ * Rows for a unified diff, as Codex reports a file change (bindertui
+ * renderUnifiedDiff). A new file may come as its plain content. The gap
+ * between hunks becomes a skip; file headers before the first hunk are dropped.
+ */
+export function unifiedDiffRows(diff: string, kind: string): DiffRow[] {
+  if (!diff.trim()) return [];
+  const lines = diff.replace(/\n$/, '').split('\n');
+  if (kind === 'add' && !lines.some((l) => /^(@@|[+-])/.test(l))) return lines.map((text) => ({ kind: 'add', text }));
+  const out: DiffRow[] = [];
+  let inHunk = false;
+  // Where the previous hunk ended in the old file, to count the lines between hunks.
+  let oldEnd: number | null = null;
+  for (const l of lines) {
+    const h = HUNK.exec(l);
+    if (h) {
+      const start = Number(h[1]);
+      const len = h[2] === undefined ? 1 : Number(h[2]);
+      if (oldEnd !== null) out.push({ kind: 'skip', count: Math.max(0, start - oldEnd) });
+      oldEnd = start + len;
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk && /^(---|\+\+\+|diff |index )/.test(l)) continue;
+    if (l.startsWith('\\')) continue; // "\ No newline at end of file"
+    if (l.startsWith('+')) out.push({ kind: 'add', text: l.slice(1) });
+    else if (l.startsWith('-')) out.push({ kind: 'del', text: l.slice(1) });
+    else out.push({ kind: 'same', text: l.replace(/^ /, '') });
+  }
+  return out;
+}

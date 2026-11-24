@@ -14,6 +14,7 @@ import { configPath, readConfig, saveConfig, type BinderConfig } from '../config
 import { completePath } from '../complete.js';
 import { expandHome } from '../paths.js';
 import { MARKDOWN_STYLES, type MarkdownStyle } from './md/theme.js';
+import { DEFAULT_STATUS, STATUS_FIELDS, statusText } from './tabLayout.js';
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 
@@ -443,12 +444,12 @@ export function ResumePanel({ session, close, cwd, configDir, currentId, onResum
       if (scope === 'folder' && s.cwd !== cwd) return false;
       if (scope === 'worktrees' && !trees.includes(s.cwd)) return false;
       if (scope === 'branch' && (!branch || s.branch !== branch || !trees.includes(s.cwd))) return false;
-      return !q || `${s.prompt} ${s.cwd} ${s.branch ?? ''} ${s.id}`.toLowerCase().includes(q);
+      return !q || `${s.title ?? ''} ${s.prompt} ${s.cwd} ${s.branch ?? ''} ${s.id}`.toLowerCase().includes(q);
     });
   }, [all, scope, query, cwd, trees, branch]);
   const items: PickerItem[] = shown.slice(0, 500).map((s) => ({
     key: s.id,
-    label: s.prompt.split('\n')[0].slice(0, 70),
+    label: (s.title ?? s.prompt.split('\n')[0]).slice(0, 70),
     description: [ago(s.modified), s.branch, scope === 'folder' ? undefined : s.cwd.replace(process.env.HOME ?? '\u0000', '~')].filter(Boolean).join(' · '),
   }));
   const toggle = (s: Scope) => setScope(scope === s ? 'folder' : s);
@@ -505,11 +506,11 @@ function folderItems(query: string, allowNew: boolean): PickerItem[] {
   return head.concat(more.map((p) => ({ key: p, label: p })));
 }
 
-type SettingsView = { kind: 'list' | 'mode' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string };
+type SettingsView = { kind: 'list' | 'mode' | 'folder' | 'status' } | { kind: 'dir' | 'mapping'; folder: string };
 
 // /settings: binder's config.json. The view settings apply at once; a running
 // binder keeps the permission mode and config dirs it started with.
-export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Common, 'session'> & { onSticky: (on: boolean) => void; onMarkdown: (style: MarkdownStyle) => void }) {
+export function SettingsPanel({ flash, close, onSticky, onStatusText, onMarkdown }: Omit<Common, 'session'> & { onSticky: (on: boolean) => void; onStatusText: (template: string | undefined) => void; onMarkdown: (style: MarkdownStyle) => void }) {
   const [loaded] = useState(() => {
     try {
       return { config: readConfig(), error: '' };
@@ -555,6 +556,39 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
         onSelect={(i) => save({ permissionMode: i.key === 'unset' ? undefined : i.key }, `Permission mode: ${i.label}`) && back()}
         onCancel={back}
         hint={backHint}
+      />
+    );
+  }
+
+  if (view.kind === 'status') {
+    const value = query.trim();
+    const saveText = (v: string) => {
+      const template = v === DEFAULT_STATUS ? undefined : v;
+      if (!save({ statusText: template }, `Status text: ${v || 'none'}`)) return;
+      onStatusText(template);
+      setLast('status');
+      back();
+    };
+    const sample = statusText(value, { contextTokens: 36_900, contextWindow: 1_000_000, costUsd: 0.42 });
+    const items: PickerItem[] = [
+      { key: 'save', label: 'Save', description: `shows ${sample ? `"${sample}"` : 'nothing'} for a session at 36.9k of 1M tokens that cost $0.42` },
+      ...(value !== DEFAULT_STATUS ? [{ key: 'default', label: 'Use the default', description: DEFAULT_STATUS }] : []),
+      ...STATUS_FIELDS.map((f) => ({ key: `field:${f.name}`, label: `{${f.name}}`, description: f.about })),
+    ];
+    return (
+      <Picker
+        key="status"
+        title="Status text: the right end of the row above the prompt"
+        subtitle={error || '{field} shows a field, ( ) text only when a field inside it has one'}
+        items={items}
+        search={{ query, onChange: setQuery }}
+        onSelect={(i) => {
+          if (i.key === 'save') return saveText(value);
+          if (i.key === 'default') return saveText(DEFAULT_STATUS);
+          setQuery(`${query.trimEnd()}${query.trim() ? ' ' : ''}${i.label}`);
+        }}
+        onCancel={back}
+        hint="type to edit · enter on Save saves · enter on a field adds it · esc back"
       />
     );
   }
@@ -617,6 +651,7 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
     { key: 'mode', label: 'Permission mode', description: config.permissionMode ?? "Claude Code's default" },
     { key: 'sticky', label: 'Sticky prompt', description: config.stickyPrompt !== false ? 'on' : 'off' },
     { key: 'markdown', label: 'Markdown style', description: style },
+    { key: 'status', label: 'Status text', description: config.statusText ?? DEFAULT_STATUS },
     { key: 'artifacts', label: 'Artifacts', description: config.artifacts !== false ? 'on: Claude can publish live pages to claude.ai' : 'off' },
     ...Object.entries(dirs).map(([folder, dir]) => ({ key: `dir:${folder}`, label: 'Config dir', description: `${folder} → ${dir}` })),
     { key: 'add', label: 'Add a config dir…', description: Object.keys(dirs).length ? undefined : 'for a second account: claude run in a folder you pick uses another config dir' },
@@ -633,6 +668,10 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
       const next = MARKDOWN_STYLES[(MARKDOWN_STYLES.indexOf(style) + 1) % MARKDOWN_STYLES.length];
       if (save({ markdownStyle: next }, `Markdown: ${next}`)) onMarkdown(next);
       return;
+    }
+    if (item.key === 'status') {
+      setQuery(config.statusText ?? DEFAULT_STATUS);
+      return setView({ kind: 'status' });
     }
     if (item.key === 'artifacts') {
       const on = config.artifacts === false;

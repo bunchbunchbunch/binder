@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { WireState, WireTab } from '../src/shared/wire';
-import { DEFAULT_SIDEBAR, renderTemplate, sessionFields, sessionStatus, shortDuration, sidebarText, usesField, type SessionFacts } from '../src/renderer/src/lib/sidebarText';
+import { DEFAULT_SIDEBAR, DEFAULT_STATUS, renderTemplate, sessionFields, sessionStatus, shortDuration, sidebarText, usesField, type SessionFacts } from '../src/renderer/src/lib/sidebarText';
 
 const tab = (id: number, prompt: string, extra: Partial<WireTab> = {}): WireTab => ({ id, prompt, status: 'done', blocks: [], earlier: [], ...extra });
 
@@ -36,6 +36,18 @@ const facts = (extra: Partial<SessionFacts> = {}): SessionFacts => ({
 });
 
 const question = { requestId: 'q', kind: 'ask' as const, questions: [] };
+
+describe('status bar text', () => {
+  it("shows the context and its share of the window by default; cost only when the template asks", () => {
+    const v = (extra: Partial<WireState>) => sessionFields(facts({ state: state(extra) }), 0);
+    expect(renderTemplate(DEFAULT_STATUS, v({ contextWindow: 200000, costUsd: 0.4213 }))).toBe('45.2k/200k 23%');
+    expect(renderTemplate(DEFAULT_STATUS, v({ contextWindow: 1000000 }))).toBe('45.2k/1M 5%');
+    // Before a turn reports the window, the parts that need it drop out.
+    expect(renderTemplate(DEFAULT_STATUS, v({}))).toBe('45.2k');
+    expect(renderTemplate('{context}( · {cost})', v({ costUsd: 0.4213 }))).toBe('45.2k · $0.42');
+    expect(renderTemplate('{context}( · {cost})', v({}))).toBe('45.2k');
+  });
+});
 
 describe('sidebar templates', () => {
   const values = { status: '⏳', elapsed: '3m', modelLetter: 'O', model: '', script: '', folder: 'binder', branch: '', waiting: '' };

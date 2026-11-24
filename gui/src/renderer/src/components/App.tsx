@@ -44,7 +44,7 @@ export function App() {
     const offSettings = window.binder.onOpenSettings(() => setAppPanel({ kind: 'settings' }));
     const offGuide = window.binder.onOpenGuide(() => setAppPanel({ kind: 'guide' }));
     const offControl = window.binder.onControl(handleControl);
-    void window.binder.loadSettings().then((s) => setState({ stickyPrompt: s.stickyPrompt, sidebar: s.sidebar }));
+    void window.binder.loadSettings().then((s) => setState({ stickyPrompt: s.stickyPrompt, statusText: s.statusText, sidebar: s.sidebar }));
     void restoreLayout();
     const t = setInterval(() => void refreshSessions(), 30000);
     const onFocus = () => void refreshSessions();

@@ -14,6 +14,8 @@ export type SessionSummary = {
   cwd: string;
   branch?: string;
   prompt: string;
+  // The session's name (/rename, claude -n), when it has one.
+  title?: string;
   modified: number;
   // How Claude Code was started: 'cli' interactive, 'sdk-cli' headless (binder, scripts, hooks).
   entrypoint?: string;
@@ -21,15 +23,31 @@ export type SessionSummary = {
 
 const HEAD_BYTES = 64 * 1024;
 
-function head(path: string): string {
+function readAt(path: string, position: number): string {
   const fd = openSync(path, 'r');
   try {
     const buf = Buffer.alloc(HEAD_BYTES);
-    const n = readSync(fd, buf, 0, HEAD_BYTES, 0);
+    const n = readSync(fd, buf, 0, HEAD_BYTES, position);
     return buf.subarray(0, n).toString('utf8');
   } finally {
     closeSync(fd);
   }
+}
+
+// The latest custom-title line in `text`. Claude Code appends one on /rename
+// and repeats it every few dozen lines, so the end of the file has the current name.
+function lastTitle(text: string): string | undefined {
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"custom-title"')) continue;
+    try {
+      const e = JSON.parse(lines[i]) as { type?: string; customTitle?: unknown };
+      if (e.type === 'custom-title' && typeof e.customTitle === 'string' && e.customTitle.trim()) return e.customTitle.trim();
+    } catch {
+      // a line cut off where the read began
+    }
+  }
+  return undefined;
 }
 
 type TranscriptLine = {
@@ -68,7 +86,8 @@ export function summarize(path: string): SessionSummary | undefined {
   let branch: string | undefined;
   let prompt: string | undefined;
   let entrypoint: string | undefined;
-  for (const line of head(path).split('\n')) {
+  const head = readAt(path, 0);
+  for (const line of head.split('\n')) {
     let e: TranscriptLine;
     try {
       e = JSON.parse(line);
@@ -82,7 +101,9 @@ export function summarize(path: string): SessionSummary | undefined {
     if (cwd && prompt) break;
   }
   if (!prompt) return undefined;
-  return { id: basename(path, '.jsonl'), path, cwd, branch, prompt, modified: statSync(path).mtimeMs, entrypoint };
+  const { size, mtimeMs } = statSync(path);
+  const title = (size > HEAD_BYTES ? lastTitle(readAt(path, size - HEAD_BYTES)) : undefined) ?? lastTitle(head);
+  return { id: basename(path, '.jsonl'), path, cwd, branch, prompt, ...(title && { title }), modified: mtimeMs, entrypoint };
 }
 
 export function listTranscripts(configDir: string): SessionSummary[] {

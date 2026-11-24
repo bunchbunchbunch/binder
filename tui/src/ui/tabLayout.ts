@@ -1,4 +1,5 @@
 import { firstPrompt, type Block, type Tab, type TabStatus } from '../store.js';
+import { renderTemplate } from './template.js';
 
 export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -38,6 +39,41 @@ export function turnVerb(blocks: Block[], activity: string, interrupting: boolea
 // The running turn's thinking so far, for the status row: "1.2k thinking tokens".
 export function thinkingCount(tokens: number): string {
   return `${tokens >= 1000 ? `${(tokens / 1000).toFixed(tokens >= 100000 ? 0 : 1)}k` : tokens} thinking tokens`;
+}
+
+// Token counts as the status row shows them: 950, 36.9k, 412k, 1.2M.
+export function shortTokens(n: number): string {
+  if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(1))}M`;
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n);
+}
+
+// Dollars at API list prices: $0.42, $12.30; under a cent is "<$0.01".
+export function fmtCost(usd: number): string {
+  return usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`;
+}
+
+// The status row's right side, from config.json's statusText (a template, as
+// in the Mac app's status bar): "36.9k/1M 4%" by default.
+export const DEFAULT_STATUS = '{context}(/{maxTokens})( {percent})';
+
+export const STATUS_FIELDS: { name: string; about: string }[] = [
+  { name: 'context', about: 'tokens in context' },
+  { name: 'maxTokens', about: "the model's context window" },
+  { name: 'percent', about: 'how much of the window the context fills' },
+  { name: 'cost', about: 'what the session has cost, at API list prices' },
+];
+
+export function statusFields(s: { contextTokens?: number; contextWindow?: number; costUsd?: number }): Record<string, string> {
+  return {
+    context: s.contextTokens ? shortTokens(s.contextTokens) : '',
+    maxTokens: s.contextWindow ? shortTokens(s.contextWindow) : '',
+    percent: s.contextTokens && s.contextWindow ? `${Math.round((s.contextTokens / s.contextWindow) * 100)}%` : '',
+    cost: s.costUsd ? fmtCost(s.costUsd) : '',
+  };
+}
+
+export function statusText(template: string | undefined, s: { contextTokens?: number; contextWindow?: number; costUsd?: number }): string {
+  return renderTemplate(template ?? DEFAULT_STATUS, statusFields(s));
 }
 
 export function elapsed(ms: number): string {

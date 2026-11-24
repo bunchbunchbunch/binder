@@ -20,7 +20,7 @@ import { HelpView } from './HelpView.js';
 import { Shortcuts } from './Shortcuts.js';
 import { Welcome } from './Welcome.js';
 import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, SettingsPanel, TasksPanel, rewindTargets } from './panels.js';
-import { SPINNER, elapsed, thinkingCount, turnVerb } from './tabLayout.js';
+import { SPINNER, elapsed, statusText, thinkingCount, turnVerb } from './tabLayout.js';
 import { MARKDOWN_STYLES, markdownStyle, setMarkdownStyle, type MarkdownStyle } from './md/theme.js';
 import { clean } from './md/text.js';
 
@@ -69,10 +69,12 @@ export type AppProps = {
   draft?: string;
   /** Keep the tab's latest prompt under the tab bar (config.json stickyPrompt). */
   stickyPrompt?: boolean;
+  /** The status row's right end (config.json statusText), a template. */
+  statusText?: string;
   onQuit: () => void;
 };
 
-export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, onQuit }: AppProps) {
+export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, statusText: statusTextAtStart, onQuit }: AppProps) {
   const state = useSyncExternalStore(host.subscribe, host.getState);
   const dispatch = host.dispatch.bind(host);
   const session = host.session;
@@ -94,6 +96,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
   const [help, setHelp] = useState(false);
   const [mdStyle, setMdStyle] = useState(markdownStyle);
   const [sticky, setSticky] = useState(stickyPrompt === true);
+  const [statusTemplate, setStatusTemplate] = useState(statusTextAtStart);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [cwd, setCwd] = useState(host.cwd);
   // Prompt history belongs to the session's folder, not wherever claude has cd'd to.
@@ -403,7 +406,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
           />
         );
       case 'settings':
-        return <SettingsPanel flash={flash} close={closePanel} onSticky={setSticky} onMarkdown={applyMarkdown} />;
+        return <SettingsPanel flash={flash} close={closePanel} onSticky={setSticky} onStatusText={setStatusTemplate} onMarkdown={applyMarkdown} />;
       case 'confirm':
         return (
           <ConfirmPanel
@@ -473,7 +476,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
       </Box>
       <Box justifyContent="space-between" height={1} paddingLeft={1}>
         <Text color="#E8C07D" wrap="truncate-end">{turnStatus}</Text>
-        <Text dimColor>{state.contextTokens ? `${state.contextTokens} tokens` : ''}</Text>
+        <Text dimColor>{statusText(statusTemplate, state)}</Text>
       </Box>
       <BackgroundTasks tasks={state.backgroundTasks} />
       {editing ? (

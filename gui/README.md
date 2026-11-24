@@ -50,7 +50,7 @@ the build stops and says so instead of producing an app macOS would treat as new
 - **Sidebar:** the panes, if config.json has any, and the sessions open in the app (`⌘1` to
   `⌘9`, panes first). `⌘K` finds the rest. A session's row shows its status (⏳ working,
   ❓ waiting for you, 🐝 background tasks, ✅ done since you last looked, ⚠️ stopped), how long
-  its turn has run, its first prompt and its folder, unless config.json's `sidebar` says
+  its turn has run, its name (or first prompt) and its folder, unless config.json's `sidebar` says
   otherwise (see [Sidebar text](#sidebar-text)). Below them: New session (`⌘N`) and Help
   (`⌘/`). Drag its right edge to resize it (the app remembers the width); double-click the
   edge for the default.
@@ -66,9 +66,14 @@ the build stops and says so instead of producing an app macOS would treat as new
   this off.
 - **Prompt:** with a status row above it (`Thinking… (12s · esc to interrupt)`), a row for
   each background task (what it is doing, its kind, the tab that started it, and how long it
-  has run) and a status bar under it (folder, model and effort, permission mode, context size, and
-  the 5-hour and 7-day usage). A click on the folder, the model, the effort level or the
-  permission mode opens its picker. Picking a folder moves the session there, as `/cd` does,
+  has run) and a status bar under it (folder, model and effort, permission mode, the context,
+  and the 5-hour and 7-day usage). The context reads `45.2k/200k 23%` (tokens, the model's
+  window, the share in use) unless config.json's `statusText` says otherwise: a template with
+  the [sidebar's fields](#sidebar-text), so `{context}( · {cost})` adds what the session has
+  cost at API list prices (on a subscription it comes out of your plan's usage). Settings (`⌘,`)
+  edits it with a preview. A click on the folder, the model, the effort level or the permission
+  mode opens its picker; a click on the context shows what it holds, by category, as
+  `/context` counts it. Picking a folder moves the session there, as `/cd` does,
   between turns. A permission mode picked there lasts until the session restarts; Claude
   Code allows bypass permissions only in a session that started in that mode.
 - **Background tasks:** a click on a task's row, or `/tasks`, lists them with the highlighted
@@ -160,13 +165,13 @@ show when the app next comes to the front.
 - Text in `( )` shows only when a field inside it has a value, so `([{modelLetter}])` leaves no
   `[]` behind. A backslash makes the next character plain text: `\(`.
 - Spaces left by empty fields collapse. An empty subtitle hides the second line; a title that
-  comes out empty shows the first prompt. A misspelled field shows as written.
+  comes out empty shows the `title` field. A misspelled field shows as written.
 - The defaults are `{status} {elapsed} {title}` and `{folder}( · {waiting})`.
 
 | Field | Shows |
 |-------|-------|
 | `status` | ⏳ a turn runs, ❓ a question waits for you, 🐝 background tasks run, ✅ a turn ended while you looked elsewhere (until you look), ⚠️ claude or its host stopped |
-| `title` | the first prompt |
+| `title` | the session's name (`/rename`), or else the first prompt |
 | `prompt` | the latest prompt |
 | `folder`, `path` | the session's folder, and its path |
 | `branch` | the folder's git branch |
@@ -176,6 +181,9 @@ show when the app next comes to the front.
 | `activity` | what the running turn does: `Thinking`, `Running Bash` |
 | `waiting` | `waiting for you` while a question is open |
 | `context` | tokens in context (`45.2k`) |
+| `maxTokens` | the model's context window (`200k`), once a turn has reported it |
+| `percent` | how much of the window the context fills (`23%`) |
+| `cost` | what the session has cost, at API list prices (`$0.42`) |
 | `tabs`, `tasks` | how many tabs, and how many background tasks; empty at zero |
 | `script` | the first line `sidebar.script` prints |
 

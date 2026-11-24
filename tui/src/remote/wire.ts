@@ -41,6 +41,10 @@ export type WireMeta = {
   permissionMode: string | null;
   usage: State['usage'] | null;
   contextTokens: number | null;
+  // The model's context window, once a turn has reported it.
+  contextWindow: number | null;
+  // What the session has cost so far, in dollars at API list prices.
+  costUsd: number | null;
   running: number | null;
   // When the running turn started (ms since the epoch).
   runningSince: number | null;
@@ -134,6 +138,8 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   permissionMode: [(s) => s.state.permissionMode, (s) => s.state.permissionMode ?? null],
   usage: [(s) => s.state.usage, (s) => s.state.usage ?? null],
   contextTokens: [(s) => s.state.contextTokens, (s) => s.state.contextTokens ?? null],
+  contextWindow: [(s) => s.state.contextWindow, (s) => s.state.contextWindow ?? null],
+  costUsd: [(s) => s.state.costUsd, (s) => s.state.costUsd ?? null],
   running: [(s) => s.state.running, (s) => s.state.running],
   runningSince: [(s) => s.runningSince, (s) => s.runningSince ?? null],
   activity: [(s) => s.state.activity, (s) => s.state.activity],

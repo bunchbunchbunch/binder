@@ -1,5 +1,5 @@
 import type { WireState } from '@shared/wire';
-import { fmtTokens, modelDisplayName, shortPath } from '../lib/format';
+import { modelDisplayName, shortPath } from '../lib/format';
 
 // Permission modes: the badge, and what it means for someone new to Claude Code.
 // In the order the permission mode picker lists them.
@@ -28,9 +28,11 @@ function Meter({ label, w }: { label: string; w?: { utilization: number; resetsA
   );
 }
 
-// Under the prompt: where and what is running, the permission mode, and the account's usage.
-// A click on the folder, the model, the effort level or the permission mode opens its picker.
-export function StatusBar({ s, onPick }: { s: WireState; onPick: (panel: 'cd' | 'model' | 'effort' | 'mode') => void }) {
+// Under the prompt: where and what is running, the permission mode, the
+// context (`text`, from config.json's statusText), and the account's usage. A
+// click on the folder, the model, the effort level or the permission mode
+// opens its picker; on the context, its breakdown.
+export function StatusBar({ s, text, onPick }: { s: WireState; text: string; onPick: (panel: 'cd' | 'model' | 'effort' | 'mode' | 'context') => void }) {
   const model = modelDisplayName(s.model);
   const mode = s.permissionMode ? PERMISSION_MODES[s.permissionMode] : undefined;
   return (
@@ -61,9 +63,13 @@ export function StatusBar({ s, onPick }: { s: WireState; onPick: (panel: 'cd' | 
         )}
       </div>
       <div className="right">
-        {s.contextTokens ? (
-          <span className="ctx" title="How much of the conversation Claude is holding: the prompt size of the latest request">
-            {fmtTokens(s.contextTokens)} context
+        {text ? (
+          <span
+            className="ctx pick"
+            title={`${s.contextTokens ? `How much of the conversation Claude is holding: ${s.contextTokens.toLocaleString()}${s.contextWindow ? ` of ${s.contextWindow.toLocaleString()}` : ''} tokens in the latest request. ` : ''}Click for the breakdown. Settings (⌘,) changes what shows here.`}
+            onClick={() => onPick('context')}
+          >
+            {text}
           </span>
         ) : null}
         <Meter label="5h" w={s.usage?.five_hour} />

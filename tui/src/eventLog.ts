@@ -18,8 +18,10 @@ import { initialState, reduce, type State } from './store.js';
 export type PromptMarker = { type: 'hc_prompt'; prompt: string; tabId: number; kind?: 'followup' | 'steer'; uuid?: string; auto?: true };
 
 // Binder's own entries: a `!command` it ran (start, then its output), a
-// rewind, and a background task the user stopped.
+// rewind, a background task the user stopped, and a new child starting
+// (which counts cost from zero; replayed as an event).
 export type LocalMarker =
+  | { type: 'hc_spawn' }
   | { type: 'hc_bash'; tabId: number; command: string }
   | { type: 'hc_bash_done'; tabId: number; output: string; exitCode: number | null }
   | { type: 'hc_rewind'; uuid: string }

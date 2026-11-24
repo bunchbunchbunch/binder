@@ -47,7 +47,13 @@ export function fmtDuration(ms: number): string {
 }
 
 export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(1))}M`;
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n);
+}
+
+// Dollars at API list prices: $0.42, $12.30; under a cent is "<$0.01".
+export function fmtCost(usd: number): string {
+  return usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`;
 }
 
 export const firstLine = (s: string) => s.split('\n').find((l) => l.trim())?.trim() ?? '';

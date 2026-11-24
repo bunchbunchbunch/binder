@@ -3,10 +3,11 @@ import type { ImageAttachment } from '@shared/api';
 import { localCommand, visibleCommands, type LocalCommandName } from '../lib/commands';
 import { elapsed, fmtTokens, plural, shortPath } from '../lib/format';
 import { turnVerb } from '../lib/work';
-import { closeConn, errText, getState, openSession, reopen, request, setActiveTab, setState, toast, useApp, type Conn } from '../store';
+import { closeConn, errText, getState, openSession, reopen, request, sessionFacts, setActiveTab, setState, toast, useApp, type Conn } from '../store';
+import { DEFAULT_STATUS, renderTemplate, sessionFields } from '../lib/sidebarText';
 import type { BackgroundTask, WireBlock } from '@shared/wire';
 import { ConfirmPanel } from './Picker';
-import { ArtifactsPanel, CdPanel, ChromePanel, cycleEffort, cycleModel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, PermissionModePanel, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
+import { ArtifactsPanel, CdPanel, ContextPanel, ChromePanel, cycleEffort, cycleModel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, PermissionModePanel, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
 import { Composer, type ComposerHandle } from './Composer';
 import { QuestionCard } from './QuestionCard';
 import { HelpView } from './Shortcuts';
@@ -20,7 +21,7 @@ import { Welcome } from './Welcome';
 // session on screen it takes the TUI's keys.
 
 type Panel =
-  | { kind: 'model' | 'effort' | 'mode' | 'cd' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' }
+  | { kind: 'model' | 'effort' | 'mode' | 'cd' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' | 'context' }
   // `taskId`: the task to show first.
   | { kind: 'tasks'; taskId?: string }
   | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
@@ -47,6 +48,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   const s = c.state;
   const detail = useApp((st) => st.detail);
   const sticky = useApp((st) => st.stickyPrompt);
+  const statusText = useApp((st) => st.statusText);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [help, setHelp] = useState(false);
   // The queued prompt (by tab and text) the composer is editing.
@@ -352,6 +354,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
         return <RewindPanel {...common} onRewound={(text) => text && composer.current?.setText(text)} />;
       case 'artifacts':
         return <ArtifactsPanel {...common} />;
+      case 'context':
+        return <ContextPanel {...common} />;
       case 'tasks':
         return <TasksPanel {...common} tasks={s?.backgroundTasks ?? []} tabs={s?.tabs ?? []} cwd={s?.cwd ?? ''} initial={p.taskId} onGoTo={(id) => setActiveTab(c.id, id)} />;
       case 'confirm':
@@ -484,6 +488,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
           </div>
           <StatusBar
             s={s}
+            text={renderTemplate(statusText ?? DEFAULT_STATUS, sessionFields(sessionFacts(c), Date.now()))}
             onPick={(kind) => {
               if (c.status !== 'attached') return;
               if (kind === 'cd' && busy) return toast('Wait for the running turn to finish (or press Esc) before /cd', true);

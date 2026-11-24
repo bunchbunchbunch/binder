@@ -68,6 +68,10 @@ export type WireMeta = {
   title?: string | null;
   // Thinking tokens so far in the running turn (Claude Code's estimate), 0 when idle.
   thinkingTokens?: number;
+  // The model's context window, once a turn has reported it.
+  contextWindow?: number | null;
+  // What the session has cost so far, in dollars at API list prices.
+  costUsd?: number | null;
 };
 
 // A background shell or agent still running. toolUseId is the call that

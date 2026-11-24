@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dragsAt, launch, newSession, shot, SHOWCASE, tuiFixture, type Launched } from './helpers';
 
@@ -175,7 +175,83 @@ test('opens the command menu and the model panel', async () => {
   await expect(page.locator('.composer textarea')).toBeFocused();
 });
 
-test('/rename puts a title above the tabs, and it drags the window', async () => {
+test("a Codex file change (Patch) shows each file's diff", async () => {
+  // A turn as binder's Codex translation reports it: one Patch call changing two files.
+  const tmp = mkdtempSync('/tmp/bg-');
+  mkdirSync(join(tmp, 'app'));
+  // Where the session reports it runs: /tmp is /private/tmp on macOS.
+  const dir = realpathSync(join(tmp, 'app'));
+  const fixture = join(tmp, 'patch.jsonl');
+  const changes = [
+    { path: join(dir, 'src/table.ts'), kind: 'update', diff: '@@ -1,3 +1,3 @@\n const a = 1;\n-const width = s.length;\n+const width = stringWidth(s);\n return width;\n@@ -20,2 +20,3 @@\n }\n+export { width };\n' },
+    { path: join(dir, 'src/wrap.ts'), kind: 'add', diff: 'export function wrap() {}\n' },
+  ];
+  const e = (o: object) => JSON.stringify({ session_id: 'patch', parent_tool_use_id: null, ...o });
+  writeFileSync(
+    fixture,
+    [
+      e({ type: 'system', subtype: 'init', cwd: dir, model: 'gpt-5-codex', permissionMode: 'acceptEdits' }),
+      e({ type: 'assistant', message: { id: 'm1', role: 'assistant', content: [{ type: 'tool_use', id: 'p1', name: 'Patch', input: { file_path: changes[0].path, changes } }] } }),
+      e({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'p1', content: '' }] } }),
+      e({ type: 'assistant', message: { id: 'm2', role: 'assistant', content: [{ type: 'text', text: 'Patched both files.' }] } }),
+      e({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1200, num_turns: 1, total_cost_usd: 0 }),
+    ].join('\n') + '\n',
+  );
+  run = await launch(fixture, {}, { reuse: tmp });
+  const { page, project } = run;
+  await newSession(page, project);
+  await page.keyboard.type('Use display width');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.md').last()).toHaveText('Patched both files.', { timeout: 20000 });
+  await page.keyboard.press('Control+e');
+  const tool = page.locator('.work .tool');
+  await expect(tool.locator('.tool-name')).toHaveText('Patch');
+  await expect(tool.locator('.tool-arg')).toHaveText('2 files');
+  await expect(tool.locator('.diff-row.file')).toHaveText(['src/table.ts', 'src/wrap.ts · new file']);
+  await expect(tool.locator('.diff-row.del')).toHaveText(['−const width = s.length;']);
+  await expect(tool.locator('.diff-row.add')).toHaveText(['+const width = stringWidth(s);', '+export { width };', '+export function wrap() {}']);
+  await expect(tool.locator('.diff-row.skip')).toHaveText(['⋯ 16 unchanged lines']);
+  await page.screenshot({ path: shot('codex-patch') });
+});
+
+test("the status bar shows the context and its share of the window, as config.json's statusText says; a click breaks it down", async () => {
+  const tmp = mkdtempSync('/tmp/bg-');
+  mkdirSync(join(tmp, 'app'));
+  const config = join(tmp, 'config.json');
+  writeFileSync(config, '{}');
+  const fixture = join(tmp, 'cost.jsonl');
+  const e = (o: object) => JSON.stringify({ session_id: 'cost', parent_tool_use_id: null, ...o });
+  writeFileSync(
+    fixture,
+    [
+      e({ type: 'system', subtype: 'init', cwd: realpathSync(join(tmp, 'app')), model: 'claude-opus-5-5', permissionMode: 'default' }),
+      e({ type: 'assistant', message: { id: 'm1', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'Done.' }], usage: { input_tokens: 10, cache_read_input_tokens: 40000, cache_creation_input_tokens: 9990 } } }),
+      e({ type: 'result', subtype: 'success', is_error: false, duration_ms: 900, num_turns: 1, total_cost_usd: 0.4213, modelUsage: { 'claude-opus-5-5': { contextWindow: 200000, costUSD: 0.4213 } } }),
+    ].join('\n') + '\n',
+  );
+  run = await launch(fixture, { BINDER_CONFIG: config }, { reuse: tmp });
+  const { page, project } = run;
+  await newSession(page, project);
+  await page.keyboard.type('Check the costs');
+  await page.keyboard.press('Enter');
+  const ctx = page.locator('.statusbar .ctx');
+  await expect(ctx).toHaveText('50.0k/200k 25%', { timeout: 20000 });
+  // The cost shows only when the template asks for it; an edit to config.json applies on focus.
+  writeFileSync(config, JSON.stringify({ statusText: '{context} context( · {cost})' }));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(ctx).toHaveText('50.0k context · $0.42');
+  await ctx.click();
+  const picker = page.locator('.picker');
+  await expect(picker).toContainText('Context: 50.0k of 200k tokens (25%)');
+  await expect(picker.locator('.picker-item')).toHaveCount(4);
+  await expect(picker.locator('.picker-item', { hasText: 'Messages' })).toContainText('46.5k tokens · 23.3%');
+  await expect(picker.locator('.picker-item', { hasText: 'MCP tools' })).toContainText('loaded when used');
+  await page.screenshot({ path: shot('context-breakdown') });
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
+});
+
+test('/rename puts a title above the tabs and in the sidebar, and it drags the window', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;
   await newSession(page, project);
@@ -184,6 +260,8 @@ test('/rename puts a title above the tabs, and it drags the window', async () =>
   await page.keyboard.press('Enter');
   await expect(page.locator('.tab')).toHaveCount(1);
   await expect(title).toHaveCount(0);
+  const row = page.locator('.session-row.active .title');
+  await expect(row).toHaveText(/Fix the table alignment$/);
 
   await page.keyboard.type('/rename');
   await page.keyboard.press('Enter');
@@ -193,7 +271,9 @@ test('/rename puts a title above the tabs, and it drags the window', async () =>
   // As Claude Code tidied it; no tab for the command.
   await expect(title).toHaveText('Table fixes');
   await expect(page.locator('.tab')).toHaveCount(1);
-  const t = (await title.boundingBox())!;
+  // The sidebar row's {title} is the name now, not the first prompt.
+  await expect(row).toHaveText(/Table fixes$/);
+  const t =(await title.boundingBox())!;
   const bar = (await page.locator('.session:not([hidden]) .titlebar').boundingBox())!;
   expect(t.y + t.height).toBeLessThanOrEqual(bar.y);
   expect(await dragsAt(page, t.x + t.width / 2, t.y + t.height / 2)).toBe(true);

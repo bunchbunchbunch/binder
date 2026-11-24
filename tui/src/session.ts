@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ClaudeProcess, buildArgs, type ImageAttachment } from './claudeProcess.js';
 import type { ClaudeEvent, ControlRequestEvent, OtherSystemEvent } from './events.js';
-import { appendLocal, appendPrompt, appendRaw, type LocalMarker } from './eventLog.js';
+import { appendLocal, appendPrompt, appendRaw, logPath, type LocalMarker } from './eventLog.js';
 import { childEnv, configDir, stateDir } from './paths.js';
 import type { SlashCommand } from './slashCommands.js';
 import { findTranscript } from './transcripts.js';
@@ -127,6 +128,10 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
     this.resume = true;
     this.forkFrom = undefined;
 
+    // The store sums cost across children; this marks where one starts. Only
+    // in a log that exists: a resumed Claude Code session has none until it is used.
+    if (existsSync(logPath(id))) appendLocal(id, { type: 'hc_spawn' });
+    this.emit('event', { type: 'hc_spawn' });
     proc.on('raw', (line) => appendRaw(id, line));
     proc.on('event', (e) => {
       // A child being replaced by switchTo() may still flush a few lines.

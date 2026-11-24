@@ -97,10 +97,10 @@ export type SidebarScriptInput = { session_id: string; cwd: string; model: { id:
 
 // binder's config.json, as the settings panel shows it (binder host reads it too).
 // `error`: the file does not parse; the rest are defaults then.
-export type Settings = { path: string; permissionMode: string | null; stickyPrompt: boolean; artifacts: boolean; appearance: Appearance; configDirs: Record<string, string>; sidebar: SidebarConfig; error?: string };
+export type Settings = { path: string; permissionMode: string | null; stickyPrompt: boolean; artifacts: boolean; statusText: string | null; appearance: Appearance; configDirs: Record<string, string>; sidebar: SidebarConfig; error?: string };
 
 // Keys to set; null removes one.
-export type SettingsPatch = { permissionMode?: string | null; stickyPrompt?: boolean; artifacts?: boolean; appearance?: Appearance | null; configDirs?: Record<string, string> | null; sidebar?: SidebarConfig | null };
+export type SettingsPatch = { permissionMode?: string | null; stickyPrompt?: boolean; artifacts?: boolean; statusText?: string | null; appearance?: Appearance | null; configDirs?: Record<string, string> | null; sidebar?: SidebarConfig | null };
 
 // Remembered between launches.
 // `fresh`: no prompt yet, so there is no conversation to resume.

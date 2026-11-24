@@ -60,12 +60,14 @@ export type AppState = {
   detail: boolean;
   // config.json stickyPrompt: the tab's latest prompt stays under the tabs (on unless false).
   stickyPrompt: boolean;
+  // config.json statusText: the status bar's context template; null is the default.
+  statusText: string | null;
   // config.json sidebar: what an open session's row says.
   sidebar: SidebarConfig;
   toast: Toast | null;
 };
 
-let state: AppState = { conns: [], panes: [], webPanes: [], active: null, computers: [], defaultComputer: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, sidebar: {}, toast: null };
+let state: AppState = { conns: [], panes: [], webPanes: [], active: null, computers: [], defaultComputer: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, statusText: null, sidebar: {}, toast: null };
 const listeners = new Set<() => void>();
 
 export const getState = () => state;
@@ -258,7 +260,10 @@ export function setActiveTab(id: string, tabId: number | null): void {
   updateConn(id, (c) => ({ ...c, activeTab: tabId }));
 }
 
+/** The session's name (/rename), or else its first prompt's first line. */
 export function sessionTitle(c: Conn): string {
+  const name = c.state?.title?.trim();
+  if (name) return name;
   const first = c.state?.tabs[0];
   const prompt = first ? (first.earlier[0] ?? first).prompt : '';
   return prompt.split('\n').find((l) => l.trim())?.trim() || c.title;
@@ -271,7 +276,7 @@ export function sessionFacts(c: Conn): SessionFacts {
 }
 
 // A session you look at is seen: on screen while the window has focus. Coming
-// back to the window also picks up config.json's sidebar, if you edited it.
+// back to the window also picks up config.json's sidebar and statusText, if you edited them.
 function markSeen(): void {
   const c = state.conns.find((x) => x.id === state.active);
   if (c?.unseen && document.hasFocus()) updateConn(c.id, (x) => ({ ...x, unseen: false }));
@@ -279,7 +284,10 @@ function markSeen(): void {
 subscribe(markSeen);
 window.addEventListener('focus', () => {
   markSeen();
-  void window.binder.loadSettings().then((s) => JSON.stringify(s.sidebar) !== JSON.stringify(state.sidebar) && setState({ sidebar: s.sidebar }));
+  void window.binder.loadSettings().then((s) => {
+    if (JSON.stringify(s.sidebar) !== JSON.stringify(state.sidebar)) setState({ sidebar: s.sidebar });
+    if (s.statusText !== state.statusText) setState({ statusText: s.statusText });
+  });
 });
 
 // The sidebar's {script} and {branch} come from the main process. They are

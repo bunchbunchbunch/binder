@@ -112,6 +112,18 @@ describe('Claude Code transcripts', () => {
 
   it('summarizes a session for the picker', () => {
     expect(summarize(path)).toMatchObject({ id: 'abc', cwd: '/proj', branch: 'feat', prompt: 'fix the bug' });
+    expect(summarize(path)?.title).toBeUndefined();
+  });
+  it("takes the session's latest name from its custom-title lines", () => {
+    const named = join(dir, 'named.jsonl');
+    const title = (t: string) => JSON.stringify({ type: 'custom-title', customTitle: t, sessionId: 'named' });
+    writeFileSync(named, [JSON.stringify(lines[1]), title('First name'), title('  Parser fix  ')].join('\n') + '\n');
+    expect(summarize(named)).toMatchObject({ prompt: 'fix the bug', title: 'Parser fix' });
+    // A long transcript renamed late: the name is only near the end, past the head binder reads.
+    const filler = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'x'.repeat(1000) }] } });
+    const long = join(dir, 'long.jsonl');
+    writeFileSync(long, [JSON.stringify(lines[1]), title('Old name'), ...Array(200).fill(filler), title('New name'), filler].join('\n') + '\n');
+    expect(summarize(long)).toMatchObject({ prompt: 'fix the bug', title: 'New name' });
   });
   it('replays it as one tab with a turn per prompt', () => {
     const s = replayTranscript('abc', path);
