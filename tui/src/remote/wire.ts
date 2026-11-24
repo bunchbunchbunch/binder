@@ -45,6 +45,8 @@ export type WireMeta = {
   // When the running turn started (ms since the epoch).
   runningSince: number | null;
   activity: string;
+  // Thinking tokens so far in the running turn (Claude Code's estimate), 0 when idle.
+  thinkingTokens: number;
   interrupting: boolean;
   canSteer: boolean;
   // `auto`: binder's own follow-up about background work, not the user's.
@@ -135,6 +137,7 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   running: [(s) => s.state.running, (s) => s.state.running],
   runningSince: [(s) => s.runningSince, (s) => s.runningSince ?? null],
   activity: [(s) => s.state.activity, (s) => s.state.activity],
+  thinkingTokens: [(s) => s.state.thinkingTokens, (s) => s.state.thinkingTokens],
   interrupting: [(s) => s.state.interrupting, (s) => s.state.interrupting],
   canSteer: [(s) => s.state.canSteer, (s) => s.state.canSteer],
   queue: [(s) => s.state.queue, (s) => s.state.queue.map((q) => ({ tabId: q.tabId, prompt: q.prompt, followup: q.followup, ...(q.auto && { auto: true }) }))],

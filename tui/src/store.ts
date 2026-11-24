@@ -98,7 +98,9 @@ export type State = {
   // The child supports sending a message mid-turn (send_now and command_lifecycle).
   canSteer: boolean;
   interrupting: boolean;
-  activity: string; // last system/status text, cleared on result
+  activity: string; // last system/status text, cleared on result ('requesting' also once the response streams)
+  // Thinking tokens so far in the running turn, as Claude Code estimates them.
+  thinkingTokens: number;
   model?: string;
   cwd?: string;
   permissionMode?: string;
@@ -175,6 +177,7 @@ export function initialState(sessionId: string): State {
     canSteer: false,
     interrupting: false,
     activity: '',
+    thinkingTokens: 0,
     streamIndex: {},
     seq: 0,
     bashContext: [],
@@ -517,6 +520,11 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
       const { status, permissionMode } = ev as { status?: unknown; permissionMode?: unknown };
       return { ...state, activity: String(status ?? ''), ...(typeof permissionMode === 'string' && { permissionMode }) };
     }
+    // A running estimate per thinking block, every ~100 tokens; the deltas add up across the turn.
+    if (sub === 'thinking_tokens') {
+      const delta = Number((ev as { estimated_tokens_delta?: unknown }).estimated_tokens_delta);
+      return delta > 0 ? { ...state, thinkingTokens: state.thinkingTokens + delta } : state;
+    }
     // The child names the session at startup when it has a name, and after
     // each rename. Claude Code never clears one, so neither does this.
     if (sub === 'session_title_changed') {
@@ -586,7 +594,8 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
   if (ev.type === 'stream_event') {
     if (parent) return state; // subagent streaming is not shown; its final messages are
     const r = applyStream(tab, state, ev as StreamEvent);
-    return { ...replaceTab(state, r.tab), streamIndex: r.streamIndex };
+    // The request is answered once its response starts to stream.
+    return { ...replaceTab(state, r.tab), streamIndex: r.streamIndex, ...(state.activity === 'requesting' && { activity: '' }) };
   }
 
   if (ev.type === 'result') {
@@ -616,6 +625,12 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
 }
 
 export function reduce(state: State, action: Action): State {
+  const next = step(state, action);
+  // The thinking count is per turn, like the clock beside it.
+  return next.running !== state.running && next.thinkingTokens ? { ...next, thinkingTokens: 0 } : next;
+}
+
+function step(state: State, action: Action): State {
   switch (action.type) {
     case 'submit': {
       const id = action.tabId ?? nextTabId(state);
@@ -703,7 +718,7 @@ export function reduce(state: State, action: Action): State {
     case 'event':
       return applyEvent(state, action.event);
     case 'events':
-      return action.events.reduce(applyEvent, state);
+      return action.events.reduce((s, event) => reduce(s, { type: 'event', event }), state);
     case 'select':
       return state.tabs.length ? { ...state, active: Math.max(0, Math.min(state.tabs.length - 1, action.index)) } : state;
     case 'select_relative': {

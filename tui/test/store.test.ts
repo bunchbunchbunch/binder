@@ -280,6 +280,30 @@ describe('permission mode', () => {
   });
 });
 
+describe('what a running turn is waiting on', () => {
+  const sys = (e: Record<string, unknown>) => ({ type: 'system', session_id: 'sid', ...e }) as ClaudeEvent;
+  const stream = (event: Record<string, unknown>) => ({ type: 'stream_event', parent_tool_use_id: null, event }) as ClaudeEvent;
+  const tokens = (total: number, delta: number) => sys({ subtype: 'thinking_tokens', estimated_tokens: total, estimated_tokens_delta: delta });
+  const result = { type: 'result', subtype: 'success', is_error: false, duration_ms: 1, num_turns: 1, result: 'ok', session_id: 'sid' } as ClaudeEvent;
+  const running = () => reduce(reduce(initialState('sid'), { type: 'submit', prompt: 'hi' }), { type: 'sent', tabId: 1 });
+
+  it("is 'requesting' until the response starts to stream", () => {
+    const s = play(running(), [sys({ subtype: 'status', status: 'requesting' })]);
+    expect(s.activity).toBe('requesting');
+    expect(play(s, [stream({ type: 'message_start', message: { role: 'assistant', content: [] } })]).activity).toBe('');
+  });
+
+  it('adds up thinking tokens across blocks and starts over each turn', () => {
+    // Each thinking block's estimate restarts from zero; the deltas carry the running sum.
+    let s = play(running(), [tokens(50, 50), tokens(150, 100), tokens(6, 6), tokens(20, 14)]);
+    expect(s.thinkingTokens).toBe(170);
+    s = play(s, [result]);
+    expect(s.thinkingTokens).toBe(0);
+    s = reduce(reduce(s, { type: 'submit', prompt: 'again' }), { type: 'sent', tabId: 2 });
+    expect(reduce(s, { type: 'events', events: [tokens(40, 40)] }).thinkingTokens).toBe(40);
+  });
+});
+
 describe('session title', () => {
   // As the real binary sends it: at startup for a named session, and after each rename.
   const named = (title: unknown) => ({ type: 'system', subtype: 'session_title_changed', title, uuid: 'u', session_id: 'sid' }) as ClaudeEvent;

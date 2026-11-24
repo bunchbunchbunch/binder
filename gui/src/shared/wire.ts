@@ -66,6 +66,8 @@ export type WireMeta = {
   runningSince?: number | null;
   // The session's name (/rename), or null.
   title?: string | null;
+  // Thinking tokens so far in the running turn (Claude Code's estimate), 0 when idle.
+  thinkingTokens?: number;
 };
 
 // A background shell or agent still running. toolUseId is the call that

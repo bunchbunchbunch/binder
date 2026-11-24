@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { buildPayload, modelDisplayName, readStatusLineCommand, runStatusLine, fallbackStatusLine } from '../src/statusline.js';
-import { visibleTabs, tabLabel, turnVerb, elapsed } from '../src/ui/tabLayout.js';
+import { visibleTabs, tabLabel, turnVerb, elapsed, thinkingCount } from '../src/ui/tabLayout.js';
 import { toolSummary } from '../src/ui/toolSummary.js';
 import { parseArgs } from '../src/cli.js';
 
@@ -62,12 +62,19 @@ describe('tab layout', () => {
   it('names what a running turn is doing', () => {
     const bash = { kind: 'tool_use' as const, id: 't1', name: 'Bash', input: {}, inputJson: '', final: true, children: [] };
     expect(turnVerb([], '', false)).toBe('Thinking');
-    expect(turnVerb([{ kind: 'thinking', text: '', final: false }], 'requesting', false)).toBe('Thinking');
+    expect(turnVerb([{ kind: 'thinking', text: '', final: false }], '', false)).toBe('Thinking');
+    expect(turnVerb([{ kind: 'thinking', text: '', final: true }], 'requesting', false)).toBe('Waiting for API');
+    expect(turnVerb([bash], 'requesting', false)).toBe('Running Bash');
     expect(turnVerb([bash], '', false)).toBe('Running Bash');
     expect(turnVerb([{ ...bash, result: { content: 'ok', isError: false } }], '', false)).toBe('Thinking');
     expect(turnVerb([{ kind: 'text', text: 'Here', final: false }], '', false)).toBe('Writing');
     expect(turnVerb([bash], 'compacting', false)).toBe('Compacting');
     expect(turnVerb([bash], '', true)).toBe('Interrupting');
+  });
+  it('counts thinking tokens in thousands past 999', () => {
+    expect(thinkingCount(372)).toBe('372 thinking tokens');
+    expect(thinkingCount(1234)).toBe('1.2k thinking tokens');
+    expect(thinkingCount(123_456)).toBe('123k thinking tokens');
   });
   it('formats elapsed time in whole seconds', () => {
     expect(elapsed(900)).toBe('0s');

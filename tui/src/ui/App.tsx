@@ -20,7 +20,7 @@ import { HelpView } from './HelpView.js';
 import { Shortcuts } from './Shortcuts.js';
 import { Welcome } from './Welcome.js';
 import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, SettingsPanel, TasksPanel, rewindTargets } from './panels.js';
-import { SPINNER, elapsed, turnVerb } from './tabLayout.js';
+import { SPINNER, elapsed, thinkingCount, turnVerb } from './tabLayout.js';
 import { MARKDOWN_STYLES, markdownStyle, setMarkdownStyle, type MarkdownStyle } from './md/theme.js';
 import { clean } from './md/text.js';
 
@@ -421,9 +421,11 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, o
 
   const runningTab = state.tabs.find((t) => t.id === state.running);
   // Like Claude Code's "✻ Thinking… (12s · esc to interrupt)" above the prompt.
+  const verb = runningTab ? turnVerb(runningTab.blocks, state.activity, state.interrupting) : '';
+  // The thinking count only while thinking, so it never crowds out a tool's ctrl+b hint.
   const turnStatus =
     runningTab && !answering
-      ? `${SPINNER[frame % SPINNER.length]} ${turnVerb(runningTab.blocks, state.activity, state.interrupting)}… (${elapsed(Date.now() - turnStart.current.at)} · esc to interrupt${waitsOnForeground(runningTab.blocks) ? ' · ctrl+b to run in background' : ''})`
+      ? `${SPINNER[frame % SPINNER.length]} ${verb}… (${elapsed(Date.now() - turnStart.current.at)}${verb === 'Thinking' && state.thinkingTokens ? ` · ${thinkingCount(state.thinkingTokens)}` : ''} · esc to interrupt${waitsOnForeground(runningTab.blocks) ? ' · ctrl+b to run in background' : ''})`
       : '';
   // Ctrl+Enter follow-ups for the active tab that have not started yet.
   const activeId = active?.id;

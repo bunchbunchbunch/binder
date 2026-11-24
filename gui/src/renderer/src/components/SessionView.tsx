@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ImageAttachment } from '@shared/api';
 import { localCommand, visibleCommands, type LocalCommandName } from '../lib/commands';
-import { elapsed, plural, shortPath } from '../lib/format';
+import { elapsed, fmtTokens, plural, shortPath } from '../lib/format';
 import { turnVerb } from '../lib/work';
 import { closeConn, errText, getState, openSession, reopen, request, setActiveTab, setState, toast, useApp, type Conn } from '../store';
 import type { BackgroundTask, WireBlock } from '@shared/wire';
@@ -372,9 +372,11 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
 
   const runningTab = s?.tabs.find((t) => t.id === s.running);
   const answering = Boolean(s?.question);
+  const verb = runningTab && s ? turnVerb(runningTab.blocks, s.activity, s.interrupting) : '';
+  // The thinking count only while thinking, as in the TUI.
   const turnStatus =
     runningTab && s && !answering
-      ? `${turnVerb(runningTab.blocks, s.activity, s.interrupting)}… (${elapsed(Date.now() - (c.runningSince ?? Date.now()))} · esc to interrupt${waitsOnForeground(runningTab.blocks) ? ' · ⌃B to run in background' : ''})${runningTab.id !== tab?.id ? ` · tab ${runningTab.id}` : ''}`
+      ? `${verb}… (${elapsed(Date.now() - (c.runningSince ?? Date.now()))}${verb === 'Thinking' && s.thinkingTokens ? ` · ${fmtTokens(s.thinkingTokens)} thinking tokens` : ''} · esc to interrupt${waitsOnForeground(runningTab.blocks) ? ' · ⌃B to run in background' : ''})${runningTab.id !== tab?.id ? ` · tab ${runningTab.id}` : ''}`
       : '';
   const commands = useMemo(() => visibleCommands(c.commands), [c.commands]);
 

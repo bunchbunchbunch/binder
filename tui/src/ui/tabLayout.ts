@@ -31,7 +31,13 @@ export function turnVerb(blocks: Block[], activity: string, interrupting: boolea
   const last = blocks[blocks.length - 1];
   if (last?.kind === 'tool_use' && !last.result) return `Running ${last.name}`;
   if (last?.kind === 'text' && !last.final) return 'Writing';
+  if (activity === 'requesting') return 'Waiting for API';
   return 'Thinking';
+}
+
+// The running turn's thinking so far, for the status row: "1.2k thinking tokens".
+export function thinkingCount(tokens: number): string {
+  return `${tokens >= 1000 ? `${(tokens / 1000).toFixed(tokens >= 100000 ? 0 : 1)}k` : tokens} thinking tokens`;
 }
 
 export function elapsed(ms: number): string {

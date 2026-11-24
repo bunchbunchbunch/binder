@@ -28,6 +28,8 @@ describe('work and response', () => {
     expect(turnVerb([tool('Bash', false)], '', false)).toBe('Running Bash');
     expect(turnVerb([text('x', false)], '', false)).toBe('Writing');
     expect(turnVerb([], 'compacting', false)).toBe('Compacting');
+    expect(turnVerb([think], 'requesting', false)).toBe('Waiting for API');
+    expect(turnVerb([think], '', false)).toBe('Thinking');
     expect(turnVerb([], '', true)).toBe('Interrupting');
   });
 

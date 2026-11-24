@@ -166,7 +166,9 @@ snapshot, then patches at most every 120 ms while something changes.
 
 `state` fields: `sessionId`, `cwd` (the folder Claude is in, which follows its own `cd`), `model`, `permissionMode`, `usage`, `contextTokens`,
 `running` (tab id or null), `runningSince` (when the running turn started, in ms since the
-epoch, or null), `activity`, `interrupting`, `canSteer`, `queue`
+epoch, or null), `activity` (Claude Code's latest status: `requesting` while an API request
+waits for its response to start streaming, `compacting`, or empty), `thinkingTokens` (Claude
+Code's estimate of the running turn's thinking tokens so far, 0 when idle), `interrupting`, `canSteer`, `queue`
 (`[{tabId, prompt, followup, auto?}]`; `auto` marks binder's own follow-up about background
 work another tab's turn took in, which the user cannot edit), `steer` (`{tabId, prompt}` or null), `question`,
 `childExit` (`{code, stderr}` or null), `effort`, `suggestion` (the next prompt Claude Code

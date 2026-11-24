@@ -42,7 +42,14 @@ describe('buildArgs', () => {
 
   it('passes the permission mode from config.json', () => {
     const args = buildArgs({ sessionId: 'abc', resume: false, passthrough: [] }, { permissionMode: 'bypassPermissions' });
-    expect(args.slice(-2)).toEqual(['--permission-mode', 'bypassPermissions']);
+    expect(args.slice(-4, -2)).toEqual(['--permission-mode', 'bypassPermissions']);
+  });
+
+  it('asks for thinking summaries unless passthrough picks a display', () => {
+    expect(buildArgs({ sessionId: 'abc', resume: false, passthrough: [] }, {}).slice(-2)).toEqual(['--thinking-display', 'summarized']);
+    const args = buildArgs({ sessionId: 'abc', resume: false, passthrough: ['--thinking-display', 'omitted'] }, {});
+    expect(args.filter((a) => a === '--thinking-display')).toHaveLength(1);
+    expect(args.slice(-2)).toEqual(['--thinking-display', 'omitted']);
   });
 
   it('uses --resume and lets passthrough override the permission mode', () => {

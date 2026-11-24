@@ -35,6 +35,7 @@ export function turnVerb(blocks: WireBlock[], activity: string, interrupting: bo
   const last = blocks[blocks.length - 1];
   if (last?.kind === 'tool_use' && !last.result) return `Running ${last.name}`;
   if (last?.kind === 'text' && !last.final) return 'Writing';
+  if (activity === 'requesting') return 'Waiting for API';
   return 'Thinking';
 }
 

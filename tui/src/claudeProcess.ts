@@ -46,6 +46,11 @@ export function buildArgs({ sessionId, resume, passthrough, forkFrom }: BuildArg
   if (config.permissionMode && !passthrough.includes('--permission-mode')) {
     args.push('--permission-mode', config.permissionMode);
   }
+  // Headless, the API leaves thinking text out unless asked; summaries stream
+  // as thinking_delta. (A hidden flag: not in `claude --help`.)
+  if (!passthrough.includes('--thinking-display')) {
+    args.push('--thinking-display', 'summarized');
+  }
   return args.concat(passthrough);
 }
 
