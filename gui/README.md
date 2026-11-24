@@ -19,8 +19,8 @@ nobody attached exits after 15 idle minutes).
   your login shell, so it works when started from the Dock. `BINDER_BIN` (the path to the TUI's
   `bin/binder.mjs`) overrides the lookup.
 - Your binder setup applies unchanged: `~/.config/binder/config.json` (`permissionMode`,
-  `configDirs` for a second account, `stickyPrompt`, and `agent`: `"codex"` starts new
-  sessions as Codex), and everything Claude Code and Codex read.
+  `configDirs` for a second account, `stickyPrompt`, `artifacts`, and `agent`: `"codex"`
+  starts new sessions as Codex), and everything Claude Code and Codex read.
   Settings (`⌘,`) changes that file. The app also reads `appearance`, `sidebar` and `panes`
   there (see [Settings](#settings), [Sidebar text](#sidebar-text) and
   [Panes](#panes-and-the-control-socket)).

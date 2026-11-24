@@ -617,6 +617,7 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
     { key: 'mode', label: 'Permission mode', description: config.permissionMode ?? "Claude Code's default" },
     { key: 'sticky', label: 'Sticky prompt', description: config.stickyPrompt !== false ? 'on' : 'off' },
     { key: 'markdown', label: 'Markdown style', description: style },
+    { key: 'artifacts', label: 'Artifacts', description: config.artifacts !== false ? 'on: Claude can publish live pages to claude.ai' : 'off' },
     ...Object.entries(dirs).map(([folder, dir]) => ({ key: `dir:${folder}`, label: 'Config dir', description: `${folder} → ${dir}` })),
     { key: 'add', label: 'Add a config dir…', description: Object.keys(dirs).length ? undefined : 'for a second account: claude run in a folder you pick uses another config dir' },
   ];
@@ -633,6 +634,11 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
       if (save({ markdownStyle: next }, `Markdown: ${next}`)) onMarkdown(next);
       return;
     }
+    if (item.key === 'artifacts') {
+      const on = config.artifacts === false;
+      save({ artifacts: on }, `Artifacts ${on ? 'on' : 'off'} for sessions opened from now on`);
+      return;
+    }
     if (item.key === 'add') {
       setQuery('~/');
       return setView({ kind: 'folder' });
@@ -643,7 +649,7 @@ export function SettingsPanel({ flash, close, onSticky, onMarkdown }: Omit<Commo
     <Picker
       key="list"
       title="Settings"
-      subtitle={error || `${configPath().replace(homedir(), '~')} · permission mode and config dirs apply to sessions opened from now on`}
+      subtitle={error || `${configPath().replace(homedir(), '~')} · permission mode, artifacts and config dirs apply to sessions opened from now on`}
       items={items}
       initial={Math.max(0, items.findIndex((i) => i.key === last))}
       onSelect={pick}

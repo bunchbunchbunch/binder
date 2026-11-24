@@ -40,7 +40,13 @@ export const expandHome = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir
 // it (binder serve under launchd, for one).
 export function childEnv(cwd: string, inherited: NodeJS.ProcessEnv = process.env, config: BinderConfig = binderConfig()): NodeJS.ProcessEnv {
   // Headless Claude Code keeps file checkpoints (for /rewind) only when asked.
-  let env: NodeJS.ProcessEnv = { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true', ...inherited };
+  // It also leaves the Artifact tool off (live pages on claude.ai) unless
+  // CLAUDE_CODE_ARTIFACT is set; config.json artifacts:false keeps it off.
+  let env: NodeJS.ProcessEnv = {
+    CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: 'true',
+    ...(config.artifacts !== false && { CLAUDE_CODE_ARTIFACT: '1' }),
+    ...inherited,
+  };
   if (env.BINDER_SET_NODE_ENV) {
     delete env.NODE_ENV;
     delete env.BINDER_SET_NODE_ENV;

@@ -38,6 +38,13 @@ describe('account routing', () => {
     expect(childEnv('/tmp', {}).CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING).toBe('true');
     expect(childEnv('/tmp', { CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: '' }).CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING).toBe('');
   });
+  it('turns on artifacts unless config.json or the user says otherwise', () => {
+    expect(childEnv('/tmp', {}, {}).CLAUDE_CODE_ARTIFACT).toBe('1');
+    expect(childEnv('/tmp', {}, { artifacts: true }).CLAUDE_CODE_ARTIFACT).toBe('1');
+    expect(childEnv('/tmp', {}, { artifacts: false }).CLAUDE_CODE_ARTIFACT).toBeUndefined();
+    expect(childEnv('/tmp', { CLAUDE_CODE_ARTIFACT: '0' }, {}).CLAUDE_CODE_ARTIFACT).toBe('0');
+    expect(childEnv(join(homedir(), 'work'), {}, { ...config, artifacts: false }).CLAUDE_CODE_ARTIFACT).toBeUndefined();
+  });
   it('picks the config dir from configDirs when CLAUDE_CONFIG_DIR is unset', () => {
     expect(childEnv(join(homedir(), 'work', 'repo'), {}, config).CLAUDE_CONFIG_DIR).toBe(join(homedir(), '.claude-alt'));
     expect(childEnv(join(homedir(), 'work'), {}, config).CLAUDE_CONFIG_DIR).toBe(join(homedir(), '.claude-alt'));

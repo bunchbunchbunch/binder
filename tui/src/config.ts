@@ -9,12 +9,14 @@ import { dirname, join } from 'node:path';
 //   stickyPrompt    keep the tab's latest prompt under the tab bar; on unless false
 //   markdownStyle   how responses render: vivid (the default) or classic
 //   agent           what new sessions run: claude (the default) or codex
+//   artifacts       let Claude publish artifacts (live claude.ai pages); on unless false
 export type BinderConfig = {
   permissionMode?: string;
   configDirs?: Record<string, string>;
   stickyPrompt?: boolean;
   markdownStyle?: string;
   agent?: 'claude' | 'codex';
+  artifacts?: boolean;
 };
 
 export const configPath = () => process.env.BINDER_CONFIG || join(homedir(), '.config', 'binder', 'config.json');

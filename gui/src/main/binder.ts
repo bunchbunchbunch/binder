@@ -131,9 +131,9 @@ export function readSettings(env: NodeJS.ProcessEnv): Settings {
     const c = readConfig(path);
     const dirs = c.configDirs && typeof c.configDirs === 'object' ? (c.configDirs as Record<string, string>) : {};
     const appearance = c.appearance === 'light' || c.appearance === 'dark' ? c.appearance : 'auto';
-    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, appearance, configDirs: dirs, sidebar: readSidebar(c.sidebar) };
+    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, artifacts: c.artifacts !== false, appearance, configDirs: dirs, sidebar: readSidebar(c.sidebar) };
   } catch (e) {
-    return { path, permissionMode: null, stickyPrompt: true, appearance: 'auto', configDirs: {}, sidebar: {}, error: (e as Error).message };
+    return { path, permissionMode: null, stickyPrompt: true, artifacts: true, appearance: 'auto', configDirs: {}, sidebar: {}, error: (e as Error).message };
   }
 }
 

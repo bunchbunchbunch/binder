@@ -72,11 +72,16 @@ elsewhere). `/settings` shows and changes them, or edit the file:
   overrides it, and `/md` switches for the running session only.
 - `agent` is `claude` (the default) or `codex`: what new sessions run, including ones started
   from the phone. A session keeps the agent it started with.
+- `artifacts` lets Claude publish artifacts: live pages on claude.ai that update in place.
+  Claude Code leaves the Artifact tool off when run headless, as binder runs it, so binder
+  turns it on with `CLAUDE_CODE_ARTIFACT=1`. On unless set to `false`; a
+  `CLAUDE_CODE_ARTIFACT` already in your environment wins. Claude Docs and Sheets come
+  through the claude.ai Claude Docs connector and don't depend on this setting.
 
 `/settings` saves to the file in place (a symlink into a dotfiles repo stays a symlink) and
 keeps keys it does not know. Sticky prompt and markdown style change at once; a running
-binder keeps the permission mode and config dirs it started with, so they apply to sessions
-opened from then on.
+binder keeps the permission mode, artifacts and config dirs it started with, so they apply
+to sessions opened from then on.
 
 ## Codex
 

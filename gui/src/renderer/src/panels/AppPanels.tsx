@@ -431,6 +431,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
     ? [
         { key: 'mode', label: 'Permission mode', description: settings.permissionMode ?? "Claude Code's default" },
         { key: 'sticky', label: 'Sticky prompt', description: settings.stickyPrompt ? 'On' : 'Off' },
+        { key: 'artifacts', label: 'Artifacts', description: settings.artifacts ? 'On: Claude can publish live pages to claude.ai' : 'Off' },
         { key: 'appearance', label: 'Appearance', description: APPEARANCES.find((a) => a.key === settings.appearance)!.label },
         { key: 'sidebar:title', label: SIDEBAR_LABEL.title, description: sidebarTemplates(settings.sidebar).title },
         { key: 'sidebar:subtitle', label: SIDEBAR_LABEL.subtitle, description: sidebarTemplates(settings.sidebar).subtitle || 'None' },
@@ -452,6 +453,10 @@ export function SettingsPanel({ close }: { close: () => void }) {
       const on = !settings!.stickyPrompt;
       return void save({ stickyPrompt: on }, `Sticky prompt ${on ? 'on' : 'off'}`);
     }
+    if (item.key === 'artifacts') {
+      const on = !settings!.artifacts;
+      return void save({ artifacts: on }, `Artifacts ${on ? 'on' : 'off'} for sessions opened from now on`);
+    }
     if (item.key === 'add') {
       setQuery('');
       return setView({ kind: 'folder' });
@@ -462,7 +467,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
     <Picker
       key="list"
       title="Settings"
-      subtitle={error ?? (settings ? `${shortPath(settings.path)} · permission mode and config dirs apply to sessions opened from now on` : 'Loading…')}
+      subtitle={error ?? (settings ? `${shortPath(settings.path)} · permission mode, artifacts and config dirs apply to sessions opened from now on` : 'Loading…')}
       items={items}
       initial={Math.max(0, items.findIndex((i) => i.key === last))}
       onSelect={pick}

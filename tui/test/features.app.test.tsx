@@ -368,7 +368,7 @@ describe('background tasks', () => {
 });
 
 describe('/settings', () => {
-  it('saves to config.json: sticky prompt, markdown style, permission mode, and a config dir added then removed', async () => {
+  it('saves to config.json: sticky prompt, markdown style, artifacts, permission mode, and a config dir added then removed', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'binder-settings-'));
     const file = join(dir, 'config.json');
     writeFileSync(file, JSON.stringify({ permissionMode: 'plan', mine: true }));
@@ -389,10 +389,13 @@ describe('/settings', () => {
       await t.key(ENTER);
       await t.wait(() => t.frame().includes('Markdown: classic'));
       expect(config()).toEqual({ permissionMode: 'plan', mine: true, stickyPrompt: false, markdownStyle: 'classic' });
+      await t.key(DOWN);
+      await t.key(ENTER);
+      await t.wait(() => t.frame().includes('Artifacts off'));
+      expect(config().artifacts).toBe(false);
 
       // Back to Claude Code's own default: the key goes.
-      await t.key(UP);
-      await t.key(UP);
+      for (let i = 0; i < 3; i++) await t.key(UP);
       await t.key(ENTER);
       await t.wait(() => t.frame().includes('bypassPermissions'));
       for (let i = 0; i < 3; i++) await t.key(UP);
@@ -401,7 +404,7 @@ describe('/settings', () => {
       expect(config().permissionMode).toBeUndefined();
 
       // Add a config dir: type the folder, then a config dir that does not exist yet.
-      for (let i = 0; i < 3; i++) await t.key(DOWN);
+      for (let i = 0; i < 4; i++) await t.key(DOWN);
       await t.key(ENTER);
       await t.wait(() => t.frame().includes('Add a config dir: the folder'));
       for (let i = 0; i < 2; i++) await t.key('\x7f');
@@ -420,7 +423,7 @@ describe('/settings', () => {
       await t.wait(() => t.frame().includes('Remove'));
       await t.key(ENTER);
       await t.wait(() => !config().configDirs);
-      expect(config()).toEqual({ mine: true, stickyPrompt: false, markdownStyle: 'classic' });
+      expect(config()).toEqual({ mine: true, stickyPrompt: false, markdownStyle: 'classic', artifacts: false });
       await t.key(ESC);
       await t.wait(() => !t.frame().includes('Sticky prompt'));
     } finally {

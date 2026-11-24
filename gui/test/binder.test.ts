@@ -25,7 +25,7 @@ describe("binder's config.json", () => {
   const env = (name: string) => ({ BINDER_CONFIG: join(dir, name) });
 
   it('reads defaults when the file is missing, and names it when it does not parse', () => {
-    expect(readSettings(env('missing.json'))).toEqual({ path: join(dir, 'missing.json'), permissionMode: null, stickyPrompt: true, appearance: 'auto', configDirs: {}, sidebar: {} });
+    expect(readSettings(env('missing.json'))).toEqual({ path: join(dir, 'missing.json'), permissionMode: null, stickyPrompt: true, artifacts: true, appearance: 'auto', configDirs: {}, sidebar: {} });
     writeFileSync(join(dir, 'bad.json'), '{');
     expect(readSettings(env('bad.json')).error).toContain(join(dir, 'bad.json'));
   });
