@@ -11,6 +11,10 @@ export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: nu
   // Whether the strip keeps the active tab in view. Scrolling it by hand lets
   // go until the active tab changes.
   const follow = useRef(true);
+  // How many times a resize may re-settle the strip after the active tab or
+  // the tab count last changed. Whatever else feeds back through the layout,
+  // the strip stops moving after a few passes instead of rocking forever.
+  const resizeSettles = useRef(0);
 
   const measure = () => {
     const el = box.current;
@@ -49,13 +53,18 @@ export function TabBar({ tabs, active, onSelect }: { tabs: WireTab[]; active: nu
   // 120 ms while a turn runs) leave a strip scrolled by hand where it is.
   useLayoutEffect(() => {
     follow.current = true;
+    resizeSettles.current = 4;
     settle();
   }, [active, tabs.length]);
   useLayoutEffect(measure, [tabs]);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
-    const ro = new ResizeObserver(settle);
+    const ro = new ResizeObserver(() => {
+      if (resizeSettles.current <= 0) return measure();
+      resizeSettles.current--;
+      settle();
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, [tabs.length > 0]);
