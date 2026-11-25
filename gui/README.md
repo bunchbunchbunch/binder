@@ -19,7 +19,7 @@ nobody attached exits after 15 idle minutes).
   your login shell, so it works when started from the Dock. `BINDER_BIN` (the path to the TUI's
   `bin/binder.mjs`) overrides the lookup.
 - Your binder setup applies unchanged: `~/.config/binder/config.json` (`permissionMode`,
-  `configDirs` for a second account, `stickyPrompt`, `artifacts`, and `agent`: `"codex"`
+  `configDirs` for a second account, `stickyPrompt`, `artifacts`, `fastMode`, `alwaysAllow`, `planApproval`, `restartOnUpdate`, `notifications`, `claudeLinks`, `showImages`, `editor`, `todoPanel`, `workflowCard`, `worktrees`, `diffBase`, `terminalCommand`, `prWatch`, `prAutoFix`, `findingsCard`, `fileEditing`, `splitView`, `sideChat`, `schedules`, `pluginReload`, `previewReload`, `previewCommand`, `simulatorFps`, and `agent`: `"codex"`
   starts new sessions as Codex), and everything Claude Code and Codex read.
   Settings (`⌘,`) changes that file. The app also reads `appearance`, `sidebar` and `panes`
   there (see [Settings](#settings), [Sidebar text](#sidebar-text) and
@@ -74,8 +74,122 @@ the build stops and says so instead of producing an app macOS would treat as new
   edits it with a preview. A click on the folder, the model, the effort level or the permission
   mode opens its picker; a click on the context shows what it holds, by category, as
   `/context` counts it. Picking a folder moves the session there, as `/cd` does,
-  between turns. A permission mode picked there lasts until the session restarts; Claude
-  Code allows bypass permissions only in a session that started in that mode.
+  between turns. A permission mode picked there, with `⌥M`, or with `/permission-mode` lasts
+  until the session restarts; Claude Code allows bypass permissions only in a session that
+  started in that mode. `↯ fast` shows there while fast mode is on (`⌥O` or `/fast`); a click
+  turns it off.
+- **Permission prompts:** Allow, Deny, and the "always allow" choices Claude Code suggests: one
+  for its rules (Claude Code saves them where it says, such as this project's
+  `.claude/settings.local.json`) and one for switching the mode (`Allow, and accept all edits
+  from now on`). `"alwaysAllow": false` in config.json leaves Allow and Deny only.
+- **Attachments:** drop or paste images, PDFs and text files on the prompt. An image is
+  `[Image #n]`; a PDF or text file is `[File #n: name]` with a chip, and goes with the prompt (a PDF
+  as a document Claude reads, up to 32 MB; a text file as its text, up to 512 KB), so it works
+  for a session on another computer too. Any other file on this Mac is mentioned by its path.
+  One prompt's attachments may come to 60 MB as sent (base64, about 45 MB of files); more is
+  refused before sending. A send that is refused or fails keeps the prompt and its attachments.
+- **A terminal per session:** `⌃\`` opens the session's own terminal under the prompt: your
+  login shell in the session's folder (on another computer, over ssh), or config.json's
+  `terminalCommand`, run with `$SHELL -c`. Its keys are its own (Esc, Ctrl+C), except ⌘ keys and
+  `⌃\``, which hides it; it keeps running while hidden and ends when the session closes (or the
+  session's own window does).
+- **Reviewing changes:** `/diff` opens the session folder's changes in a pane over the session,
+  file by file with line numbers, against HEAD (what is not committed) or a branch picked at
+  the top (config.json `diffBase` sets the default); `/diff <branch>` opens against that branch.
+  A click on a line opens a comment there (Enter saves it, and `⌘⏎` in it saves it and sends);
+  Send (`⌘⏎`) hands every comment to Claude in one prompt, each with its file, line and the
+  line itself. `Esc` closes the pane.
+- **Preview:** `/preview` starts the session folder's dev server (package.json's `dev` script,
+  else `start`, with the package manager its lockfile names; config.json `previewCommand` sets
+  another) and shows the address it prints beside the session. `/preview <url>` (or a port, or
+  a host and port such as `localhost:3000`, `myhost:3000` or `192.168.1.5:5173`, with `0.0.0.0`
+  read as localhost) opens a server already running; `/preview <command>` starts that one. The
+  page reloads when a turn ends (`"previewReload": false` leaves it to ↻), its console errors
+  count at the foot (a click lists them), and `Show Claude` sends Claude a capture of the page
+  and those errors, into the session's tab, to check its own changes. The server's output is
+  a click away too; × closes the preview and stops the server and what it started (a hangup,
+  then SIGTERM and SIGKILL for one that ignores it). Quitting the app stops them the same way,
+  so it can take about 3 seconds then. On this Mac only.
+- **iOS Simulator:** `/simulator` (or `/sim`; again to close) shows an iOS Simulator device
+  beside the sessions, through Xcode's `simctl`: its screen, captured about once a second
+  (`"simulatorFps"`: 1, 2 or 4) while the pane is on screen and the window is not hidden or
+  minimized. Pick the device (an iPhone or iPad) at the top; `Boot` starts one that is not
+  running (with no window); `Open in Simulator` is where you tap and type; `Show Claude` sends
+  the active session a capture of the screen, unless it runs on another computer. Needs Xcode
+  and its iOS platform on this Mac.
+- **Plugins:** `/plugins` lists the installed plugins (one opens Enable or Disable, and Uninstall),
+  `Install a plugin…` (the marketplaces' plugins, filtered as you type), and `claude.ai
+  connectors…` with their state. A change loads into the running session at once, its commands
+  included; `"pluginReload": false` leaves it for claude's next start.
+- **Scheduled tasks:** `/schedule weekdays 9:00 <prompt>` runs the prompt on a schedule, each run
+  in a fresh session in the session's folder named for the task (`daily 9:00`, `weekdays 17:30`,
+  `mon,thu 8:00`, `hourly`, `every 15m`, or a cron line). `/schedule` alone lists the tasks with
+  their next run: one opens Run it now, Pause, Runs (Enter opens a run's session) and Delete.
+  They run on this Mac while the app is open (it checks each minute); `"schedules": false`
+  runs none.
+- **Side questions:** `/btw <question>` opens a side chat above the prompt: Claude answers from
+  the conversation so far, without tools, and none of it goes into the transcript; it works
+  while a turn runs. Its own box asks the next one (with the earlier ones as context); `Esc`
+  or × closes it. `"sideChat": false` sends `/btw` to Claude Code as typed.
+- **Two at once:** `⌘\` shows two sessions side by side: the active one and the next. A click
+  in either half (or `⌘1-9`) gives it the keyboard, marked by a blue line on top; a session
+  picked from the sidebar takes the place of the half that had the keyboard; `⌘\` again shows
+  one. `/window` moves the session to a window of its own (no sidebar; `⌘W` closes it and its
+  session terminal, and the session's binder keeps running until idle). If that binder ends, the window stays open with
+  "The session ended. ⌃R reopens it."; `/exit` closes it. A session's window has no claude.ai
+  pane (its links open in the browser) or simulator, and `⌘N` there says new sessions open
+  from the main window. `"splitView": false` turns both off.
+- **Files:** `⌘P` finds a file in the session folder by part of its name or path, and opens
+  the file pane over the session: the folder's tree on the left, the file highlighted with line
+  numbers on the right. `/open <path>` opens one directly. `Edit` makes it a text box (Tab and
+  Shift+Tab indent and outdent the selected lines, and a file with CRLF line endings keeps
+  them) that `⌘S` saves; a file changed on disk since you opened it (Claude edited it, say)
+  asks before it is saved over. A file you are not editing is read again when a turn ends.
+  `Esc` leaves editing (twice with unsaved changes), then closes the pane. It works through the
+  session's binder, so a session on another computer works the same. `"fileEditing": false`
+  makes the pane read only, and the session's binder then refuses saves from any viewer;
+  turned off in the middle of an edit, `⌘S` says so and writes nothing.
+- **Code review findings:** a code review (`/code-review`) shows its findings as a card in
+  place of its text: each with its severity, file and line (a click opens it), what is wrong
+  and its failure scenario, and `Fix this one`; `Apply fixes` asks for the rest in one prompt.
+  Both go into the review's tab. `/findings` lists them too, and the diff pane (`/diff`) shows
+  each under its line with its own `Fix this one`. `"findingsCard": false` keeps the review as text.
+- **Pull requests:** the status bar shows the branch's PR from the GitHub CLI (`gh`): its
+  number, green with its checks passing, red with how many failed or with a review asking for
+  changes, gold while they run, and plain with no checks (or only skipped ones). A
+  click (or `/pr`) opens it in the browser, asks Claude to fix the failing checks or address a
+  review asking for changes, merges it when ready (`gh pr merge --auto --squash`), or looks
+  again; binder looks every minute while the PR is open, and after each turn. With
+  `"prAutoFix": true` Claude is asked on its own, once per failure. `"prWatch": false` turns it off.
+- **Workflows:** a workflow asks with a card of its name, description and phases (`Run once`,
+  `Always allow workflows` in this project, `Deny`), and its run shows its phase and agents in
+  the background task row and in `/tasks`. `"workflowCard": false` asks a plain Allow / Deny.
+- **Todos and plan:** the session's latest todo list and its current plan stay above the prompt,
+  one line each (`Todos 1/3 · ◐ Writing the tests`, `Plan: Add hello.txt · approved`); a click
+  opens one, and `⌃T` opens both. `"todoPanel": false` leaves them in the transcript only.
+- **Files:** a tool call's file (Read, Edit, Write, a Codex patch) is a link: a click opens it in
+  your editor, at a Read's line, and Option-click shows it in Finder. `/files` lists the tab's
+  files the same way. config.json's `editor` says how: `open` (the file's default app, the
+  default), a command (`code`), or one with `{file}` and `{line}` (`code -g {file}:{line}`);
+  Settings offers the common editors. A session on another computer's files stay put.
+- **Images:** a tool's images (a screenshot, a Read of an image file) show under its call, the
+  ones you send show under your prompt, and a markdown image of a file on this Mac (an
+  absolute path, `~/...`, or relative to the session's folder) shows in the response. An image
+  from the web waits behind a "load from <host>" button, so showing a response never fetches a
+  URL by itself. A click enlarges an image. `"showImages": false` leaves captions.
+- **claude.ai pages beside the session:** a claude.ai link (a doc, sheet or artifact) in a
+  response, in `/artifacts`, or from `⌃]` opens in a pane to the right of the session instead of
+  the browser. Its title bar has Open in browser and ×; `⌃\` closes the pane and opens its last
+  page again. It keeps its own cookies between launches, so you sign in to claude.ai there
+  once; the page can go to claude.ai and its sign-in (a claude.ai link that opens a new tab
+  stays in the pane), and other links open in the browser. `⌃\` and `⌃]` work while the page
+  has the keyboard.
+  `"claudeLinks": "browser"` in config.json opens them in the browser as before.
+- **Plans:** when Claude finishes a plan in plan mode, the question card shows it as markdown
+  (it scrolls on its own when long) with `Yes, and use auto mode`, `Yes, and auto-accept
+  edits`, `Yes, and manually approve edits`, `No, keep planning`, and `No, and tell Claude what
+  to change` for typed feedback. Each yes approves the plan and sets that mode. Once answered,
+  the plan stays in the transcript. `"planApproval": false` asks a plain Allow / Deny.
 - **Background tasks:** a click on a task's row, or `/tasks`, lists them with the highlighted
   one's output (a shell's last lines, an agent's latest steps); `Enter` goes to the tab that
   started it, `x` or Stop stops it. `Ctrl+B` moves the running command or agent to the
@@ -83,10 +197,22 @@ the build stops and says so instead of producing an app macOS would treat as new
   sees its result there; once that turn ends, binder sends a follow-up into the tab that
   started the task, so Claude carries on with it there, under a gold `Background task
   finished: …` heading.
+- After binder is rebuilt, each open session's host still runs the old code, so a new key or
+  panel would fail there ("Unknown request"). The host notices the rebuild, and the app
+  restarts it on the new build once the session is idle: no turn running or queued, no
+  question, background task or bash command, no panel open, and nothing typed in the prompt
+  of the session on screen. The session resumes with its tabs, permission mode and fast mode.
+  `"restartOnUpdate": false` in config.json turns this off.
 - Open sessions come back on the next launch: live ones reattach, and the one on screen is
-  resumed if its host had exited.
+  resumed if its host had exited. A session that cannot start says why in its host's own words
+  (`Could not open the session. Not in a git repo: …`).
 - Outside the window: the Dock icon shows how many sessions are waiting for an answer and
-  bounces when a question arrives while you are in another app. Quitting while a turn runs asks
+  bounces when a question arrives while you are in another app. A question, or a turn that
+  finishes, in a session you are not looking at (another session is on screen, or the app is
+  in the background; in split view, both halves count as on screen) posts a macOS
+  notification: the session's name, and the question or the answer's first line. A click on
+  it brings that session forward. `"notifications": false` in
+  config.json turns them off. Quitting while a turn runs asks
   first, since the turn keeps going in the background.
 
 ## Keys
@@ -109,12 +235,17 @@ The TUI's keys work the same way; `?` on an empty prompt lists them and `/help` 
 | `Ctrl+L` | pick the model (`/model`) |
 | `Ctrl+P` / `Shift+Ctrl+P` | switch to the next / previous model, as in pi |
 | `Shift+Tab` | switch to the model's next effort level, as in pi |
+| `Option+M` | switch to the next permission mode, skipping any Claude Code refuses (`/permission-mode` picks one) |
+| `Option+O` | fast mode on or off (`/fast`) |
 | `PgUp` / `PgDn`, `Home` / `End` | scroll the tab |
 | `Ctrl+E` | expand or collapse the work behind a response |
 | `Ctrl+O` | full tool output, thinking, and subagent detail |
+| `Ctrl+T` | open the pinned todos and plan, or close them |
+| `` Ctrl+` `` | the session's terminal: show (and focus) it, or hide it |
 | `Ctrl+B` | move the running command or agent to the background (`/tasks` lists them) |
 | `Ctrl+V` | paste an image as `[Image #n]`, or text (`Cmd+V` and dropping files work too) |
-| `Ctrl+]` | open the latest artifact |
+| `Ctrl+]` | open the latest artifact (beside the session) |
+| `Ctrl+\` | close the claude.ai side pane, or open its last page again |
 | `Ctrl+R` | restart claude after it exits, or reopen a session that ended |
 | `Ctrl+C` | copy the selection; twice with nothing selected quits |
 
@@ -122,8 +253,10 @@ Added for the sidebar:
 
 | Key | Action |
 |-----|--------|
-| `⌘N` or `⌘T` | new session: pick a recent folder, type a path, or `⌘O` to choose one in Finder |
-| `⌘K` | open a session: search every session (`Ctrl+A` all projects, `Ctrl+W` this repo's worktrees, `Ctrl+B` this branch) |
+| `⌘N` or `⌘T` | new session: pick a recent folder, type a path, or `⌘O` to choose one in Finder. `⌥⏎` starts it in a new git worktree of the folder's repo (config.json `worktrees`, see the TUI's README); archiving the session in `⌘K` removes the worktree and its branch, but keeps a worktree with changes not committed (and its branch), a branch not merged, and both while the session is open |
+| `⌘K` | open a session: search every session (`Ctrl+A` all projects, `Ctrl+W` this repo's worktrees, `Ctrl+B` this branch). Three characters or more also search what was said in each, on every computer, and show the matching text. `⌃X` archives the highlighted session out of the list; `⌃D` shows the archived ones, where `⌃X` brings one back |
+| `⌘P` | find a file in the session folder by part of its name or path, and open it in the file pane (`/open`) |
+| `⌘\` | two sessions side by side, or one again (see Two at once) |
 | `⌘1` to `⌘9`, `⌘⇧[` / `⌘⇧]` | switch between panes and open sessions |
 | `⌘W` | close the session in the app (its host keeps running until idle) |
 | `⌘,` | settings: binder's `config.json` (also Binder > Settings… and `/settings`) |
@@ -133,19 +266,28 @@ Added for the sidebar:
 ## Settings
 
 `⌘,` shows binder's `config.json` and changes it, as `/settings` does in the TUI: the
-permission mode for new sessions, the sticky prompt, the app's appearance, the sidebar's text,
-and config dirs (add one by typing or choosing its folder, then its config dir; pick one to
-remove it). The file is written in place, so a symlink into a dotfiles repo stays one, and keys
-the app does not know stay. The sticky prompt, appearance and sidebar change at once; open
-sessions keep the permission mode and config dir they started with. The TUI's markdown style is
-there in the TUI only.
+permission mode for new sessions, the sticky prompt, artifacts, fast mode at the start of a
+session, the "always allow" choices, where claude.ai links open, pull request watching and
+auto-fix, the session terminal, the diff base, worktrees, the workflow card, the todo and plan
+panel, your editor, images, notifications, plan approval, the findings card, file editing, the
+preview's reload and server, the simulator's refresh rate, plugin changes, scheduled tasks,
+side chat, split view and windows, restarting sessions on a new build, the app's appearance,
+the sidebar's text, the status text, and config dirs (add one by typing or choosing its
+folder, then its config dir; pick one to remove it). The file is written in place, so a
+symlink into a dotfiles repo stays one, and keys the app does not know stay. Open sessions
+keep the permission mode, artifacts, fast mode, always allow, plan approval, pull request
+watching and auto-fix, workflow card and config dir they started with, so those apply to
+sessions opened from then on. The rest change at once, the diff base and plugin changes
+included (the session terminal, preview server and worktrees the next time one starts). The
+TUI's markdown style is there in the TUI only.
 
 Appearance is `"appearance": "light"` or `"dark"` in config.json; without it (Auto) the app is
 light or dark as macOS is. The TUI ignores it: a terminal's colors are the terminal's.
 
-Slash commands behave as in the TUI, with two differences: `/resume` opens the session picker
-and shows the session alongside the others instead of replacing this one, and `/exit` closes the
-session in the app rather than quitting.
+Slash commands behave as in the TUI, with these differences: `/resume` opens the session picker
+and shows the session alongside the others instead of replacing this one; `/exit` closes the
+session in the app rather than quitting; `/preview`, `/simulator` (`/sim`), `/open` and
+`/window` are the app's own (see [Layout](#layout)); and the TUI's `/markdown` is not offered.
 
 ## Sidebar text
 

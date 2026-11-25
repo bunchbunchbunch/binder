@@ -2,14 +2,17 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { chmodSync, existsSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, sep } from 'node:path';
-import { createInterface } from 'node:readline';
 import type { SessionHost } from '../host.js';
+import { onLines } from '../lines.js';
 import type { Block, Tab } from '../store.js';
 import type { ImageAttachment } from '../claudeProcess.js';
 import { addHistory, loadHistory } from '../history.js';
 import { completeCommand, completePath } from '../complete.js';
 import { sessionArtifacts } from '../artifacts.js';
 import { diff, wireBlock, wireState, type Source } from './wire.js';
+import { branches, sessionDiff } from '../gitDiff.js';
+import { binderConfig } from '../config.js';
+import { fileIndex, listDir, readText, writeText } from '../fileAccess.js';
 import { liveElsewhere, lockPath, socketPath } from './sockets.js';
 
 // Serves one session host on its unix socket (docs/remote-protocol.md). A
@@ -18,7 +21,8 @@ import { liveElsewhere, lockPath, socketPath } from './sockets.js';
 // `roots` (set by the gateway) confines what that viewer may reach.
 
 const PATCH_MS = 120;
-const MAX_LINE = 32 * 1024 * 1024;
+// A 32 MB PDF is about 45 MB once base64.
+const MAX_LINE = 64 * 1024 * 1024;
 
 type Viewer = { socket: Socket; roots?: string[]; attached: boolean };
 type Msg = Record<string, unknown> & { t?: string; id?: number };
@@ -64,15 +68,21 @@ const str = (v: unknown, name: string): string => {
   return v;
 };
 
+// Images, PDFs and text files (attachments.ts), each base64 with its name.
 function images(v: unknown): ImageAttachment[] {
   if (v === undefined) return [];
   if (!Array.isArray(v)) throw new Error('images must be a list');
   return v.map((i) => {
-    const { mediaType, data } = (i ?? {}) as Record<string, unknown>;
-    if (typeof mediaType !== 'string' || !/^image\/(png|jpeg|gif|webp)$/.test(mediaType) || typeof data !== 'string') throw new Error('bad image');
-    return { mediaType, data };
+    const { mediaType, data, name } = (i ?? {}) as Record<string, unknown>;
+    if (typeof mediaType !== 'string' || !/^(image\/(png|jpeg|gif|webp)|application\/pdf|text\/plain)$/.test(mediaType) || typeof data !== 'string') throw new Error('bad attachment');
+    return { mediaType, data, ...(typeof name === 'string' && { name: name.slice(0, 200) }) };
   });
 }
+
+// What only a headless `binder host` can do: `restart` ends the process so a
+// viewer can start the session again on binder's newer code. A host inside the
+// terminal app passes nothing, and refuses.
+export type HostServerOptions = { restart?: () => void };
 
 export class HostServer {
   private server: Server | null = null;
@@ -81,8 +91,15 @@ export class HostServer {
   private prev: Source | null = null;
   private timer: NodeJS.Timeout | null = null;
   private closed = false;
+  // binder was rebuilt since this process started, so it runs the older code.
+  private outdated = false;
+  // Restarting: claude's exit is part of it, not news for the viewers.
+  private quiet = false;
 
-  constructor(private readonly host: SessionHost) {
+  constructor(
+    private readonly host: SessionHost,
+    private readonly opts: HostServerOptions = {},
+  ) {
     host.on('change', this.schedule);
     host.on('cwd', this.schedule);
     host.on('effort', this.schedule);
@@ -95,7 +112,14 @@ export class HostServer {
   }
 
   private source(): Source {
-    return { state: this.host.state, cwd: this.host.cwd, effort: this.host.effort, runningSince: this.host.runningSince };
+    return { state: this.host.state, cwd: this.host.cwd, effort: this.host.effort, runningSince: this.host.runningSince, outdated: this.outdated };
+  }
+
+  /** binder's code on disk changed since this host started: viewers may restart it when idle. */
+  markOutdated(): void {
+    if (this.outdated) return;
+    this.outdated = true;
+    this.schedule();
   }
 
   /** Starts serving the host's current session. Throws if another live binder holds it. */
@@ -167,7 +191,7 @@ export class HostServer {
   }
 
   private schedule = (): void => {
-    if (this.timer || !this.viewerCount) return;
+    if (this.timer || this.quiet || !this.viewerCount) return;
     this.timer = setTimeout(this.tick, PATCH_MS);
   };
 
@@ -197,12 +221,9 @@ export class HostServer {
     this.viewers.add(viewer);
     socket.on('error', () => {});
     socket.on('close', () => this.viewers.delete(viewer));
-    const lines = createInterface({ input: socket, crlfDelay: Infinity });
-    // readline re-emits the socket's errors (EPIPE when a viewer vanished mid-write).
-    lines.on('error', () => {});
     let first = true;
-    lines.on('line', (line) => {
-      if (line.length > MAX_LINE) return socket.destroy();
+    onLines(socket, (line) => {
+      if (line.length > MAX_LINE) return viewer.attached ? this.tooBig(viewer, line) : socket.destroy();
       let msg: Msg;
       try {
         msg = JSON.parse(line);
@@ -219,6 +240,16 @@ export class HostServer {
         void this.handle(viewer, msg);
       }
     });
+  }
+
+  // A request over the line cap is refused, not taken in, and the viewer stays
+  // attached: the reply goes to its id when that is at either end of the line
+  // (the apps put it last, after the attachments), else a notice says why.
+  private tooBig(v: Viewer, line: string): void {
+    const error = `Too big to send: ${(line.length / 1024 / 1024).toFixed(1)} MB, over the ${MAX_LINE / 1024 / 1024} MB limit`;
+    const at = (s: string) => /[{,]"id":(\d+)[,}]/.exec(s)?.[1];
+    const id = at(line.slice(0, 1024)) ?? at(line.slice(-1024));
+    this.write(v, id === undefined ? { t: 'notice', text: error } : { t: 'reply', id: Number(id), ok: false, error });
   }
 
   private hello(v: Viewer, msg: Msg): void {
@@ -324,6 +355,10 @@ export class HostServer {
         return void (await host.setEffort(str(m.level, 'level')));
       case 'set_permission_mode':
         return void (await host.setPermissionMode(str(m.mode, 'mode')));
+      case 'cycle_mode':
+        return { message: await host.cycleMode() };
+      case 'set_fast_mode':
+        return { message: await host.setFastMode(typeof m.on === 'boolean' ? m.on : undefined) };
       case 'mcp_status': {
         const r = await host.session.request('mcp_status');
         return { servers: r.mcpServers ?? [] };
@@ -372,6 +407,50 @@ export class HostServer {
         }
         return { items: completePath(partial, host.cwd, 50) };
       }
+      case 'plugins':
+        return await host.plugins(m.available === true);
+      case 'plugin_action':
+        return { message: await host.pluginAction(str(m.action, 'action'), str(m.plugin, 'plugin'), typeof m.scope === 'string' ? m.scope : undefined) };
+      case 'side_question': {
+        const history = Array.isArray(m.history) ? (m.history as Array<Record<string, unknown>>).filter((h) => typeof h?.question === 'string' && typeof h?.response === 'string').map((h) => ({ question: h.question as string, response: h.response as string })) : [];
+        return await host.sideQuestion(str(m.question, 'question'), history);
+      }
+      // The Mac app's file pane: the session folder's files.
+      case 'file_list':
+        return await listDir(host.cwd, typeof m.dir === 'string' ? m.dir : '');
+      case 'file_index':
+        return await fileIndex(host.cwd);
+      case 'file_read':
+        return await readText(host.cwd, str(m.path, 'path'));
+      case 'file_write':
+        // config.json's fileEditing: false makes the file pane read-only for every viewer.
+        if (binderConfig().fileEditing === false) throw new Error('File editing is off (fileEditing in config.json)');
+        if (typeof m.text !== 'string') throw new Error('Missing text');
+        return await writeText(host.cwd, str(m.path, 'path'), m.text, typeof m.mtime === 'number' ? m.mtime : undefined, m.force === true);
+      case 'pr':
+        await host.refreshPr();
+        return { pr: host.state.pr ?? null };
+      case 'pr_fix':
+        return { message: host.fixPr() };
+      case 'pr_merge':
+        return { message: await host.mergePr() };
+      case 'diff':
+        // The session's changes against `base`: HEAD unless it or config.json's diffBase says.
+        return { ...(await sessionDiff(host.cwd, typeof m.base === 'string' && m.base ? m.base : (binderConfig().diffBase ?? 'HEAD'))) };
+      case 'branches':
+        return { branches: await branches(host.cwd) };
+      case 'image': {
+        // A tool result's image (toolUseId) or one sent with a prompt (turn: its
+        // place among the tab's turns, oldest first).
+        const tab = host.state.tabs.find((t) => t.id === m.tabId);
+        const turns = tab ? [...tab.earlier, tab] : [];
+        const index = Number(m.index ?? 0);
+        const call = typeof m.toolUseId === 'string' ? turns.map((turn) => findBlock(turn.blocks, m.toolUseId as string)).find(Boolean) : undefined;
+        const images = call?.kind === 'tool_use' ? call.result?.images : turns[Number(m.turn)]?.images;
+        const img = images?.[index];
+        if (!img) throw new Error('No such image');
+        return { mediaType: img.mediaType, data: img.data };
+      }
       case 'tool_detail': {
         const tab = host.state.tabs.find((t) => t.id === m.tabId);
         const toolId = str(m.toolUseId, 'toolUseId');
@@ -381,6 +460,17 @@ export class HostServer {
       }
       case 'restart':
         return host.restart();
+      case 'restart_host': {
+        const restart = this.opts.restart;
+        if (!restart) throw new Error('This session runs in the terminal app; restart binder there');
+        const s = host.state;
+        const working = host.busy || s.question || s.backgroundTasks.length > 0 || s.tabs.some((t) => t.bash && t.status === 'running');
+        if (working) throw new Error('Wait until the session is idle');
+        this.quiet = true;
+        // After this reply is written.
+        setImmediate(restart);
+        return;
+      }
       default:
         throw new Error(`Unknown request: ${String(m.t)}`);
     }

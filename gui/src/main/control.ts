@@ -1,7 +1,7 @@
 import { chmodSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
-import { createInterface } from 'node:readline';
 import type { ControlReply, ControlRequest } from '../shared/api';
+import { onLines } from './lines';
 
 // The control socket: other programs (a pane's program, a script a session
 // runs) ask the app to open or close a session. One JSON line in, one reply
@@ -50,9 +50,10 @@ export function listenControl(path: string, handle: (req: ControlRequest) => Pro
   const server = createServer({ allowHalfOpen: true }, (s) => {
     s.on('error', () => {});
     const reply = (r: ControlReply) => s.end(JSON.stringify(r) + '\n');
-    const lines = createInterface({ input: s });
-    lines.on('error', () => {});
-    lines.once('line', (line) => {
+    let first = true;
+    onLines(s, (line) => {
+      if (!first) return;
+      first = false;
       const req = parseControl(line);
       if (typeof req === 'string') return reply({ ok: false, error: req });
       handle(req).then(reply, (e: Error) => reply({ ok: false, error: e.message }));

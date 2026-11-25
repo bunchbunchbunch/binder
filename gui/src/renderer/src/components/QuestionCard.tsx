@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WireQuestion } from '@shared/wire';
+import { Markdown } from './Markdown';
 
 // AskUserQuestion and permission prompts, in place of the prompt box:
 // Up/Down move, a number picks, Space toggles in multi-select, Enter
@@ -9,6 +10,8 @@ import type { WireQuestion } from '@shared/wire';
 // elsewhere in the window never leaves the question unanswerable.
 
 const OTHER = 'Other (type your own)';
+// A plan's typed answer: what to change before Claude starts (bindertui's PLAN_FEEDBACK).
+const PLAN_FEEDBACK = 'No, and tell Claude what to change';
 
 function inputSummary(toolName: string | undefined, input: unknown): string {
   if (!input || typeof input !== 'object') return '';
@@ -28,7 +31,9 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
   const other = useRef<HTMLInputElement>(null);
 
   const q = question.questions[qi];
-  const labels = q.options.map((o) => o.label).concat(question.kind === 'ask' ? [OTHER] : []);
+  const plan = question.plan !== undefined;
+  const typed = question.kind === 'ask' ? OTHER : plan ? PLAN_FEEDBACK : undefined;
+  const labels = q.options.map((o) => o.label).concat(typed ? [typed] : []);
 
   // Focus follows the card only while it has the keyboard, so it never takes it from an open panel.
   useEffect(() => {
@@ -49,9 +54,9 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
   };
 
   const choose = (i: number) => {
-    if (labels[i] === OTHER) return setTyping('');
+    if (labels[i] === typed) return setTyping('');
     if (!q.multiSelect) return finish(labels[i]);
-    const chosen = labels.filter((l, j) => (picked.has(j) || j === i) && l !== OTHER);
+    const chosen = labels.filter((l, j) => (picked.has(j) || j === i) && l !== typed);
     finish(chosen.join(', '));
   };
 
@@ -82,7 +87,7 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
     else if (e.key === 'Escape') onDeny();
     else if (!e.metaKey && !e.ctrlKey && digit >= 1 && digit <= labels.length) {
       setCursor(digit - 1);
-      if (!q.multiSelect || labels[digit - 1] === OTHER) choose(digit - 1);
+      if (!q.multiSelect || labels[digit - 1] === typed) choose(digit - 1);
     } else if (e.key === ' ' && q.multiSelect) toggle(cursor);
     else if (e.key === 'Enter') choose(cursor);
     else handled = false;
@@ -99,7 +104,7 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
     return () => window.removeEventListener('keydown', h);
   }, [active]);
 
-  const detail = question.kind === 'permission' ? inputSummary(question.toolName, question.toolInput) : '';
+  const detail = question.kind === 'permission' && !plan && !question.workflow ? inputSummary(question.toolName, question.toolInput) : '';
   return (
     <div className="question" ref={box} tabIndex={-1}>
       <div className="head">
@@ -108,6 +113,23 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
         {question.questions.length > 1 && <span className="count">{`${qi + 1}/${question.questions.length}`}</span>}
       </div>
       {question.reason && <div className="reason">{question.reason}</div>}
+      {question.workflow && (
+        <div className="workflow-card">
+          {question.workflow.description && <div className="wf-desc">{question.workflow.description}</div>}
+          {question.workflow.phases.length > 0 && (
+            <ol className="wf-phases">
+              {question.workflow.phases.map((p, i) => (
+                <li key={i}>{p}</li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+      {plan && (
+        <div className="plan">
+          <Markdown text={question.plan!} />
+        </div>
+      )}
       {detail && <pre className="tool-input">{detail}</pre>}
       {labels.map((label, i) => {
         const desc = q.options[i]?.description;
@@ -115,12 +137,12 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
         return (
           <div
             key={label}
-            className={`option${i === cursor ? ' cursor' : ''}${label === OTHER ? ' other' : ''}`}
+            className={`option${i === cursor ? ' cursor' : ''}${label === typed ? ' other' : ''}`}
             onMouseMove={() => i !== cursor && setCursor(i)}
             onClick={() => {
               // A drag that selected the option's text is not a pick.
               if (!window.getSelection()?.isCollapsed) return;
-              if (q.multiSelect && label !== OTHER) toggle(i);
+              if (q.multiSelect && label !== typed) toggle(i);
               else choose(i);
             }}
           >
@@ -131,14 +153,14 @@ export function QuestionCard({ question, active, onAnswer, onDeny }: { question:
           </div>
         );
       })}
-      {typing !== null && <input ref={other} className="other-input" value={typing} placeholder="Type your answer, then Enter" onChange={(e) => setTyping(e.target.value)} />}
+      {typing !== null && <input ref={other} className="other-input" value={typing} placeholder={plan ? 'What should Claude change? Then Enter' : 'Type your answer, then Enter'} onChange={(e) => setTyping(e.target.value)} />}
       <div className="hint">
         {typing !== null ? 'Enter sends · Esc goes back' : q.multiSelect ? '↑↓ move · space toggles · ⏎ confirms' : '↑↓ move · ⏎ or a number selects'}
         {typing === null && (
           <>
             {' · '}
             <button className="decline" onClick={onDeny}>
-              {question.kind === 'ask' ? 'esc declines' : 'esc denies'}
+              {question.kind === 'ask' ? 'esc declines' : plan ? 'esc keeps planning' : 'esc denies'}
             </button>
           </>
         )}

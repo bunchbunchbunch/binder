@@ -1,9 +1,12 @@
+import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ClaudeProcess, buildArgs, type ImageAttachment } from './claudeProcess.js';
-import type { ClaudeEvent, ControlRequestEvent, OtherSystemEvent } from './events.js';
+import type { ClaudeEvent, ControlRequestEvent, FastModeState, OtherSystemEvent } from './events.js';
+import type { PermissionUpdate } from './permissions.js';
+import { binderConfig } from './config.js';
 import { appendLocal, appendPrompt, appendRaw, logPath, type LocalMarker } from './eventLog.js';
 import { childEnv, configDir, stateDir } from './paths.js';
 import type { SlashCommand } from './slashCommands.js';
@@ -26,10 +29,29 @@ export type PermissionRequest = {
   input: Record<string, unknown>;
   // Why the child is asking, e.g. a safety check that bypass mode does not skip.
   reason?: string;
+  // The rules (or mode switch) the child suggests for "always allow", unchecked.
+  suggestions?: unknown;
+  // ExitPlanMode: the mode the session was in before plan mode, if it entered it here.
+  returnMode?: string;
+  // What the child says the call is (a workflow re-run by name or script path has no script to read it from).
+  description?: string;
 };
+
+// Fast mode as the child reports it, and why it cannot serve, if it cannot.
+export type FastReport = { state?: FastModeState; reason?: string };
+
+export function fastReport(r: Record<string, unknown>): FastReport {
+  const state = r.fast_mode_state;
+  if (state !== 'on' && state !== 'off' && state !== 'cooldown') return {};
+  return { state, ...(typeof r.fast_mode_disabled_reason === 'string' && { reason: r.fast_mode_disabled_reason }) };
+}
 
 // Which CLI runs the session.
 export type Agent = 'claude' | 'codex';
+
+// Claude Code's decisionClassification: user_temporary for an allow once,
+// user_permanent for an "always allow".
+export type DecisionClassification = 'user_temporary' | 'user_permanent';
 
 export type SessionEvents = {
   event: [ClaudeEvent];
@@ -41,6 +63,8 @@ export type SessionEvents = {
   plan: [string];
   // The model and effort the child starts with, from `get_settings`.
   applied: [{ model?: string; effort?: string }];
+  // Fast mode as a new child starts, from its `initialize` response.
+  fast: [FastReport];
 };
 
 // Owns the child process for one session id: spawn, respawn after a crash,
@@ -67,6 +91,8 @@ export interface AgentSession extends EventEmitter<SessionEvents> {
   readonly cwd: string;
   start(): void;
   request(subtype: string, fields?: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>;
+  // The agent's own CLI (`claude plugin ...`), run with the session's binary, folder and config dir.
+  cli(args: string[], timeoutMs?: number): Promise<string>;
   respawn(): void;
   switchTo(sessionId: string, opts: SwitchOptions): void;
   movedTo(cwd: string): void;
@@ -76,8 +102,13 @@ export interface AgentSession extends EventEmitter<SessionEvents> {
   steer(prompt: string, tabId: number, images?: ImageAttachment[]): string;
   interrupt(): void;
   answerQuestion(req: PermissionRequest, answers: Record<string, string>): void;
-  allow(req: PermissionRequest): void;
+  // `updates`: an "always allow" answer's rules or mode switch; `classification`, how lasting the user meant it.
+  allow(req: PermissionRequest, updates?: PermissionUpdate[], classification?: DecisionClassification): void;
   deny(req: PermissionRequest, message?: string): void;
+  // Whether fast mode is asked for (it may still be unable to serve).
+  readonly fastMode: boolean;
+  // Asks for fast mode or stops asking, and reports what the child then says.
+  setFastMode(on: boolean): Promise<FastReport>;
   close(): Promise<void>;
 }
 
@@ -93,6 +124,11 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
   // The child's permission mode, and the one it was in when it entered plan mode.
   private mode: string | undefined;
   private beforePlan: string | undefined;
+  // config.json as this session started: its permission mode, artifacts,
+  // config dirs and fast mode wait for the next session (/clear included).
+  private config = binderConfig();
+  // Headless Claude Code takes fast mode only from flag settings, which a new child starts without.
+  private fast = this.config.fastMode === true;
 
   constructor(private readonly opts: SessionOptions) {
     super();
@@ -110,20 +146,29 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
     return this.dir;
   }
 
+  get fastMode(): boolean {
+    return this.fast;
+  }
+
   start(): void {
     const id = this.id;
-    const env = childEnv(this.dir);
+    const env = childEnv(this.dir, process.env, this.config);
     // Nothing to resume (linked to a todo but never used, or cleaned up by
     // Claude Code): start it fresh under the same id instead of failing.
     if (this.resume && !this.forkFrom && !findTranscript(configDir(env), id)) this.resume = false;
+    const args = buildArgs({ sessionId: id, resume: this.resume, passthrough: this.opts.passthrough.concat(this.extraArgs), forkFrom: this.forkFrom }, this.config);
     const proc = new ClaudeProcess({
       bin: this.opts.bin ?? process.env.BINDER_CLAUDE_BIN ?? 'claude',
-      args: buildArgs({ sessionId: id, resume: this.resume, passthrough: this.opts.passthrough.concat(this.extraArgs), forkFrom: this.forkFrom }),
+      args,
       cwd: this.dir,
       env,
       stderrPath: join(stateDir(), `${id}.stderr.log`),
     });
     this.proc = proc;
+    // The mode the child starts in, until its first init says: switched to
+    // plan before then, plan mode still knows where it came from.
+    const flag = args.lastIndexOf('--permission-mode');
+    this.mode = flag >= 0 ? args[flag + 1] : undefined;
     // Once the session exists on disk every later spawn must resume it.
     this.resume = true;
     this.forkFrom = undefined;
@@ -161,6 +206,9 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
             toolUseId: req.request.tool_use_id as string | undefined,
             input: (req.request.input as Record<string, unknown>) ?? {},
             reason: req.request.decision_reason as string | undefined,
+            suggestions: req.request.permission_suggestions,
+            ...(typeof req.request.description === 'string' && { description: req.request.description }),
+            ...(req.request.tool_name === 'ExitPlanMode' && this.beforePlan && { returnMode: this.beforePlan }),
           };
           // In plan mode entered from bypass mode, interactive Claude Code asks
           // only for its safety checks and the tools that need the user
@@ -179,11 +227,18 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
       if (this.proc === proc) this.emit('exit', { code, stderr: proc.recentStderr.slice() });
     });
     proc.start();
+    // Written before any prompt, so the first turn already runs in fast mode.
+    if (this.fast) this.request('apply_flag_settings', { settings: { fastMode: true } }).catch(() => {});
     this.request('initialize')
       .then((r) => {
         this.emit('commands', (r.commands as SlashCommand[] | undefined) ?? []);
         const plan = (r.account as { subscriptionType?: string } | undefined)?.subscriptionType;
         if (plan) this.emit('plan', plan);
+        const fast = fastReport(r);
+        // Asked for (config.json fastMode) but unable to serve: not asked for any
+        // more, so the first Alt+O tries again and says why.
+        if (this.fast && fast.state === 'off' && fast.reason !== 'pending') this.fast = false;
+        if (fast.state) this.emit('fast', fast);
       })
       .catch(() => {});
     this.request('get_settings')
@@ -192,6 +247,20 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
         if (applied) this.emit('applied', applied);
       })
       .catch(() => {});
+  }
+
+  /**
+   * The claude binary's own CLI (`claude plugin ...`), run as this session's
+   * child is: the same binary, folder and config dir. Resolves its stdout even
+   * when it exits non-zero (a --json result says how it went).
+   */
+  cli(args: string[], timeoutMs = 120_000): Promise<string> {
+    return new Promise((done, fail) => {
+      execFile(this.opts.bin ?? process.env.BINDER_CLAUDE_BIN ?? 'claude', args, { cwd: this.dir, env: childEnv(this.dir, process.env, this.config), timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, out, errOut) => {
+        if (err && !String(out).trim()) fail(new Error(String(errOut || err.message).trim().split('\n').pop() ?? 'claude failed'));
+        else done(String(out));
+      });
+    });
   }
 
   // A control request to the child (mcp_status, set_model, rewind_files, ...),
@@ -226,6 +295,10 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
     this.proc = null; // its exit is expected, not a crash
     void old?.close();
     this.forkFrom = fork ? this.id : undefined;
+    if (sessionId !== this.id) {
+      this.config = binderConfig();
+      this.fast = this.config.fastMode === true;
+    }
     this.id = sessionId;
     this.resume = resume;
     if (cwd) this.dir = cwd;
@@ -274,12 +347,21 @@ export class Session extends EventEmitter<SessionEvents> implements AgentSession
     this.proc?.respondControl(req.requestId, { behavior: 'allow', updatedInput: { ...req.input, answers } });
   }
 
-  allow(req: PermissionRequest): void {
-    this.proc?.respondControl(req.requestId, { behavior: 'allow', updatedInput: req.input });
+  allow(req: PermissionRequest, updates?: PermissionUpdate[], classification: DecisionClassification = 'user_permanent'): void {
+    const always = updates?.length ? { updatedPermissions: updates, decisionClassification: classification } : {};
+    this.proc?.respondControl(req.requestId, { behavior: 'allow', updatedInput: req.input, ...always });
   }
 
   deny(req: PermissionRequest, message = 'Denied by user'): void {
     this.proc?.respondControl(req.requestId, { behavior: 'deny', message });
+  }
+
+  // A second `initialize` answers with fast mode's state now (probed on CLI
+  // 2.1.331), so a toggle that cannot take effect says why before any turn runs.
+  async setFastMode(on: boolean): Promise<FastReport> {
+    await this.request('apply_flag_settings', { settings: { fastMode: on } });
+    this.fast = on;
+    return fastReport(await this.request('initialize').catch(() => ({})));
   }
 
   async close(): Promise<void> {

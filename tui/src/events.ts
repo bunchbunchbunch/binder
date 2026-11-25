@@ -24,7 +24,13 @@ export type InitEvent = {
   claude_code_version?: string;
   // Protocol features this CLI supports, e.g. interrupt_send_now_v1.
   capabilities?: string[];
+  fast_mode_state?: FastModeState;
+  fast_mode_disabled_reason?: string;
 };
+
+// Fast mode: off, on, or paused after a rate limit. Init, each result and
+// the initialize response carry it, with the reason it cannot serve, if any.
+export type FastModeState = 'off' | 'cooldown' | 'on';
 
 export type OtherSystemEvent = {
   type: 'system';
@@ -92,6 +98,8 @@ export type ResultEvent = {
   session_id: string;
   stop_reason?: string;
   terminal_reason?: string;
+  fast_mode_state?: FastModeState;
+  fast_mode_disabled_reason?: string;
 };
 
 export type ControlRequestEvent = {

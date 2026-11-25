@@ -1,5 +1,7 @@
-import { memo, useState } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import { memo, useMemo, useState } from 'react';
+import { openLink as openUrl } from '../store';
+import { MarkdownImage } from './Images';
+import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import hljs from 'highlight.js/lib/common';
 
@@ -49,7 +51,7 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
 }
 
 function openLink(href: string | undefined) {
-  if (href) void window.binder.openExternal(href);
+  if (href) void openUrl(href);
 }
 
 const components: Components = {
@@ -88,35 +90,31 @@ const components: Components = {
     if (type !== 'checkbox') return null;
     return <span className={`check${checked ? ' on' : ''}`}>{checked ? '✓' : ''}</span>;
   },
-  img({ src, alt }) {
-    // Never loaded on their own: text injected into Claude's context could
-    // otherwise make the app fetch any URL just by showing a response. A
-    // remote image is a link to open in the browser.
-    const url = typeof src === 'string' ? src : '';
-    const label = `Image: ${alt || url.split('/').pop() || 'untitled'}`;
-    if (!/^https?:/.test(url)) return <span className="md-image" title={url}>{label}</span>;
-    return (
-      <a
-        className="md-image"
-        href={url}
-        title={url}
-        onClick={(e) => {
-          e.preventDefault();
-          openLink(url);
-        }}
-      >
-        {label} ({URL.parse(url)?.host ?? url})
-      </a>
-    );
-  },
 };
+
+// Images need the session's folder (a relative path) and whether it runs on
+// this Mac. A remote one is never fetched on its own: text injected into
+// Claude's context could otherwise make the app fetch any URL just by showing
+// a response (MarkdownImage loads it when asked).
+function withImages(cwd: string | undefined, local: boolean | undefined): Components {
+  return {
+    ...components,
+    img({ src, alt }) {
+      return <MarkdownImage src={typeof src === 'string' ? src : ''} alt={alt ?? ''} cwd={cwd} local={local} />;
+    },
+  };
+}
 
 const plugins = [remarkGfm];
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+// A file:// image loads as its path would (react-markdown's own rule drops the URL).
+const urls: UrlTransform = (url, key) => (key === 'src' && /^file:\/\//i.test(url) ? url : defaultUrlTransform(url));
+
+export const Markdown = memo(function Markdown({ text, cwd, local }: { text: string; cwd?: string; local?: boolean }) {
+  const parts = useMemo(() => withImages(cwd, local), [cwd, local]);
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={plugins} components={components}>
+      <ReactMarkdown remarkPlugins={plugins} components={parts} urlTransform={urls}>
         {text}
       </ReactMarkdown>
     </div>

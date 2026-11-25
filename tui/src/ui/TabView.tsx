@@ -54,12 +54,13 @@ function useTextRenderer(): TextRenderer {
   }, []);
 }
 
-// `mdStyle` is only read to redraw the tab when the markdown style changes.
+// `mdStyle` and `images` are only read to redraw the tab when the markdown style or the images setting changes.
 // `sticky`: the tab's latest prompt stays at the top, above the rows that scroll.
 // `editing`: the tab's queued prompt open in the prompt for editing.
-type TabViewProps = { tab: Tab; width: number; detail: boolean; scrollActive: boolean; questionPending: boolean; expandedOverride?: boolean; pending?: PendingPrompt[]; mdStyle?: MarkdownStyle; sticky?: boolean; editing?: string };
+// `findings`: a code review's findings show as a card (config.json findingsCard, as the session started).
+type TabViewProps = { tab: Tab; width: number; detail: boolean; scrollActive: boolean; questionPending: boolean; expandedOverride?: boolean; pending?: PendingPrompt[]; mdStyle?: MarkdownStyle; images?: boolean; sticky?: boolean; editing?: string; findings?: boolean };
 
-function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expandedOverride, pending, sticky = false, editing }: TabViewProps) {
+function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expandedOverride, pending, sticky = false, editing, findings }: TabViewProps) {
   const viewportRef = useRef<DOMElement>(null);
   const { height: viewHeight } = useBoxMetrics(viewportRef);
   const [requested, setRequested] = useState(0);
@@ -95,7 +96,7 @@ function TabViewImpl({ tab, width, detail, scrollActive, questionPending, expand
   const headerRows = full ? viewHeight - 2 : Math.min(3, Math.floor(viewHeight / 4));
   const pinned = sticky && headerRows >= 1 ? pinnedTurn(tab) : undefined;
   const header = pinned ? stickyLines(pinned.prompt, textWidth, headerRows, !full) : [];
-  const { lines, workAt } = tabLines(tab, { width: textWidth, detail, expanded, expandEarlier: override === true, renderText, pending, pinned, editing });
+  const { lines, workAt } = tabLines(tab, { width: textWidth, detail, expanded, expandEarlier: override === true, renderText, pending, pinned, editing, findings });
   const rows = Math.max(0, viewHeight - header.length);
   const maxTop = Math.max(0, lines.length - rows);
   const top = follow ? maxTop : Math.min(requested, maxTop);

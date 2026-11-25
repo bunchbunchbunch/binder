@@ -3,15 +3,23 @@ import type { ImageAttachment } from '@shared/api';
 import { localCommand, visibleCommands, type LocalCommandName } from '../lib/commands';
 import { elapsed, fmtTokens, plural, shortPath } from '../lib/format';
 import { turnVerb } from '../lib/work';
-import { closeConn, errText, getState, openSession, reopen, request, sessionFacts, setActiveTab, setState, toast, useApp, type Conn } from '../store';
+import { closeConn, errText, getState, moveToWindow, openSession, reopen, request, restartHost, sessionFacts, setActiveTab, setState, toast, useApp, type Conn } from '../store';
+import { windowSession } from '../lib/window';
+import { openPreview } from '../lib/preview';
 import { DEFAULT_STATUS, renderTemplate, sessionFields } from '../lib/sidebarText';
 import type { BackgroundTask, WireBlock } from '@shared/wire';
 import { ConfirmPanel } from './Picker';
-import { ArtifactsPanel, CdPanel, ContextPanel, ChromePanel, cycleEffort, cycleModel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, PermissionModePanel, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
+import { ArtifactsPanel, CdPanel, FilesPanel, FindingsPanel, PluginsPanel, PrPanel, SchedulePanel, whenText, ContextPanel, ChromePanel, cycleEffort, cycleModel, EffortPanel, McpPanel, ModelPanel, openLatestArtifact, PermissionModePanel, RewindPanel, TasksPanel, taskMeta } from '../panels/SessionPanels';
 import { Composer, type ComposerHandle } from './Composer';
 import { QuestionCard } from './QuestionCard';
 import { HelpView } from './Shortcuts';
-import { StatusBar } from './StatusBar';
+import { PERMISSION_MODES, StatusBar } from './StatusBar';
+import { Pinned } from './Pinned';
+import { DiffPane } from '../panels/DiffPane';
+import { FilePane } from '../panels/FilePane';
+import { askSide, SideChat, type SideItem } from './SideChat';
+import { tabsFindings } from '../lib/findings';
+import { TermView } from './TermView';
 import { TabBar } from './TabBar';
 import { PromptText, Transcript, type PendingPrompt } from './Transcript';
 import { Welcome } from './Welcome';
@@ -21,7 +29,12 @@ import { Welcome } from './Welcome';
 // session on screen it takes the TUI's keys.
 
 type Panel =
-  | { kind: 'model' | 'effort' | 'mode' | 'cd' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' | 'context' }
+  | { kind: 'model' | 'effort' | 'mode' | 'cd' | 'mcp' | 'chrome' | 'rewind' | 'artifacts' | 'files' | 'pr' | 'findings' | 'context' }
+  // `base`: the branch /diff named.
+  | { kind: 'diff'; base?: string }
+  | { kind: 'filepane'; path?: string; quick?: boolean }
+  | { kind: 'schedule' }
+  | { kind: 'plugins' }
   // `taskId`: the task to show first.
   | { kind: 'tasks'; taskId?: string }
   | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
@@ -32,23 +45,51 @@ function waitsOnForeground(blocks: WireBlock[]): boolean {
 }
 
 const DOUBLE_ESC_MS = 600;
+// Attachments one prompt can carry, base64-encoded (the host's line cap is 64 MiB).
+const MAX_ATTACHED = 60 * 1024 * 1024;
 
 const isEditable = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
 
 type Props = {
   conn: Conn;
+  // On screen with the keyboard; `onScreen` is on screen at all (the other half of split view has no keyboard).
   visible: boolean;
+  onScreen: boolean;
+  // Its half in split view.
+  side?: 'left' | 'right';
   // A window-wide panel (session switcher, new session) has the keys.
   appPanelOpen: boolean;
   onSwitcher: (scope: 'folder' | 'all') => void;
   onSettings: () => void;
 };
 
-export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSettings }: Props) {
+export function SessionView({ conn: c, visible, onScreen, side, appPanelOpen, onSwitcher, onSettings }: Props) {
   const s = c.state;
   const detail = useApp((st) => st.detail);
   const sticky = useApp((st) => st.stickyPrompt);
   const statusText = useApp((st) => st.statusText);
+  const restartOnUpdate = useApp((st) => st.restartOnUpdate);
+  const todoPanel = useApp((st) => st.todoPanel);
+  const findingsCard = useApp((st) => st.findingsCard);
+  // /btw's side chat, while open.
+  const [sideItems, setSideItems] = useState<SideItem[] | null>(null);
+  // A turn that ends may have changed the app: its preview reloads (config.json previewReload).
+  const runningNow = s?.running ?? null;
+  const wasRunning = useRef(runningNow);
+  useEffect(() => {
+    const st = getState();
+    if (wasRunning.current !== null && runningNow === null && st.previewReload && st.previews[c.id]?.url) window.binder.previewReload(c.id);
+    wasRunning.current = runningNow;
+  }, [runningNow]);
+  const sideNow = useRef(sideItems);
+  sideNow.current = sideItems;
+  const ask = (question: string) => setSideItems(askSide(c.id, sideNow.current ?? [], question, setSideItems));
+  // Ctrl+T, as in Claude Code: every todo, and the plan.
+  const [pinnedOpen, setPinnedOpen] = useState(false);
+  // ⌃`: the session's own terminal under the prompt. It starts the first time and keeps running while hidden.
+  const [term, setTerm] = useState<'off' | 'shown' | 'hidden'>('off');
+  const toggleTerm = () => setTerm((t) => (t === 'shown' ? 'hidden' : 'shown'));
+  useEffect(() => () => window.binder.termStop(c.id), [c.id]);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [help, setHelp] = useState(false);
   // The queued prompt (by tab and text) the composer is editing.
@@ -56,6 +97,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   // Ctrl+E per tab, until the turn's automatic state changes (as in the TUI).
   const [overrides, setOverrides] = useState<Record<number, { value: boolean; auto: boolean }>>({});
   const composer = useRef<ComposerHandle>(null);
+  // Text in the prompt (the composer says when that changes).
+  const [typing, setTyping] = useState(Boolean(c.draft));
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -66,6 +109,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   // comes with the host's next patch), the one shown before stays.
   const shown = useRef<number | null>(null);
   const tab = s?.tabs.find((t) => t.id === c.activeTab) ?? s?.tabs.find((t) => t.id === shown.current) ?? s?.tabs.at(-1) ?? null;
+  // The latest code review's findings (/findings, the diff pane): the active tab's, else the newest tab's.
+  const review = useMemo(() => (s ? tabsFindings(s.tabs, Math.max(0, s.tabs.findIndex((t) => t.id === tab?.id))) : null), [s?.tabs, tab?.id]);
   shown.current = tab?.id ?? null;
   const questionPending = Boolean(s?.question && s.running === tab?.id);
   const auto = tab?.status === 'running' && !questionPending;
@@ -173,8 +218,53 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
         return closeConn(c.id);
       case 'settings':
         return onSettings();
-      case 'artifacts':
+      case 'files':
+        return tab ? setPanel({ kind: 'files' }) : toast('No tab yet');
+      case 'diff':
+        return setPanel({ kind: 'diff', base: args || undefined });
+      case 'pr':
+        return setPanel({ kind: 'pr' });
+      case 'findings':
+        return setPanel({ kind: 'findings' });
+      case 'open':
+        return setPanel(args ? { kind: 'filepane', path: args } : { kind: 'filepane', quick: true });
+      case 'plugins':
+        // A Codex session's host leaves /plugins and /tasks out of its commands: refused, in the TUI's words.
+        if (!c.commands.some((x) => x.name === name)) return toast(`/${name} is not available in a Codex session`, true);
+        return setPanel({ kind: 'plugins' });
+      case 'preview':
+        return void openPreview(c, args);
+      case 'simulator':
+        if (windowSession) return toast('The simulator shows in the main window: /simulator there opens it');
+        return setState((st) => ({ simulator: !st.simulator }));
+      case 'schedule': {
+        if (!args) return setPanel({ kind: 'schedule' });
+        if (c.computer) return toast('Scheduled tasks run on this Mac: add one from a session here', true);
+        const words = args.trim().split(/\s+/);
+        // binder reads the when; the rest is the prompt (bindertui's splitWhen).
+        return void window.binder
+          .schedule(['add', '--cwd', s?.cwd ?? c.cwd, '--', ...words])
+          .then((r) => {
+            const t = r as { name: string; when: string };
+            void window.binder.schedule(['list']).then((list) => {
+              const row = (list as Array<{ name: string; describe: string; next: number | null }>).find((x) => x.name === t.name);
+              toast(`Scheduled "${t.name}": ${row?.describe ?? t.when}${row?.next ? `, next ${whenText(row.next)}` : ''}${getState().schedules ? '' : ' (scheduled tasks are off in config.json)'}`);
+            });
+          })
+          .catch((e) => toast(errText(e), true));
+      }
+      case 'btw':
+        // Off: Claude Code gets it as typed.
+        if (!getState().sideChat) return void request(c.id, 'send', { text: `/btw ${args}`.trim() }).catch((e) => toast(errText(e), true));
+        if (!args) return setSideItems((items) => items ?? []);
+        return ask(args);
+      case 'window':
+        if (windowSession) return toast('This session has its own window already');
+        return getState().splitView ? moveToWindow(c.id) : toast('Session windows are off (config.json splitView)');
       case 'tasks':
+        if (!c.commands.some((x) => x.name === name)) return toast(`/${name} is not available in a Codex session`, true);
+        return setPanel({ kind: name });
+      case 'artifacts':
       case 'mcp':
       case 'chrome':
         return setPanel({ kind: name });
@@ -189,6 +279,14 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
       }
       case 'rename':
         return void request(c.id, 'rename', { title: args }).catch((e) => toast(`/rename: ${errText(e)}`, true));
+      case 'permission-mode':
+        if (!args) return setPanel({ kind: 'mode' });
+        return void request(c.id, 'set_permission_mode', { mode: args === 'manual' ? 'default' : args })
+          .then(() => toast(`Permission mode: ${PERMISSION_MODES[args === 'manual' ? 'default' : args]?.[0] ?? args}`))
+          .catch((e) => toast(`/permission-mode: ${errText(e)}`, true));
+      case 'fast':
+        if (args && args !== 'on' && args !== 'off') return toast('/fast takes on or off', true);
+        return void run('set_fast_mode', args ? { on: args === 'on' } : undefined);
       case 'resume': {
         if (!args) return onSwitcher('folder');
         const hit = getState().sessions.find((r) => r.id.startsWith(args));
@@ -235,20 +333,29 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   };
   const removeQueued = (tabId: number, prompt: string) => void request(c.id, 'edit_queued', { tabId, prompt, text: '' }).catch((e) => toast(errText(e), true));
 
-  const send = (text: string, images: ImageAttachment[], followup: boolean) => {
+  // False: refused, so the composer keeps the prompt; a promise of false: the send failed, and it gets it back.
+  const send = (text: string, images: ImageAttachment[], followup: boolean): false | Promise<boolean> | void => {
     setHelp(false);
     if (editing) return saveEdit(text);
     const local = /^!\s*\S/.test(text) ? null : localCommand(text);
     if (local) return runLocal(local.name, local.args);
+    // Too big for the host's line: refused before anything goes.
+    const encoded = images.reduce((n, a) => n + a.data.length, 0);
+    if (encoded > MAX_ATTACHED) return toast(`The attachments come to ${Math.round(encoded / 1024 / 1024)} MB encoded, over the 60 MB one prompt can carry`, true), false;
     // Ctrl+Enter keeps the prompt in the current tab: on a running turn it is
     // sent at once (Claude Code's "send now"), otherwise it waits its turn.
     const into = followup && tab && !tab.bash ? tab.id : undefined;
-    request(c.id, 'send', { text, ...(images.length && { images }), ...(into !== undefined && { tabId: into }) })
-      .then((r) => {
+    return request(c.id, 'send', { text, ...(images.length && { images }), ...(into !== undefined && { tabId: into }) }).then(
+      (r) => {
         if (typeof r.tabId === 'number') setActiveTab(c.id, r.tabId);
         follow.current = true;
-      })
-      .catch((e) => toast(errText(e), true));
+        return true;
+      },
+      (e) => {
+        toast(errText(e), true);
+        return false;
+      },
+    );
   };
 
   const moveTab = (delta: number) => {
@@ -266,6 +373,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     if (ctrl && e.key === ']') return take(), void openLatestArtifact(c.id);
     if (panel) return;
     if (help && e.key === 'Escape') return take(), setHelp(false);
+    // ⌘P: find a file in the session folder, to read or edit.
+    if (e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && e.key === 'p') return take(), setPanel({ kind: 'filepane', quick: true });
     if (ctrl && e.key === 'r') {
       take();
       if (c.status === 'detached' || c.status === 'failed') reopen(c.id);
@@ -297,12 +406,18 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
       );
     }
     if (ctrl && e.key === 'e') return take(), toggleWork();
+    if (ctrl && e.key === 't') return take(), setPinnedOpen((o) => !o);
+    if (ctrl && e.code === 'Backquote') return take(), toggleTerm();
     if (ctrl && (e.key === 'n' || e.key === 'ArrowRight')) return take(), moveTab(1);
     if (ctrl && e.key === 'ArrowLeft') return take(), moveTab(-1);
     // pi's keys: Ctrl+L picks a model, Ctrl+P / Shift+Ctrl+P cycle models, Shift+Tab cycles the effort level.
     if (ctrl && e.key === 'l') return take(), runLocal('model', '');
     if (ctrl && e.key.toLowerCase() === 'p') return take(), void cycleModel(c.id, e.shiftKey ? -1 : 1).then(toast, (err) => toast(errText(err), true));
     if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) return take(), void cycleEffort(c.id).then(toast, (err) => toast(errText(err), true));
+    // Claude Code's keys for these: ⌥M steps the permission mode (its Shift+Tab, taken by effort here), ⌥O fast mode.
+    const alt = e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey;
+    if (alt && e.code === 'KeyM') return take(), void run('cycle_mode');
+    if (alt && e.code === 'KeyO') return take(), void run('set_fast_mode');
     if (e.altKey && !e.metaKey && !e.ctrlKey && /^Digit[1-9]$/.test(e.code)) {
       take();
       const t = s.tabs[Number(e.code.slice(5)) - 1];
@@ -335,6 +450,16 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
     return () => window.removeEventListener('keydown', h);
   }, [visible]);
 
+  // binder was rebuilt since this session's host started, so new requests
+  // (a new key, a new panel) would fail there: restart the host on the new
+  // build once nothing would be cut short. Not while you are typing into it.
+  const working = Boolean(s && (busy || s.question || s.backgroundTasks?.length || s.tabs.some((t) => t.bash && t.status === 'running')));
+  useEffect(() => {
+    if (!restartOnUpdate || !s?.outdated || c.status !== 'attached' || working || panel || editing) return;
+    if (visible && typing) return;
+    restartHost(c.id);
+  }, [restartOnUpdate, s?.outdated, c.status, working, panel, editing, visible, typing]);
+
   const renderPanel = (p: Panel) => {
     const common = { conn: c.id, close: () => setPanel(null), active: visible && !appPanelOpen };
     switch (p.kind) {
@@ -354,6 +479,20 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
         return <RewindPanel {...common} onRewound={(text) => text && composer.current?.setText(text)} />;
       case 'artifacts':
         return <ArtifactsPanel {...common} />;
+      case 'pr':
+        return <PrPanel {...common} pr={s?.pr ?? null} />;
+      case 'findings':
+        return <FindingsPanel {...common} review={review} />;
+      case 'schedule':
+        return <SchedulePanel {...common} />;
+      case 'plugins':
+        return <PluginsPanel {...common} />;
+      case 'filepane':
+        return <FilePane conn={c.id} close={() => setPanel(null)} path={p.path} quick={p.quick} running={s?.running !== null && s?.running !== undefined} local={!c.computer} cwd={s?.cwd ?? c.cwd} />;
+      case 'diff':
+        return <DiffPane conn={c.id} close={() => setPanel(null)} onSent={() => setPanel(null)} review={findingsCard ? review : null} initialBase={p.base} />;
+      case 'files':
+        return tab ? <FilesPanel {...common} tab={tab} cwd={s?.cwd ?? c.cwd} local={!c.computer} /> : null;
       case 'context':
         return <ContextPanel {...common} />;
       case 'tasks':
@@ -385,7 +524,8 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
   const commands = useMemo(() => visibleCommands(c.commands), [c.commands]);
 
   return (
-    <div className="session" hidden={!visible}>
+    // A click in the other half of split view gives it the keyboard.
+    <div className={`session${side ? ` split-${side}` : ''}${side && visible ? ' focused' : ''}`} hidden={!onScreen} onMouseDownCapture={() => !visible && setState({ active: c.id })}>
       {s?.title && (
         <div className="session-title" title={s.title}>
           {s.title}
@@ -446,7 +586,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
           {help ? (
             <HelpView commandCount={commands.length} />
           ) : s && tab ? (
-            <Transcript tab={tab} ctx={{ conn: c.id, tabId: tab.id, cwd: s.cwd, detail }} expanded={expanded} expandEarlier={expandEarlier} onToggle={toggleWork} pending={pending} pinned={pinned} queued={{ edit: (p) => editQueued(tab.id, p), remove: (p) => removeQueued(tab.id, p) }} />
+            <Transcript tab={tab} ctx={{ conn: c.id, session: s.sessionId, tabId: tab.id, cwd: s.cwd, detail, local: !c.computer }} expanded={expanded} expandEarlier={expandEarlier} onToggle={toggleWork} pending={pending} pinned={pinned} queued={{ edit: (p) => editQueued(tab.id, p), remove: (p) => removeQueued(tab.id, p) }} />
           ) : s ? (
             <Welcome model={s.model} effort={s.effort} cwd={s.cwd} />
           ) : null}
@@ -461,6 +601,17 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
             <span className="side">{s.queue.length ? `${s.queue.length} queued` : ''}</span>
           </div>
           {s.backgroundTasks?.length ? <BackgroundTasks tasks={s.backgroundTasks} onOpen={(taskId) => setPanel({ kind: 'tasks', taskId })} /> : null}
+          {todoPanel && <Pinned conn={c.id} tabs={s.tabs} open={pinnedOpen} onToggle={() => setPinnedOpen(!pinnedOpen)} />}
+          {sideItems && (
+            <SideChat
+              items={sideItems}
+              onAsk={ask}
+              onClose={() => {
+                setSideItems(null);
+                composer.current?.focus();
+              }}
+            />
+          )}
           {s.question && (
             <QuestionCard
               key={s.question.requestId}
@@ -483,6 +634,7 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
               draft={c.draft}
               onEditQueued={lastQueued && !editing ? () => editQueued(lastQueued.tabId, lastQueued.prompt) : undefined}
               editing={editing !== null}
+              onTyping={setTyping}
               onSubmit={send}
             />
           </div>
@@ -494,8 +646,33 @@ export function SessionView({ conn: c, visible, appPanelOpen, onSwitcher, onSett
               if (kind === 'cd' && busy) return toast('Wait for the running turn to finish (or press Esc) before /cd', true);
               setPanel({ kind });
             }}
+            onFast={() => void run('set_fast_mode', { on: false })}
           />
-          <Toast />
+          {visible && <Toast />}
+        </div>
+      )}
+      {term !== 'off' && s && (
+        <div className="session-term" hidden={term === 'hidden'}>
+          <div className="session-term-head">
+            <span>Terminal · {shortPath(s.cwd)}</span>
+            <button title="Hide it (⌃`)" onClick={() => setTerm('hidden')}>
+              ×
+            </button>
+          </div>
+          <TermView
+            name={`term:${c.id}`}
+            label="The shell"
+            className="session-term-body"
+            focus={visible && term === 'shown'}
+            start={(cols, rows) => window.binder.termStart(c.id, s.cwd, c.computer, cols, rows)}
+            onKey={(e) => {
+              if (!(e.ctrlKey && e.code === 'Backquote')) return false;
+              e.preventDefault();
+              setTerm('hidden');
+              composer.current?.focus();
+              return true;
+            }}
+          />
         </div>
       )}
       {panel && renderPanel(panel)}

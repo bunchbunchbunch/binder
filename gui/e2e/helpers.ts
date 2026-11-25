@@ -52,8 +52,20 @@ export async function launch(fixture: string, env: Record<string, string> = {}, 
       CLAUDE_CONFIG_DIR: join(tmp, 'claude'),
       BINDER_GUI_USER_DATA: join(tmp, 'gui'),
       BINDER_GUI_BACKGROUND: '1',
+      // Hosts ask gh about the branch's PR: never the real one (a test sets the fake).
+      BINDER_GH: '/nonexistent/gh',
+      // "Open in Simulator" only logs (fakeXcrun.mjs), never opens the real Simulator.
+      BINDER_OPEN: join(ROOT, 'e2e/fakeXcrun.mjs'),
       ...env,
     },
+  });
+  // macOS notifications are recorded, not shown: tests read them with notes().
+  await app.evaluate(({ Notification }) => {
+    const g = globalThis as unknown as { __notes: unknown[] };
+    g.__notes = [];
+    Notification.prototype.show = function (this: unknown) {
+      g.__notes.push(this);
+    };
   });
   const page = await app.firstWindow();
   await page.locator('.sidebar').waitFor();

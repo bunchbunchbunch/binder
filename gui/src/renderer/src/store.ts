@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react';
+import { windowSession } from './lib/window';
+import type { PreviewState } from './lib/preview';
 import type { ControlReply, ControlRequest, OpenRequest, PaneInfo, SessionRow, SidebarConfig, SidebarScriptInput } from '@shared/api';
-import { applyPatch, type HostMessage, type SlashCommand, type WireState } from '@shared/wire';
-import { addHome } from './lib/format';
+import { applyPatch, type HostMessage, type SlashCommand, type WireQuestion, type WireState } from '@shared/wire';
+import { addHome, firstLine } from './lib/format';
 import { sessionFields, sessionStatus, sidebarTemplates, usesField, type SessionFacts } from './lib/sidebarText';
 
 // The window's state: the sessions it shows (one host connection each), the
@@ -36,6 +38,8 @@ export type Conn = {
   unseen: boolean;
   branch?: string;
   script?: string;
+  // Restarting its host on a newer binder (restartHost): the modes to put back once it is up.
+  restarting?: { mode: string | null; fast: boolean };
 };
 
 export type Toast = { id: number; text: string; error?: boolean };
@@ -48,6 +52,8 @@ export type AppState = {
   webPanes: string[];
   // What is on screen: a connection id, or a pane's paneId().
   active: string | null;
+  // Split view (⌘\): the two sessions side by side, left and right; `active` is the one with the keyboard.
+  split: [string, string] | null;
   // config.json's computers: the other computers whose sessions show here.
   computers: string[];
   // config.json's defaultComputer: where new sessions start; null for this Mac.
@@ -64,10 +70,37 @@ export type AppState = {
   statusText: string | null;
   // config.json sidebar: what an open session's row says.
   sidebar: SidebarConfig;
+  // config.json restartOnUpdate: an idle session whose host is outdated restarts it (on unless false).
+  restartOnUpdate: boolean;
+  // config.json notifications: macOS notifications for sessions you are not looking at (on unless false).
+  notifications: boolean;
+  // config.json showImages: images drawn in the transcript (on unless false).
+  showImages: boolean;
+  // config.json todoPanel: the latest todos and plan pinned above the prompt (on unless false).
+  todoPanel: boolean;
+  // config.json findingsCard: a code review's findings as a card to fix from (on unless false).
+  findingsCard: boolean;
+  // config.json fileEditing: the file pane can edit and save (on unless false).
+  fileEditing: boolean;
+  // config.json splitView: ⌘\ shows two sessions side by side, and /window moves one to a window of its own (on unless false).
+  splitView: boolean;
+  // config.json sideChat: /btw asks side questions in the side chat (on unless false).
+  sideChat: boolean;
+  // config.json schedules: scheduled tasks run while the app is open (on unless false).
+  schedules: boolean;
+  // config.json previewReload: a session's preview reloads when its turn ends (on unless false).
+  previewReload: boolean;
+  // The simulator pane (/simulator), open beside the sessions; config.json simulatorFps its refreshes a second.
+  simulator: boolean;
+  simulatorFps: number;
+  // Each session's preview (/preview), by connection.
+  previews: Record<string, PreviewState>;
+  // The claude.ai page open beside the sessions (a doc, sheet or artifact), its title once loaded, or why it failed.
+  sidePane: { url: string; title: string | null; error: string | null } | null;
   toast: Toast | null;
 };
 
-let state: AppState = { conns: [], panes: [], webPanes: [], active: null, computers: [], defaultComputer: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, statusText: null, sidebar: {}, toast: null };
+let state: AppState = { conns: [], panes: [], webPanes: [], active: null, split: null, computers: [], defaultComputer: null, sessions: [], sessionsError: null, detail: false, stickyPrompt: true, statusText: null, sidebar: {}, restartOnUpdate: true, notifications: true, showImages: true, todoPanel: true, findingsCard: true, fileEditing: true, splitView: true, sideChat: true, schedules: true, previewReload: true, simulator: false, simulatorFps: 1, previews: {}, sidePane: null, toast: null };
 const listeners = new Set<() => void>();
 
 export const getState = () => state;
@@ -112,6 +145,9 @@ function keepTab(activeTab: number | null, s: WireState): number | null {
   return s.tabs.at(-1)?.id ?? null;
 }
 
+// A session on screen: the active one, or either half of split view.
+const onScreen = (id: string) => state.active === id || Boolean(state.split?.includes(id));
+
 // The turn clock and ✅: a turn that starts resets the clock, and one that
 // ends records its length and, unless you are looking at it, stays unseen
 // until you do. The host says when its turn started, so the clock keeps
@@ -125,14 +161,28 @@ function turnClock(c: Conn, s: WireState): Partial<Conn> {
   const now = Date.now();
   const out: Partial<Conn> = { runningSince: since(now), unseen: false };
   if (was !== null) out.lastTurnMs = s.tabs.find((t) => t.id === was)?.result?.durationMs ?? (c.runningSince === null ? null : now - c.runningSince);
-  if (was !== null && s.running === null) out.unseen = !(state.active === c.id && document.hasFocus());
+  if (was !== null && s.running === null) out.unseen = !(onScreen(c.id) && document.hasFocus());
   return out;
 }
 
 export function handleMessage(id: string, msg: HostMessage): void {
   // A connection the window already let go.
-  if (!state.conns.some((c) => c.id === id)) return;
+  const was = state.conns.find((c) => c.id === id);
+  if (!was) return;
   if (msg.t === 'notice') return toast(msg.text);
+  // A host restarting on a newer binder: reopen the session once the old line
+  // has closed, and put back its modes once the new host answers.
+  if (was.restarting && (msg.t === 'ended' || msg.t === 'detached')) {
+    if (msg.t === 'detached') reopen(id);
+    return;
+  }
+  if (was.restarting && msg.t === 'snapshot') {
+    const { mode, fast } = was.restarting;
+    updateConn(id, (c) => ({ ...c, restarting: undefined }));
+    if (mode) void request(id, 'set_permission_mode', { mode }).catch(() => {});
+    if (fast) void request(id, 'set_fast_mode', { on: true }).catch(() => {});
+    if (state.active === id) toast('Restarted this session on the new build of binder');
+  }
   updateConn(id, (c) => {
     switch (msg.t) {
       case 'snapshot': {
@@ -204,7 +254,7 @@ export function openSession(req: OpenRequest & { title?: string; draft?: string 
   const id = crypto.randomUUID();
   const conn: Conn = { id, sessionId: req.sessionId ?? null, cwd: req.cwd, ...(req.computer && { computer: req.computer }), title: req.title ?? 'New session', status: 'opening', state: null, commands: [], activeTab: null, draft: req.draft, runningSince: null, lastTurnMs: null, unseen: false };
   setState((s) => ({ conns: [...s.conns, conn], active: id }));
-  void attach(id, { cwd: req.cwd, sessionId: req.sessionId, resume: req.resume, args: req.args, computer: req.computer });
+  void attach(id, { cwd: req.cwd, sessionId: req.sessionId, resume: req.resume, args: req.args, computer: req.computer, ...(req.worktree && { worktree: true }) });
 }
 
 // A session that never got a prompt has no conversation for claude to resume.
@@ -218,9 +268,58 @@ export function reopen(id: string): void {
   void attach(id, c.sessionId ? { cwd: c.cwd, sessionId: c.sessionId, resume: !fresh(c), computer: c.computer } : { cwd: c.cwd, computer: c.computer });
 }
 
+/**
+ * Restarts a session's host on the binder now installed, for a host that says
+ * it is outdated: the host ends (it refuses unless the session is idle) and
+ * handleMessage reopens the session, resumed, with the modes it had.
+ */
+export function restartHost(id: string): void {
+  const c = state.conns.find((x) => x.id === id);
+  if (!c?.state || c.restarting || c.status !== 'attached') return;
+  const keep = { mode: c.state.permissionMode, fast: c.state.fastMode === 'on' || c.state.fastMode === 'cooldown' };
+  updateConn(id, (x) => ({ ...x, restarting: keep }));
+  request(id, 'restart_host').catch(() => updateConn(id, (x) => ({ ...x, restarting: undefined })));
+}
+
+// The side pane's page, kept when it closes so ⌃\ opens it again.
+let lastSide: string | null = null;
+
+/** Opens a link from a response or a panel: a claude.ai page beside the session (config.json claudeLinks), anything else in the browser. */
+export async function openLink(url: string): Promise<void> {
+  const where = await window.binder.openLink(url);
+  if (where === 'pane') {
+    lastSide = url;
+    setState({ sidePane: { url, title: null, error: null } });
+  } else toast(`Opened ${url}`);
+}
+
+/** ⌃\: closes the side pane, or opens its last page again. */
+export function toggleSidePane(): void {
+  if (state.sidePane) return setState({ sidePane: null });
+  if (lastSide) void openLink(lastSide);
+}
+
+window.binder.onSidePane((e) => {
+  const side = state.sidePane;
+  if (!side) return;
+  if (e.t === 'title') setState({ sidePane: { ...side, title: e.title } });
+  else if (e.t === 'url') {
+    // The page it moved to is the one ⌃\ brings back.
+    lastSide = e.url;
+    setState({ sidePane: { ...side, url: e.url, error: null } });
+  } else setState({ sidePane: { ...side, error: e.error } });
+});
+
 /** Lets a session go from the window; its host keeps running until it is idle. */
 export function closeConn(id: string): void {
   void window.binder.close(id);
+  // Its preview, and the dev server it started, go with it.
+  if (state.previews[id]) {
+    window.binder.previewServerStop(id);
+    window.binder.previewClose(id);
+    const { [id]: _gone, ...previews } = state.previews;
+    setState({ previews });
+  }
   setState((s) => {
     const i = s.conns.findIndex((c) => c.id === id);
     const conns = s.conns.filter((c) => c.id !== id);
@@ -345,10 +444,47 @@ subscribe(() => {
   }
 });
 
+// Split view follows the keyboard: a session picked while two show (⌘1-9, the
+// sidebar) takes the place of the one that had it; a pane, or a session
+// closing, ends the split.
+let splitFrom: string | null = null;
+subscribe(() => {
+  const { split, active, conns } = state;
+  const was = splitFrom;
+  splitFrom = active;
+  if (!split || !active || split.includes(active)) return;
+  const live = split.every((id) => conns.some((c) => c.id === id));
+  if (paneName(active) !== null || !conns.some((c) => c.id === active) || !live) return setState({ split: null });
+  const at = split.indexOf(was ?? '');
+  const next: [string, string] = at === 1 ? [split[0], active] : [active, split[1]];
+  setState({ split: next[0] === next[1] ? null : next });
+});
+
+/** ⌘\: two sessions side by side (the active one and the next), or one again. */
+export function toggleSplit(): void {
+  if (state.split) return setState({ split: null });
+  const at = state.conns.findIndex((c) => c.id === state.active);
+  if (at < 0 || state.conns.length < 2) return toast(state.conns.length < 2 ? 'Split view needs two open sessions' : 'Split view shows sessions, not panes');
+  setState({ split: [state.conns[at].id, state.conns[(at + 1) % state.conns.length].id] });
+}
+
+/** /window: the session moves to a window of its own. */
+export function moveToWindow(id: string): void {
+  const c = state.conns.find((x) => x.id === id);
+  const sessionId = c?.sessionId ?? c?.state?.sessionId;
+  if (!c || !sessionId) return toast('The session has not started yet', true);
+  window.binder.newWindow({ sessionId, cwd: c.state?.cwd ?? c.cwd, ...(c.computer && { computer: c.computer }), title: sessionTitle(c), ...(fresh(c) && { fresh: true }) }).then(
+    () => closeConn(id),
+    (e) => toast(errText(e), true),
+  );
+}
+
 // The open sessions and the active one, saved for the next launch as soon as
-// they change (only opening, closing or switching sessions changes them).
+// they change (only opening, closing or switching sessions changes them). A
+// session's own window keeps no layout.
 let lastSaved = '';
 subscribe(() => {
+  if (windowSession) return;
   const layout = {
     open: state.conns.filter((c) => c.sessionId).map((c) => ({ sessionId: c.sessionId!, cwd: c.cwd, ...(fresh(c) && { fresh: true }), ...(c.computer && { computer: c.computer }) })),
     active: paneName(state.active) !== null ? state.active : (state.conns.find((c) => c.id === state.active)?.sessionId ?? null),
@@ -359,11 +495,33 @@ subscribe(() => {
   void window.binder.saveLayout(layout);
 });
 
+// What a notification says: for a question, what is asked; for a finished
+// turn, the first line of its answer.
+function questionNote(q: WireQuestion): string {
+  if (q.plan !== undefined) return 'A plan is ready for your approval';
+  if (q.kind === 'permission') {
+    const input = q.toolInput as { command?: unknown; file_path?: unknown } | undefined;
+    const what = typeof input?.command === 'string' ? input.command : typeof input?.file_path === 'string' ? input.file_path : '';
+    return `Allow ${q.toolName}?${what ? ` ${firstLine(what)}` : ''}`;
+  }
+  return q.questions[0]?.question ?? 'Claude has a question';
+}
+
+function finishedNote(s: WireState): string {
+  const tab = [...s.tabs].reverse().find((t) => t.result);
+  if (!tab) return 'Finished';
+  if (tab.status === 'error') return 'Stopped with an error';
+  const text = [...tab.blocks].reverse().find((b) => b.kind === 'text' && b.text.trim());
+  return text && text.kind === 'text' ? firstLine(text.text) : 'Finished';
+}
+
 // What shows outside the window: the Dock badge counts sessions waiting on
-// you, a new question bounces the Dock icon while you are in another app, and
-// quitting while turns run asks first.
+// you, a new question bounces the Dock icon while you are in another app, a
+// question or a finished turn in a session you are not looking at posts a
+// notification, and quitting while turns run asks first.
 let lastStatus = '';
 const seenQuestions = new Map<string, string>();
+const seenUnseen = new Map<string, boolean>();
 subscribe(() => {
   const waiting = state.conns.filter((c) => c.state?.question).length;
   const working = state.conns.filter((c) => c.state && (c.state.running !== null || c.state.queue.length > 0)).length;
@@ -372,12 +530,17 @@ subscribe(() => {
     lastStatus = status;
     window.binder.setStatus({ waiting, working });
   }
+  const away = (c: Conn) => !onScreen(c.id) || !document.hasFocus();
   for (const c of state.conns) {
-    const q = c.state?.question?.requestId;
-    if (q && seenQuestions.get(c.id) !== q) {
-      seenQuestions.set(c.id, q);
+    const q = c.state?.question;
+    if (q && seenQuestions.get(c.id) !== q.requestId) {
+      seenQuestions.set(c.id, q.requestId);
       window.binder.attention();
+      if (state.notifications && away(c)) window.binder.notify({ title: sessionTitle(c), body: questionNote(q), conn: c.id });
     }
+    // turnClock marks a turn that ends while you are elsewhere unseen.
+    if (c.unseen && !seenUnseen.get(c.id) && c.state && state.notifications) window.binder.notify({ title: sessionTitle(c), body: finishedNote(c.state), conn: c.id });
+    seenUnseen.set(c.id, c.unseen);
   }
 });
 

@@ -15,37 +15,44 @@ Features binder needs to keep up with Claude Code's desktop app and terminal UI,
 2. [x] **Session names everywhere.** The Mac app's sidebar, `⌘K`, `/resume` in both apps, and the phone's list show the session's name (from Claude Code's `custom-title` lines, or binder's index for Codex), falling back to the first prompt.
 3. [x] **Codex patch diffs in the Mac app.** Codex `Patch` calls have no view in the Mac app, so their diffs aren't shown. Render them like the terminal app does. Mac app only.
 4. [x] **Cost and context display.** Context as a share of the model's window (from `modelUsage`), a breakdown on click in the Mac app (`get_context_usage`), and the session's cost summed across every child binder ran. Setting: `statusText`, a template (`{context}`, `{maxTokens}`, `{percent}`, `{cost}`); the default leaves cost out.
-5. [ ] **Fast mode toggle.** A key and a status-bar indicator to turn fast mode on and off, using the `fastMode` setting and the result's `fast_mode_state`.
-6. [ ] **Live permission mode switch in the terminal app.** The Mac app can change mode mid-session; the terminal app can't. Add a key and a picker. Mac app already done.
-7. [ ] **"Always allow" on permission prompts.** Show the rules Claude suggests with each prompt as extra choices, and send the chosen one back as `updatedPermissions`.
-8. [ ] **Plan approval.** Render the plan from `ExitPlanMode` as markdown, with the choices approve and switch to auto mode, approve with manual approval, or keep planning.
-9. [ ] **Notifications.** macOS notifications from the Mac app when a turn finishes or a question arrives in a session you aren't looking at, and a bell in the terminal app. Setting: on by default, one switch to turn each off.
-10. [ ] **Doc, sheet, and artifact side pane.** Open claude.ai doc, sheet, and artifact links in a pane beside the session instead of the browser. Mac app only. Setting: open in pane or in browser.
-11. [ ] **Images in the transcript.** Show images from tool results, markdown images, and images you send. Mac app inline; terminal app inline where the terminal supports it (iTerm2), placeholder elsewhere. Setting: show images.
+5. [x] **Fast mode toggle.** `Alt+O` (Claude Code's key) and `/fast [on|off]` in both apps, with `↯ fast` in the status bar while it runs. Headless Claude Code takes fast mode only from flag settings (`apply_flag_settings`), then reports `fast_mode_state` on init, each result, and a second `initialize`; when it cannot serve, binder says why and stops asking. Setting: `fastMode` (start sessions with it on; off by default).
+6. [x] **Live permission mode switch in the terminal app.** `Alt+M` steps to the next mode, skipping any Claude Code refuses (Claude Code's `Shift+Tab`, which binder gives to effort), and `/permission-mode` (`/mode`) picks one. The Mac app gets the same key and command.
+7. [x] **"Always allow" on permission prompts.** Claude Code's `permission_suggestions` become up to two extra choices, its rules and its mode switch kept apart, sent back as `updatedPermissions`. They are plain option labels, so the Mac app gets them with no protocol change (the phone app still offers only Allow and Deny). Setting: `alwaysAllow` (on unless false).
+8. [x] **Plan approval.** The plan from `ExitPlanMode` shows as markdown (in the terminal app's transcript, in the Mac app's question card) with `Yes, and use auto mode`, `Yes, and auto-accept edits`, `Yes, and manually approve edits` (each approves and sets the mode in the same answer, a `setMode` update), `No, keep planning`, and typed changes. A session that entered plan mode from bypass gets `Yes, and bypass permissions` first. The plan stays in the transcript once answered. Setting: `planApproval` (on unless false).
+9. [x] **Notifications.** The Mac app posts a macOS notification when a question arrives or a turn finishes in a session you aren't looking at (another session on screen, or the app in the background); a click brings that session forward. The terminal app rings the bell for the same while its window is in the background (focus reporting, `ESC[?1004h`). Settings: `notifications` and `bell`, both on unless false.
+10. [x] **Doc, sheet, and artifact side pane.** A claude.ai link in a response, `/artifacts`, or `⌃]` opens in a pane to the right of the session (a view of its own with persistent claude.ai cookies, navigation kept to claude.ai and its sign-in), with Open in browser and close; `⌃\` toggles it. Mac app only. Setting: `claudeLinks` (`pane`, the default, or `browser`).
+11. [x] **Images in the transcript.** A tool result's images and the images sent with a prompt are kept (the wire carries their kind and size; `image` fetches the bytes). The Mac app shows them inline, plus markdown images of files on this Mac, and web images behind a load button (never fetched on their own). The terminal app draws them inline in iTerm2 (OSC 1337, in rows it leaves, once the screen settles) and shows a caption elsewhere. Setting: `showImages` (on unless false).
 
 ## Medium
 
-12. [ ] **Clickable file paths.** File paths in tool calls open in your editor or reveal in Finder. Setting: which editor.
-13. [ ] **Pinned todo, task, and plan panel.** Keep the latest todo list and the current plan visible instead of only inline in the transcript. Setting: show panel.
-14. [ ] **Non-image attachments.** Attach PDFs and other files, not just images, by drag-drop or paste.
-15. [ ] **Archive sessions and full-text search.** Archive sessions out of the list, and search transcript text in `⌘K` and `/resume`, not just first prompts.
-16. [ ] **Workflow approval and progress.** Show the workflow approval card (phases, once, always, deny) and live phase progress in the background tasks view.
-17. [ ] **Worktree per session.** Option to start a session in a new git worktree, and clean it up when the session is archived. Setting: worktree location and branch prefix.
-18. [ ] **Diff review pane.** All of a session's changes in one pane, with comments on individual lines sent back to Claude together, and compare against a branch. Mac app; the terminal app gets a `/diff` view.
-19. [ ] **Per-session terminal pane.** An interactive terminal in the session's folder, beside the transcript. Mac app (builds on the existing xterm.js panes).
-20. [ ] **PR monitoring.** The session's pull request with CI status, auto-fix for failing checks and review comments, and merge when ready, through `gh`. Setting: auto-fix on or off.
+12. [x] **Clickable file paths.** In the Mac app a tool call's file is a link: a click opens it in your editor (at a Read's line), Option-click shows it in Finder. The terminal app links tool paths with OSC 8 (Cmd+click in iTerm2) and both apps have `/files`: the tab's files, Enter opens one, `f` shows it in Finder. Setting: `editor` (`open`, a command, or one with `{file}` and `{line}`).
+13. [x] **Pinned todo, task, and plan panel.** The session's latest todo list (TodoWrite, or the Task tools by task number, whichever Claude touched last) and its current plan stay above the prompt in one line each; `Ctrl+T` (Claude Code's key) or a click opens every item and the plan's markdown. Setting: `todoPanel` (on unless false).
+14. [x] **Non-image attachments.** PDFs and text files go with a prompt, dropped or pasted (the Mac app's composer; the terminal app turns a dropped file's path, or a file copied in Finder, into one), as `[File #n: name]`: a PDF as a `document` block Claude reads, a text file as its text. Other files stay `@path` mentions. Codex takes text files, not PDFs.
+15. [x] **Archive sessions and full-text search.** `Ctrl+X` in `/resume` and `⌘K` archives a session out of the list (`Ctrl+D` shows the archived ones); typing three characters or more also searches what was said (prompts and replies, cached as text in binder's state dir: 1.3 s cold, 0.3 s warm over 430 MB here), on every computer in the Mac app. `binder sessions --search`/`--archive`/`--unarchive` back both.
+16. [x] **Workflow approval and progress.** A workflow asks with a card read from its script's `meta` (name, description, phases): `Run once`, `Always allow workflows` (a `Workflow` rule in `.claude/settings.local.json`), `Deny`. Its run keeps `workflow_progress` on the background task: the row says its phase and agents done, `/tasks` lists phases with each agent's state, model, time and result. Setting: `workflowCard` (on unless false).
+17. [x] **Worktree per session.** `binder --worktree [name]` (and `⌥⏎` in the Mac app's New session panel) makes a git worktree of the folder's repo on its own branch and starts the session there; archiving the session removes the worktree and its branch unless that would lose work (changes not committed, a branch not merged), and says what it kept. Setting: `worktrees` (`location`, default `../{repo}-worktrees`; `branchPrefix`, default `binder/`).
+18. [x] **Diff review pane.** `/diff` shows the session folder's changes against HEAD or a branch (untracked files as new): in the Mac app a pane where a click on a line adds a comment and Send hands them all to Claude in one prompt, each with its file, line and the line itself; in the terminal app a scrollable view. Host requests `diff` and `branches`. Setting: `diffBase` (HEAD by default).
+19. [x] **Per-session terminal pane.** `⌃`` opens the session's own terminal under the prompt (xterm.js over a pty, shared with config panes): your login shell in the session's folder, over ssh for another computer's session. Its keys stay its own (Esc, Ctrl+C) apart from ⌘ keys and `⌃``; it keeps running while hidden and ends with the session. Mac app only. Setting: `terminalCommand`.
+20. [x] **PR monitoring.** The session's pull request with CI status, auto-fix for failing checks and review comments, and merge when ready, through `gh`. Setting: auto-fix on or off.
 
 ## Low
 
-21. [ ] **Code review findings card.** Show `/code-review` findings as a card with "Fix this one" and "Apply fixes". Builds on the diff pane.
-22. [ ] **File viewer and editor pane.** Browse and edit files in the session's folder. Mac app.
-23. [ ] **Split view and multiple windows.** Two sessions side by side, or a session in its own window. Mac app.
-24. [ ] **Side chat (`/btw`).** Ask a question about the session without adding it to the transcript.
-25. [ ] **Scheduled tasks.** Run a prompt on a schedule in a fresh session, with run history.
-26. [ ] **Plugin and connector management.** Browse, install, enable, and disable plugins; list connectors.
-27. [ ] **Browser preview pane.** Start the project's dev server and preview it beside the session, with Claude able to check its own changes. Mac app.
-28. [ ] **iOS Simulator pane.** Stream the simulator beside the session. Mac app.
+21. [x] **Code review findings card.** Show `/code-review` findings as a card with "Fix this one" and "Apply fixes". Builds on the diff pane.
+22. [x] **File viewer and editor pane.** Browse and edit files in the session's folder. Mac app.
+23. [x] **Split view and multiple windows.** Two sessions side by side, or a session in its own window. Mac app.
+24. [x] **Side chat (`/btw`).** Ask a question about the session without adding it to the transcript.
+25. [x] **Scheduled tasks.** Run a prompt on a schedule in a fresh session, with run history.
+26. [x] **Plugin and connector management.** Browse, install, enable, and disable plugins; list connectors.
+27. [x] **Browser preview pane.** Start the project's dev server and preview it beside the session, with Claude able to check its own changes. Mac app.
+28. [x] **iOS Simulator pane.** Stream the simulator beside the session. Mac app.
 29. [ ] **Cloud sessions.** Run or hand off sessions to Anthropic's cloud. Depends on what the CLI exposes; investigate first.
+    - **Investigated (November 2026, Claude Code 2.1.331), not built.** What the CLI exposes:
+      - `claude -p --cloud "<task>"` creates a cloud session (Claude Code on the web) from the folder: it uploads the working tree, local changes included, and prints `Created cloud session: <id>`, a `View:` claude.ai/code URL, and `Resume with: claude --teleport <id>`. The task goes in the description; a positional prompt or piped stdin alongside it is refused. `--ref <branch|tag|sha>` sets the base; `--on-branch` resumes a branch; `--environment ccpool_...` runs it on a self-hosted environment.
+      - `claude -p --cloud <id|url> "<message>"` sends a message to an existing cloud session ("Sent to cloud session."); stream-json is refused there, so binder cannot host a cloud session the way it hosts a local one.
+      - `claude --teleport [id]` pulls a cloud session down to continue locally; `--cloud` with `--resume <local id>` moves a local session up (strings: "Moved from a local session").
+      - Org policy can deny it (`cloudSessionsDeniedByOrgPolicy`).
+    - **Proposed:** `/cloud <task>` runs the first form in the session's folder and opens the View URL in the side pane (a claude.ai page); `/cloud` alone hands off this session (`--cloud --resume <id>`); `/teleport` lists the account's cloud sessions to pull one down into a new binder session. A setting turns `/cloud` off.
+    - **Needs before building:** a go-ahead, since every real test creates cloud sessions on the account and uploads the folder, and a throwaway repo to try it in. Fake claude covers the rest.
 
 ## Not planned
 

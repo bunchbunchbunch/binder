@@ -19,27 +19,45 @@ export function SessionSwitcher({ cwd, computer, initialScope, close }: { cwd: s
   const [scope, setScope] = useState<Scope>(cwd ? initialScope : 'all');
   const [query, setQuery] = useState('');
   const [repo, setRepo] = useState<{ worktrees: string[]; branch: string | null } | null>(null);
+  // Archived sessions stay out until ⌃D shows them (and only them).
+  const [archived, setArchived] = useState(false);
+  // What was said in each session, searched once the query is three characters long.
+  const [hits, setHits] = useState<{ query: string; found: Map<string, string> } | null>(null);
   useEffect(() => void refreshSessions(), []);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3) return setHits(null);
+    let live = true;
+    const t = setTimeout(() => {
+      void window.binder.searchSessions(q).then((found) => live && setHits({ query: q, found: new Map(found.map((h) => [`${h.computer ?? ''}:${h.id}`, h.snippet])) }));
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [query]);
   useEffect(() => {
     if (cwd) void window.binder.repoInfo(cwd, computer).then(setRepo);
   }, [cwd, computer]);
 
+  const said = hits?.query === query.trim() ? hits.found : null;
   const shown = useMemo(() => {
     const q = query.toLowerCase();
     return sessions.filter((s) => {
+      if (Boolean(s.archived) !== archived) return false;
       if (scope !== 'all' && !sameComputer(s.computer, computer)) return false;
       if (scope === 'folder' && s.cwd !== cwd) return false;
       if (scope === 'worktrees' && !repo?.worktrees.includes(s.cwd)) return false;
       if (scope === 'branch' && (!repo?.branch || s.branch !== repo.branch || !repo.worktrees.includes(s.cwd))) return false;
-      return !q || `${s.title} ${s.cwd} ${s.branch ?? ''} ${s.id} ${s.computer ?? ''}`.toLowerCase().includes(q);
+      return !q || `${s.title} ${s.cwd} ${s.branch ?? ''} ${s.id} ${s.computer ?? ''}`.toLowerCase().includes(q) || said?.has(`${s.computer ?? ''}:${s.id}`);
     });
-  }, [sessions, scope, query, cwd, computer, repo]);
+  }, [sessions, scope, query, cwd, computer, repo, archived, said]);
 
   const key = (s: SessionRow) => `${s.computer ?? ''}:${s.id}`;
   const items: PickerItem[] = shown.map((s) => ({
     key: key(s),
     label: s.title || '(no prompt yet)',
-    description: [s.computer, s.live ? (s.running ? 'running' : 'live') : ago(s.lastUsedAt), s.branch, scope === 'folder' ? undefined : shortPath(s.cwd)].filter(Boolean).join(' · '),
+    description: hits?.found.get(key(s)) ?? [s.computer, s.live ? (s.running ? 'running' : 'live') : ago(s.lastUsedAt), s.branch, scope === 'folder' ? undefined : shortPath(s.cwd)].filter(Boolean).join(' · '),
     mark: s.running ? '◐' : s.live ? '●' : ' ',
     markColor: s.running ? '#E8C07D' : '#98C379',
   }));
@@ -49,26 +67,41 @@ export function SessionSwitcher({ cwd, computer, initialScope, close }: { cwd: s
     openSession({ cwd: s.cwd, sessionId: s.id, resume: true, title: s.title, computer: s.computer });
   };
   const toggle = (s: Scope) => setScope(scope === s ? (cwd ? 'folder' : 'all') : s);
+  const archive = (item: PickerItem) => {
+    const s = shown.find((x) => key(x) === item.key);
+    if (!s) return;
+    window.binder
+      .archiveSession(s.id, !archived, s.computer)
+      .then((said) => {
+        // "Archived", or what else happened (a worktree removed, or kept and why).
+        toast(said === 'Archived' || said === 'Unarchived' ? `${said} ${s.title || s.id.slice(0, 8)}` : said);
+        return refreshSessions();
+      })
+      .catch((e) => toast(errText(e), true));
+  };
+  const searching = query.trim().length >= 3 && !said;
   return (
     <Picker
-      key={scope}
-      title={`Open a session: ${SCOPE_TITLE[scope]}${scope === 'branch' && repo?.branch ? ` (${repo.branch})` : ''}`}
-      subtitle={error ?? undefined}
+      key={`${scope}:${archived}`}
+      title={`${archived ? 'Archived sessions' : 'Open a session'}: ${SCOPE_TITLE[scope]}${scope === 'branch' && repo?.branch ? ` (${repo.branch})` : ''}`}
+      subtitle={error ?? (searching ? 'Searching what was said…' : undefined)}
       items={items}
-      search={{ query, onChange: setQuery, placeholder: 'Search prompts, folders, branches' }}
+      search={{ query, onChange: setQuery, placeholder: 'Search prompts, folders, branches, and what was said' }}
       onSelect={pick}
       onCancel={close}
-      empty={query ? 'No session matches' : 'No sessions here yet'}
+      empty={query ? 'No session matches' : archived ? 'No archived sessions here' : 'No sessions here yet'}
       hint={
         <>
-          ↑↓ move · ⏎ open · <kbd>⌃A</kbd> all projects · <kbd>⌃W</kbd> worktrees · <kbd>⌃B</kbd> this branch · esc close
+          ↑↓ move · ⏎ open · <kbd>⌃X</kbd> {archived ? 'unarchive' : 'archive'} · <kbd>⌃D</kbd> {archived ? 'back' : 'archived'} · <kbd>⌃A</kbd> all projects · <kbd>⌃W</kbd> worktrees · <kbd>⌃B</kbd> this branch · esc close
         </>
       }
-      onKey={(e) => {
+      onKey={(e, item) => {
         if (!e.ctrlKey) return false;
         if (e.key === 'a') return toggle('all'), true;
         if (e.key === 'w' && cwd) return toggle('worktrees'), true;
         if (e.key === 'b' && cwd) return toggle('branch'), true;
+        if (e.key === 'd') return setArchived(!archived), true;
+        if (e.key === 'x' && item) return archive(item), true;
         return false;
       }}
     />
@@ -157,10 +190,11 @@ export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; 
     ...typedOn.map((k) => ({ key: JSON.stringify([k, typed!.path]), label: `Start in ${typed!.path}${on(k)}` })),
     ...matches.map((f) => ({ key: JSON.stringify([f.computer, f.dir]), label: baseName(f.dir), description: shortPath(f.dir) + on(f.computer) })),
   ];
-  const start = (dir: string, k: string) => {
+  // `worktree`: in a new git worktree of the folder's repo (⌥⏎).
+  const start = (dir: string, k: string, worktree = false) => {
     close();
     // Another computer's ~ is its own home: binder start there reads it so.
-    openSession(k ? { cwd: dir, computer: k } : { cwd: dir.replace(/^~(?=$|\/)/, window.binder.home) });
+    openSession({ ...(k ? { cwd: dir, computer: k } : { cwd: dir.replace(/^~(?=$|\/)/, window.binder.home) }), ...(worktree && { worktree }) });
   };
   const pick = (item: PickerItem) => {
     const [k, dir] = JSON.parse(item.key) as [string, string];
@@ -177,10 +211,14 @@ export function NewSessionPanel({ cwd, computer, close }: { cwd: string | null; 
       empty={query ? 'No folder matches' : 'No recent folders'}
       hint={
         <>
-          ↑↓ move · ⏎ start · <kbd>⌘O</kbd> choose in Finder{computers.length ? ' (this Mac)' : ''} · esc close
+          ↑↓ move · ⏎ start · <kbd>⌥⏎</kbd> start in a new worktree · <kbd>⌘O</kbd> choose in Finder{computers.length ? ' (this Mac)' : ''} · esc close
         </>
       }
-      onKey={(e) => {
+      onKey={(e, item) => {
+        if (e.altKey && !e.metaKey && !e.ctrlKey && e.key === 'Enter' && item) {
+          const [k, dir] = JSON.parse(item.key) as [string, string];
+          return start(dir, k, true), true;
+        }
         if (!e.metaKey || e.ctrlKey || e.altKey || e.key !== 'o') return false;
         void window.binder.chooseFolder().then((dir) => dir && start(dir, ''));
         return true;
@@ -228,7 +266,17 @@ function useIsDirectory(path: string): boolean | null {
 type SidebarLine = 'title' | 'subtitle' | 'script' | 'status';
 const SIDEBAR_LABEL: Record<SidebarLine, string> = { title: 'Sidebar title', subtitle: 'Sidebar subtitle', script: 'Sidebar script', status: 'Status bar text' };
 
-type SettingsView = { kind: 'list' | 'mode' | 'appearance' | 'folder' } | { kind: 'dir' | 'mapping'; folder: string } | { kind: 'sidebar'; line: SidebarLine };
+// How a file can open (bindertui's EDITOR_PRESETS).
+const EDITORS: Array<[string, string]> = [
+  ['open', "The file's default app"],
+  ['code -g {file}:{line}', 'Visual Studio Code, at the line'],
+  ['cursor -g {file}:{line}', 'Cursor, at the line'],
+  ['zed {file}:{line}', 'Zed, at the line'],
+  ['subl {file}:{line}', 'Sublime Text, at the line'],
+  ['idea --line {line} {file}', 'IntelliJ IDEA, at the line'],
+];
+
+type SettingsView = { kind: 'list' | 'mode' | 'appearance' | 'folder' | 'editor' } | { kind: 'worktree'; field: 'location' | 'branchPrefix' } | { kind: 'diffBase' } | { kind: 'terminal' } | { kind: 'previewCommand' } | { kind: 'dir' | 'mapping'; folder: string } | { kind: 'sidebar'; line: SidebarLine };
 
 /**
  * binder's config.json: permission mode, sticky prompt, appearance, the
@@ -259,7 +307,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
       const s = await window.binder.saveSettings(patch);
       setSettings(s);
       setError(null);
-      setState({ stickyPrompt: s.stickyPrompt, statusText: s.statusText, sidebar: s.sidebar });
+      setState({ stickyPrompt: s.stickyPrompt, statusText: s.statusText, sidebar: s.sidebar, restartOnUpdate: s.restartOnUpdate, notifications: s.notifications, showImages: s.showImages, todoPanel: s.todoPanel, findingsCard: s.findingsCard, fileEditing: s.fileEditing, splitView: s.splitView, sideChat: s.sideChat, schedules: s.schedules, previewReload: s.previewReload, simulatorFps: s.simulatorFps });
       toast(msg);
       return true;
     } catch (e) {
@@ -284,6 +332,121 @@ export function SettingsPanel({ close }: { close: () => void }) {
         items={items}
         initial={Math.max(0, items.findIndex((m) => m.key === current))}
         onSelect={(i) => void save({ permissionMode: i.key === 'unset' ? null : i.key }, `Permission mode: ${i.label}`).then((ok) => ok && back())}
+        onCancel={back}
+        hint="↑↓ move · ⏎ select · esc back"
+      />
+    );
+  }
+
+  if (view.kind === 'previewCommand') {
+    const typed = query.trim();
+    const current = settings?.previewCommand ?? null;
+    const items: PickerItem[] = [
+      ...(typed ? [{ key: 'save', label: `Save: ${typed}`, description: "Run in the session's folder to serve its preview" }] : []),
+      ...(current ? [{ key: 'default', label: 'Use the default', description: "package.json's dev script (or start)" }] : []),
+    ];
+    return (
+      <Picker
+        key="previewCommand"
+        title="What starts a session's preview (/preview)"
+        subtitle={error ?? `Now: ${current ?? "package.json's dev script (or start)"}`}
+        items={items}
+        search={{ query, onChange: setQuery, placeholder: 'A command, e.g. npm run dev -- --port 5173' }}
+        onSelect={(i) => void save({ previewCommand: i.key === 'save' ? typed : null }, `Preview server: ${i.key === 'save' ? typed : "package.json's dev script"}`).then((ok) => ok && (setLast('previewCommand'), back()))}
+        onCancel={back}
+        empty="Type a command"
+        hint="⏎ saves · esc back"
+      />
+    );
+  }
+
+  if (view.kind === 'terminal') {
+    const typed = query.trim();
+    const current = settings?.terminalCommand ?? null;
+    const items: PickerItem[] = [
+      ...(typed ? [{ key: 'save', label: `Save: ${typed}`, description: "Run with your shell ($SHELL -c) in the session's folder" }] : []),
+      ...(current ? [{ key: 'default', label: 'Use the default', description: 'your login shell' }] : []),
+    ];
+    return (
+      <Picker
+        key="terminal"
+        title="What a session's terminal (⌃`) runs"
+        subtitle={error ?? `Now: ${current ?? 'your login shell'}`}
+        items={items}
+        search={{ query, onChange: setQuery, placeholder: 'A command, e.g. exec fish -l' }}
+        onSelect={(i) => void save({ terminalCommand: i.key === 'save' ? typed : null }, `Terminal: ${i.key === 'save' ? typed : 'your login shell'}`).then((ok) => ok && (setLast('terminal'), back()))}
+        onCancel={back}
+        empty="Type a command"
+        hint="⏎ saves · esc back"
+      />
+    );
+  }
+
+  if (view.kind === 'diffBase') {
+    const typed = query.trim();
+    const current = settings?.diffBase ?? 'HEAD';
+    const items: PickerItem[] = [
+      ...(typed && typed !== 'HEAD' ? [{ key: typed, label: `Save: ${typed}`, description: 'A branch (or any ref) to compare against' }] : []),
+      { key: 'HEAD', label: 'HEAD', description: 'What is not committed yet (the default)', mark: current === 'HEAD' ? '✓' : ' ', markColor: '#98C379' },
+    ];
+    return (
+      <Picker
+        key="diffBase"
+        title="What the diff pane compares against"
+        subtitle={error ?? `Now: ${current}`}
+        items={items}
+        search={{ query, onChange: setQuery, placeholder: 'Type a branch' }}
+        onSelect={(i) => void save({ diffBase: i.key === 'HEAD' ? null : i.key }, `Diff base: ${i.key}`).then((ok) => ok && (setLast('diffBase'), back()))}
+        onCancel={back}
+        hint="⏎ saves · esc back"
+      />
+    );
+  }
+
+  if (view.kind === 'worktree') {
+    const { field } = view;
+    const typed = query.trim();
+    const fallback = field === 'location' ? '../{repo}-worktrees' : 'binder/';
+    const current = settings?.worktrees[field] ?? fallback;
+    const saveField = (v: string) => {
+      const next = { ...settings?.worktrees, [field]: v === fallback ? undefined : v };
+      const kept = Object.fromEntries(Object.entries(next).filter(([, x]) => x !== undefined));
+      void save({ worktrees: Object.keys(kept).length ? kept : null }, `Worktree ${field === 'location' ? 'folder' : 'branch prefix'}: ${v}`).then((ok) => ok && (setLast(`wt:${field}`), back()));
+    };
+    const items: PickerItem[] = [
+      ...(typed ? [{ key: 'save', label: `Save: ${typed}`, description: field === 'location' ? 'Relative to the repo; ~ and {repo} are filled in' : 'Each new branch starts with it' }] : []),
+      ...(current !== fallback ? [{ key: 'default', label: 'Use the default', description: fallback }] : []),
+    ];
+    return (
+      <Picker
+        key="worktree"
+        title={field === 'location' ? 'Where new worktrees go (⌥⏎ in New session)' : "The start of a worktree's branch name"}
+        subtitle={error ?? `Now: ${current}`}
+        items={items}
+        search={{ query, onChange: setQuery, placeholder: 'Type a value' }}
+        onSelect={(i) => saveField(i.key === 'save' ? typed : fallback)}
+        onCancel={back}
+        empty="Type a value"
+        hint="⏎ saves · esc back"
+      />
+    );
+  }
+
+  if (view.kind === 'editor') {
+    const typed = query.trim();
+    const current = settings?.editor ?? 'open';
+    const items: PickerItem[] = [
+      ...(typed && !EDITORS.some(([c]) => c === typed) ? [{ key: typed, label: `Use: ${typed}`, description: 'A command; {file} and {line} are filled in, or the path goes last' }] : []),
+      ...EDITORS.filter(([c]) => !typed || c.includes(typed)).map(([c, about]) => ({ key: c, label: c, description: about, mark: c === current ? '✓' : ' ', markColor: '#98C379' })),
+    ];
+    return (
+      <Picker
+        key="editor"
+        title="Editor: how a file from a tool call opens"
+        subtitle={error ?? `Now: ${current}`}
+        items={items}
+        search={{ query, onChange: setQuery, placeholder: 'Type a command, or pick one' }}
+        onSelect={(i) => void save({ editor: i.key === 'open' ? null : i.key }, `Editor: ${i.key}`).then((ok) => ok && (setLast('editor'), back()))}
         onCancel={back}
         hint="↑↓ move · ⏎ select · esc back"
       />
@@ -438,6 +601,31 @@ export function SettingsPanel({ close }: { close: () => void }) {
         { key: 'mode', label: 'Permission mode', description: settings.permissionMode ?? "Claude Code's default" },
         { key: 'sticky', label: 'Sticky prompt', description: settings.stickyPrompt ? 'On' : 'Off' },
         { key: 'artifacts', label: 'Artifacts', description: settings.artifacts ? 'On: Claude can publish live pages to claude.ai' : 'Off' },
+        { key: 'fast', label: 'Fast mode', description: settings.fastMode ? 'On when a session starts (⌥O turns it off)' : 'Off when a session starts (⌥O turns it on)' },
+        { key: 'always', label: 'Always allow', description: settings.alwaysAllow ? 'On: permission prompts offer the rules Claude suggests' : 'Off: permission prompts offer allow and deny only' },
+        { key: 'links', label: 'claude.ai links', description: settings.claudeLinks === 'pane' ? 'Open beside the session (docs, sheets, artifacts); ⌃\\ closes the pane' : 'Open in the browser' },
+        { key: 'prWatch', label: 'Pull request', description: settings.prWatch ? "On: the branch's PR and its checks in the status bar (gh)" : 'Off' },
+        { key: 'prAutoFix', label: 'PR auto-fix', description: settings.prAutoFix ? 'On: failing checks and reviews asking for changes go to Claude' : 'Off: /pr fixes them when you ask' },
+        { key: 'terminal', label: 'Session terminal', description: settings.terminalCommand ?? 'Your login shell, in the session\'s folder (⌃`)' },
+        { key: 'diffBase', label: 'Diff base', description: settings.diffBase === 'HEAD' ? 'HEAD: the diff pane (/diff) shows what is not committed' : settings.diffBase },
+        { key: 'wt:location', label: 'Worktree folder', description: settings.worktrees.location ?? '../{repo}-worktrees (⌥⏎ in New session)' },
+        { key: 'wt:branchPrefix', label: 'Worktree branch prefix', description: settings.worktrees.branchPrefix ?? 'binder/' },
+        { key: 'workflow', label: 'Workflow card', description: settings.workflowCard ? "On: a workflow asks with its phases, and can be allowed from then on" : 'Off: a workflow asks allow or deny' },
+        { key: 'pinned', label: 'Todo and plan panel', description: settings.todoPanel ? 'On: the latest todos and plan stay above the prompt (⌃T opens them)' : 'Off: only in the transcript' },
+        { key: 'editor', label: 'Editor', description: settings.editor === 'open' ? "open: the file's default app" : settings.editor },
+        { key: 'images', label: 'Images', description: settings.showImages ? "On: a tool's images, ones you send, and markdown images on this Mac show in the transcript" : 'Off: a caption' },
+        { key: 'notify', label: 'Notifications', description: settings.notifications ? 'On: a turn that finishes, or a question, in a session you are not looking at' : 'Off' },
+        { key: 'plan', label: 'Plan approval', description: settings.planApproval ? 'On: a plan shows in full with approve choices that set the mode' : 'Off: a plan asks allow or deny' },
+        { key: 'findings', label: 'Findings card', description: settings.findingsCard ? 'On: a code review (/code-review) shows its findings as a card to fix from, and the diff pane marks them' : 'Off: a review is plain text' },
+        { key: 'fileEditing', label: 'File editing', description: settings.fileEditing ? 'On: the file pane (⌘P) can edit and save files' : 'Off: the file pane only shows them' },
+        { key: 'previewReload', label: 'Preview reload', description: settings.previewReload ? "On: a session's preview (/preview) reloads when its turn ends" : 'Off: ↻ reloads it' },
+        { key: 'previewCommand', label: 'Preview server', description: settings.previewCommand ?? "package.json's dev script (or start), unless /preview names one" },
+        { key: 'simulatorFps', label: 'Simulator refresh', description: `${settings.simulatorFps} a second: how often the simulator pane (/simulator) captures the screen (Enter: 1, 2 or 4)` },
+        { key: 'pluginReload', label: 'Plugin changes', description: settings.pluginReload ? 'On: one made in /plugins loads into the running session at once' : "Off: they load at claude's next start" },
+        { key: 'schedules', label: 'Scheduled tasks', description: settings.schedules ? 'On: /schedule tasks run while the app is open' : 'Off: none runs' },
+        { key: 'sideChat', label: 'Side chat', description: settings.sideChat ? 'On: /btw asks a side question, answered from the session and kept out of its transcript' : 'Off: /btw goes to Claude Code as typed' },
+        { key: 'splitView', label: 'Split view and windows', description: settings.splitView ? 'On: ⌘\\ shows two sessions side by side; /window moves one to a window of its own' : 'Off: one session at a time' },
+        { key: 'restart', label: 'Restart on a new build', description: settings.restartOnUpdate ? "On: after binder is rebuilt, an idle session's binder restarts on the new build" : 'Off: a session keeps the binder it started with until it ends' },
         { key: 'appearance', label: 'Appearance', description: APPEARANCES.find((a) => a.key === settings.appearance)!.label },
         { key: 'sidebar:title', label: SIDEBAR_LABEL.title, description: sidebarTemplates(settings.sidebar).title },
         { key: 'sidebar:subtitle', label: SIDEBAR_LABEL.subtitle, description: sidebarTemplates(settings.sidebar).subtitle || 'None' },
@@ -458,11 +646,109 @@ export function SettingsPanel({ close }: { close: () => void }) {
     }
     if (item.key === 'sticky') {
       const on = !settings!.stickyPrompt;
-      return void save({ stickyPrompt: on }, `Sticky prompt ${on ? 'on' : 'off'}`);
+      return void save({ stickyPrompt: on ? null : false }, `Sticky prompt ${on ? 'on' : 'off'}`);
     }
     if (item.key === 'artifacts') {
       const on = !settings!.artifacts;
-      return void save({ artifacts: on }, `Artifacts ${on ? 'on' : 'off'} for sessions opened from now on`);
+      return void save({ artifacts: on ? null : false }, `Artifacts ${on ? 'on' : 'off'} for sessions opened from now on`);
+    }
+    if (item.key === 'fast') {
+      const on = !settings!.fastMode;
+      return void save({ fastMode: on || null }, `Fast mode ${on ? 'on' : 'off'} at the start of sessions opened from now on`);
+    }
+    if (item.key === 'links') {
+      const pane = settings!.claudeLinks !== 'pane';
+      return void save({ claudeLinks: pane ? null : 'browser' }, `claude.ai links open ${pane ? 'beside the session' : 'in the browser'}`);
+    }
+    if (item.key === 'prWatch') {
+      const on = !settings!.prWatch;
+      return void save({ prWatch: on ? null : false }, `Pull request watching ${on ? 'on' : 'off'} for sessions opened from now on`);
+    }
+    if (item.key === 'prAutoFix') {
+      const on = !settings!.prAutoFix;
+      return void save({ prAutoFix: on || null }, `PR auto-fix ${on ? 'on' : 'off'} for sessions opened from now on`);
+    }
+    if (item.key === 'terminal') {
+      setQuery(settings!.terminalCommand ?? '');
+      return setView({ kind: 'terminal' });
+    }
+    if (item.key === 'diffBase') {
+      setQuery('');
+      return setView({ kind: 'diffBase' });
+    }
+    if (item.key.startsWith('wt:')) {
+      const field = item.key.slice(3) as 'location' | 'branchPrefix';
+      setQuery(settings!.worktrees[field] ?? '');
+      return setView({ kind: 'worktree', field });
+    }
+    if (item.key === 'workflow') {
+      const on = !settings!.workflowCard;
+      return void save({ workflowCard: on ? null : false }, `Workflow card ${on ? 'on' : 'off'} for sessions opened from now on`);
+    }
+    if (item.key === 'pinned') {
+      const on = !settings!.todoPanel;
+      return void save({ todoPanel: on ? null : false }, `Todo and plan panel ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'editor') {
+      setQuery('');
+      return setView({ kind: 'editor' });
+    }
+    if (item.key === 'images') {
+      const on = !settings!.showImages;
+      return void save({ showImages: on ? null : false }, `Images ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'notify') {
+      const on = !settings!.notifications;
+      return void save({ notifications: on ? null : false }, `Notifications ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'plan') {
+      const on = !settings!.planApproval;
+      return void save({ planApproval: on ? null : false }, `Plan approval ${on ? 'on' : 'off'} for sessions opened from now on`);
+    }
+    if (item.key === 'findings') {
+      const on = !settings!.findingsCard;
+      return void save({ findingsCard: on ? null : false }, `Findings card ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'fileEditing') {
+      const on = !settings!.fileEditing;
+      return void save({ fileEditing: on ? null : false }, `File editing ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'previewReload') {
+      const on = !settings!.previewReload;
+      return void save({ previewReload: on ? null : false }, `Preview reload ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'previewCommand') {
+      setQuery(settings!.previewCommand ?? '');
+      return setView({ kind: 'previewCommand' });
+    }
+    if (item.key === 'simulatorFps') {
+      const next = settings!.simulatorFps === 1 ? 2 : settings!.simulatorFps === 2 ? 4 : 1;
+      return void save({ simulatorFps: next === 1 ? null : next }, `Simulator refresh: ${next} a second`);
+    }
+    if (item.key === 'pluginReload') {
+      const on = !settings!.pluginReload;
+      return void save({ pluginReload: on ? null : false }, `Plugin changes ${on ? 'load at once' : "load at claude's next start"}`);
+    }
+    if (item.key === 'schedules') {
+      const on = !settings!.schedules;
+      return void save({ schedules: on ? null : false }, `Scheduled tasks ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'sideChat') {
+      const on = !settings!.sideChat;
+      return void save({ sideChat: on ? null : false }, `Side chat ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'splitView') {
+      const on = !settings!.splitView;
+      if (!on) setState({ split: null });
+      return void save({ splitView: on ? null : false }, `Split view and windows ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'restart') {
+      const on = !settings!.restartOnUpdate;
+      return void save({ restartOnUpdate: on ? null : false }, `Restart on a new build ${on ? 'on' : 'off'}`);
+    }
+    if (item.key === 'always') {
+      const on = !settings!.alwaysAllow;
+      return void save({ alwaysAllow: on ? null : false }, `"Always allow" choices ${on ? 'on' : 'off'} for sessions opened from now on`);
     }
     if (item.key === 'add') {
       setQuery('');
@@ -474,7 +760,7 @@ export function SettingsPanel({ close }: { close: () => void }) {
     <Picker
       key="list"
       title="Settings"
-      subtitle={error ?? (settings ? `${shortPath(settings.path)} · permission mode, artifacts and config dirs apply to sessions opened from now on` : 'Loading…')}
+      subtitle={error ?? (settings ? `${shortPath(settings.path)} · permission mode, artifacts, fast mode, always allow, plan approval and config dirs apply to sessions opened from now on` : 'Loading…')}
       items={items}
       initial={Math.max(0, items.findIndex((i) => i.key === last))}
       onSelect={pick}

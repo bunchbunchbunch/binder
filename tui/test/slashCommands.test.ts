@@ -12,13 +12,16 @@ const child = [
 describe('slash commands', () => {
   it("merges binder's own commands over the child's, sorted by name", () => {
     const all = mergeCommands(child);
-    expect(all.map((c) => c.name)).toEqual(['artifacts', 'cd', 'chrome', 'clear', 'compact', 'context', 'effort', 'exit', 'fork', 'help', 'markdown', 'mcp', 'model', 'rename', 'resume', 'rewind', 'settings', 'tasks', 'vercel:deploy']);
+    expect(all.map((c) => c.name)).toEqual(['artifacts', 'btw', 'cd', 'chrome', 'clear', 'compact', 'context', 'diff', 'effort', 'exit', 'fast', 'files', 'findings', 'fork', 'help', 'markdown', 'mcp', 'model', 'permission-mode', 'plugins', 'pr', 'rename', 'resume', 'rewind', 'schedule', 'settings', 'tasks', 'vercel:deploy']);
     expect(all.find((c) => c.name === 'clear')?.description).toMatch(/new session/);
   });
 
   it('matches by prefix, alias, then substring, only while the name is being typed', () => {
     const all = mergeCommands(child);
     expect(matchCommands(all, '/co').map((c) => c.name)).toEqual(['compact', 'context']);
+    // A name or alias typed in full comes first, so Enter runs it: /mode is /permission-mode, not /model.
+    expect(matchCommands(all, '/mode').map((c) => c.name)).toEqual(['permission-mode', 'model']);
+    expect(matchCommands(all, '/model').map((c) => c.name)).toEqual(['model']);
     expect(matchCommands(all, '/quit').map((c) => c.name)).toEqual(['exit']);
     expect(matchCommands(all, '/deploy').map((c) => c.name)).toEqual(['vercel:deploy']);
     expect(matchCommands(all, '/').length).toBe(all.length);

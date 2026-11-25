@@ -42,7 +42,25 @@ launcher's link to that id keeps working.
 
 Binder leaves the permission mode to Claude Code (`permissions.defaultMode` in
 `settings.json`) unless `config.json` sets one or you pass `binder -- --permission-mode
-<mode>`. Prompts that ask for permission show an Allow / Deny picker.
+<mode>`. `Alt+M` steps a running session to the next mode (manual, accept edits, plan,
+auto, bypass permissions, skipping any Claude Code refuses), as `Shift+Tab` does in Claude
+Code, and `/permission-mode` picks one; either lasts until the session restarts.
+
+Prompts that ask for permission show a picker: Allow, Deny, and the "always allow" choices
+Claude Code suggests. One applies its rules (`Always allow Bash(make lint)`): binder hands them
+back to Claude Code, which saves them where it said (this project's `.claude/settings.local.json`,
+or this session only). Another allows the call and switches the session's mode (`Allow, and
+accept all edits from now on`).
+Binder keeps them apart, because Claude Code may suggest both for one command and taking a
+rule should not also change the mode.
+
+When Claude finishes a plan in plan mode (ExitPlanMode), the plan shows in the transcript as
+markdown, and the picker under it asks "Ready to code?": `Yes, and use auto mode`, `Yes,
+and auto-accept edits`, `Yes, and manually approve edits` (each approves the plan and sets
+that mode), `No, keep planning`, or `No, and tell Claude what to change`, which takes typed
+feedback. A session that came into plan mode from bypass permissions is offered `Yes, and
+bypass permissions` first. `Esc` keeps planning. The plan stays in the transcript, unfolded,
+once answered.
 
 ## Configuration
 
@@ -83,11 +101,78 @@ elsewhere). `/settings` shows and changes them, or edit the file:
   turns it on with `CLAUDE_CODE_ARTIFACT=1`. On unless set to `false`; a
   `CLAUDE_CODE_ARTIFACT` already in your environment wins. Claude Docs and Sheets come
   through the claude.ai Claude Docs connector and don't depend on this setting.
+- `fastMode` starts sessions with Claude Code's fast mode on (`true`); off by default. Run
+  headless, Claude Code ignores the `fastMode` in its own settings.json, so this is where
+  binder takes it from. `Alt+O` or `/fast` turns it on or off in a running session.
+- `alwaysAllow` offers the "always allow" choices on permission prompts. On unless set to
+  `false`, which leaves Allow and Deny only.
+- `planApproval` shows a plan with its approve choices (see above). On unless set to
+  `false`, which asks a plain Allow / Deny.
+- `worktrees` is where `binder --worktree [name]` makes a session's own git worktree, and what
+  its branch starts with: `{ "location": "../{repo}-worktrees", "branchPrefix": "binder/" }`
+  (the defaults; `location` is relative to the repo, `~` and `{repo}` filled in). The session
+  starts in the same subfolder of the new worktree, on a branch named for it (the time, unless
+  you name it). Archiving the session (`Ctrl+X` in `/resume`) removes the worktree and its
+  branch, and says what it kept: a worktree with changes not committed stays, with its branch;
+  a branch not merged stays, though its worktree is removed; and while the session is still
+  open (its binder is running), both stay.
+- `workflowCard` asks about a workflow (the Workflow tool) with what its script says it is:
+  its name, description and phases, not the script. `Run once`, `Always allow workflows` (a
+  rule Claude Code saves in this project's `.claude/settings.local.json`), or `Deny`. A
+  running workflow's row under the status row says its phase and how many agents are done,
+  and `/tasks` lists its phases with each agent's state, model, time and result. On unless set
+  to `false`, which asks a plain Allow / Deny.
+- `pluginReload` loads a plugin change made in `/plugins` into the running session at once
+  (after the turn, if one is running). On unless set to `false`, which leaves it for claude's
+  next start.
+- `schedules` runs scheduled tasks (`/schedule`): each minute, a running binder (or the Mac
+  app) starts the ones due. `binder schedule list|add|remove|pause|resume|run|history|tick`
+  does the same from a shell (JSON out); `binder schedule tick` from cron or launchd runs them
+  with neither app open. `binder schedule add --mode <mode>` refuses a name that is not a
+  permission mode. On unless set to `false`, which runs none.
+- `sideChat` makes `/btw` binder's side chat (above). On unless set to `false`, which sends
+  `/btw` to Claude Code as typed.
+- `findingsCard` makes a code review's findings (`/code-review`) something to act on: under
+  the review, a row counts them by severity (`▸ 4 findings (2 important, 1 pre-existing, 1 nit)`),
+  `/findings` lists them to ask Claude to fix one, or all in one prompt (in the review's tab),
+  and `/diff` shows each under its line. binder reads them from Claude Code's text for the
+  review, at any effort, or from its ReportFindings tool. On unless set to `false`.
+- `prWatch` watches the pull request for the session folder's branch through the GitHub CLI
+  (`gh`, signed in): a row under the status row says its number, its checks and its review
+  (`⎇ PR #12 · ✗ 2 failing (lint, test) · approved`). binder asks when the session starts,
+  after each turn, and every minute while the PR is open. `/pr` opens it in the browser, asks
+  Claude to fix the failing checks (or address a review asking for changes), merges it when
+  ready (`gh pr merge --auto --squash`), or looks again. Without `gh` or a PR, there is no row.
+  On unless set to `false`.
+- `prAutoFix` asks Claude on its own, once the session is idle, when the PR's checks fail or a
+  review asks for changes: once per commit and set of failures, and once per review. Off
+  unless set to `true`.
+- `todoPanel` keeps the session's latest todo list (from TodoWrite or the Task tools,
+  whichever Claude used last) and its current plan pinned above the prompt, in one line:
+  `☑ 1/3 · ◐ Writing the tests  ·  ▤ Plan: Add hello.txt`. `Ctrl+T`, as in Claude Code, opens
+  every item and the plan. A list with every item done stays out of the way until opened.
+  On unless set to `false`.
+- `editor` is how a file opens from `/files` and the Mac app's tool calls: `open` (the
+  file's default app, the default), a command the path is added to (`code`), or a command
+  with `{file}` and `{line}` filled in (`code -g {file}:{line}`, to land on a Read's line).
+  `/settings` offers VS Code, Cursor, Zed, Sublime Text and IntelliJ, or type your own.
+- `showImages` draws images in the transcript: a tool's (a screenshot, a Read of an image
+  file) and the ones you send, under the prompt. iTerm2 draws them inline, in rows binder
+  leaves for them once the screen settles; elsewhere, and with `false`, an image is a caption
+  (`▣ PNG image, 800×600, 45 KB`). On unless set to `false`.
+- `bell` rings the terminal bell when a turn finishes or a question arrives while the
+  terminal's window is in the background (binder turns on focus reporting to know). iTerm2
+  can bounce the Dock or post a notification on a bell; see its profile's Terminal settings.
+  On unless set to `false`. `notifications` is the Mac app's switch for the same.
 
 `/settings` saves to the file in place (a symlink into a dotfiles repo stays a symlink) and
-keeps keys it does not know. Sticky prompt, markdown style and status text change at once; a running
-binder keeps the permission mode, artifacts and config dirs it started with, so they apply
-to sessions opened from then on.
+keeps keys it does not know. Nothing needs a restart of binder. Sticky prompt, markdown style,
+status text, images, the bell, the todo panel, the diff base, plugin changes and scheduled
+tasks change at once (the editor and worktrees at their next use). The permission mode,
+artifacts, config dirs, fast mode, always allow, plan approval, workflow card, PR watching and
+auto-fix, side chat and findings card apply from the next session: an open one keeps the
+values it started with, and `/clear`, `/resume` and `/fork` start the next one with the new
+values. Fast mode goes back to config.json's value then; an `Alt+O` toggle doesn't carry over.
 
 ## Codex
 
@@ -106,8 +191,12 @@ remote viewers work as they do for Claude Code. What differs:
 - **Permission mode.** `permissionMode` (or `--permission-mode` after `--`) becomes an
   approval policy and sandbox, below. Without one, `~/.codex/config.toml` decides.
 - **Commands.** `/model`, `/effort`, `/cd`, `/clear`, `/fork` and `/resume` work; `/resume`
-  lists binder's Codex sessions. `/mcp` shows status only. `/rewind` and `/chrome` are not
-  available: Codex keeps no file checkpoints. The menu offers binder's commands only.
+  lists binder's Codex sessions. `/mcp` shows status only. `/rewind`, `/chrome`, `/fast`,
+  `/tasks`, `/btw` and `/plugins` are not available: Codex keeps no file checkpoints, and has
+  no Claude in Chrome, fast mode, background tasks, side questions or Claude Code plugins. The
+  menu offers binder's commands only.
+- **Attachments.** Images and text files go with a prompt; a prompt with a PDF is refused
+  ("Codex reads images and text files, not PDFs").
 - **Usage.** The bar names Codex's windows by length: `5h`, `7d`, or the free plan's `30d`.
 - **Flags.** After `--`, `--model` (`-m`) and `--permission-mode` are binder's; the rest go
   to `codex app-server` (`-c key=value`, `--enable <feature>`).
@@ -141,11 +230,13 @@ tested against Codex 0.160.1, the version `fixtures/codex/` was recorded with.
 | `Ctrl+L` | pick the model, as `/model` does (pi's key) |
 | `Ctrl+P` / `Shift+Ctrl+P` | switch to the next / previous model the agent offers, as in pi. A model listed twice (Claude Code's `default` and `opus`) counts once. `Shift+Ctrl+P` needs the kitty keyboard protocol; elsewhere it acts as `Ctrl+P` |
 | `Shift+Tab` | switch to the current model's next effort level, wrapping around, as pi does with its thinking level |
+| `Alt+M` | switch to the next permission mode, skipping any Claude Code refuses (Claude Code's `Shift+Tab`, which binder gives to effort). The mode shows under the status bar |
+| `Alt+O` | fast mode on or off, as in Claude Code. `↯ fast mode on` shows under the status bar while it is on. When it cannot run (no usage credits, a model without it), binder says why and leaves it off |
 | `Option+Left` / `Option+Right` | move the cursor by a word in the prompt |
 | `Shift+arrows`, `Shift+Option+arrows`, `Shift+Home/End` | select text (typing, paste, Backspace and Delete act on the selection) |
 | `Ctrl+C` with text selected | copy the selection, like Claude Code. `Cmd+C` works too in terminals that pass it on; iTerm2 keeps `Cmd+C` for its own mouse selection |
 | `Option+Backspace` / `Option+Delete` | delete a word backward / forward |
-| `Ctrl+V` | paste the clipboard: an image as `[Image #n]`, like Claude Code, or else its text (long text collapses as a paste does) |
+| `Ctrl+V` | paste the clipboard: an image as `[Image #n]`, like Claude Code, a file copied in Finder as an attachment (below), or else its text (long text collapses as a paste does) |
 | `Cmd+V` | paste text. Like Claude Code, a paste over 800 characters or with more than 2 line breaks shows as `[Pasted text #n +N lines]`; the full text is sent |
 | `Alt+1` to `Alt+9` | jump to tab |
 | mouse wheel or trackpad, `PgUp` / `PgDn` (`Fn+Up` / `Fn+Down` on a Mac), `Home` / `End` | scroll the active tab (output auto-follows until you scroll up). Binder turns on mouse reporting for the wheel, so select text with the mouse by holding `Option` (iTerm2) or `Shift` (most other terminals) while dragging |
@@ -154,9 +245,17 @@ tested against Codex 0.160.1, the version `fixtures/codex/` was recorded with.
 | `Ctrl+]` | open the latest artifact published in this session |
 | `Ctrl+E` | expand / collapse the work (thinking and tool calls) behind a response |
 | `Ctrl+O` | toggle full tool output, thinking, and subagent detail |
+| `Ctrl+T` | open the pinned todos and plan in full, or close them |
 | `Ctrl+B` | move the running command or agent to the background, as in Claude Code. The status row says when there is one: `ctrl+b to run in background` |
 | `Ctrl+R` | restart the child after it exits unexpectedly |
 | `Ctrl+C` twice | quit |
+
+A PDF or a text file goes with a prompt too: drop it on the terminal (iTerm2 types its path,
+which binder turns into `[File #n: name]`; several dropped at once each become one) or copy it
+in Finder and press `Ctrl+V`. Claude reads a PDF as a document (up to 32 MB) and gets a text
+file's text (up to 512 KB). A file that cannot go (another kind, or over its limit) stays in
+the prompt as its path, with a notice saying why, so you can mention it with `@` instead.
+Codex takes text files, not PDFs.
 
 While a turn runs, its work streams in full, and a row above the prompt shows what it is
 doing and for how long (`Thinking… (12s · esc to interrupt)`, `Running Bash…`). When the
@@ -195,7 +294,7 @@ session or directory the child is on, or they need a picker:
 | Command | Action |
 |---------|--------|
 | `/help` | keys and commands, in place of the transcript until `Esc` |
-| `/resume [id]` | pick a session to resume, with search: this folder by default, `Ctrl+A` all projects, `Ctrl+W` this repo's worktrees, `Ctrl+B` this branch. Lists interactive Claude Code sessions and binder's own, not other headless `claude -p` runs. A session from another folder resumes there |
+| `/resume [id]` | pick a session to resume, with search: this folder by default, `Ctrl+A` all projects, `Ctrl+W` this repo's worktrees, `Ctrl+B` this branch. Lists interactive Claude Code sessions and binder's own, not other headless `claude -p` runs. A session from another folder resumes there. Typing three characters or more also searches what was said in each session (prompts and Claude's replies, not tool output; the text is cached in binder's state dir, so a search after the first is quick) and shows the matching text. `Ctrl+X` archives the highlighted session out of the list (`Ctrl+D` shows the archived ones, where `Ctrl+X` brings one back) |
 | `/clear` (`/reset`, `/new`) | start a fresh session; the current one stays resumable with `/resume` |
 | `/fork [title]` (`/branch`) | continue in a new session forked from this one (`--fork-session`); the original stays resumable |
 | `/rename <title>` | give the session a title, shown above the tabs from then on, and in `/resume`, the Mac app's sidebar and `⌘K`, and the phone's list in place of the first prompt. Claude Code keeps it, so a resumed session shows it again, and tidies it: spaces collapse, the ends are trimmed. A session started with `-n <name>`, or named in Claude Code, shows its name the same way. Claude Code can rename a session but not clear its name, so neither can binder |
@@ -203,11 +302,21 @@ session or directory the child is on, or they need a picker:
 | `/cd <path>` | move the session to another directory (asks to trust a new folder first); a folder that `configDirs` gives another config dir is refused. When Claude changes folder itself (a `cd` in Bash, a worktree), binder shows its new folder; prompt history stays with the session's folder |
 | `/model [model]` | pick from the models the child offers, or set one by name. `Ctrl+L` opens the same picker |
 | `/effort [level]` | pick the effort level for this session, or set one by name. `Shift+Tab` steps to the next one |
+| `/fast [on\|off]` | turn fast mode on or off for this session; no argument flips it (`Alt+O`). Binder's own, so it answers at once instead of taking a turn |
+| `/permission-mode [mode]` (`/mode`) | pick the permission mode for this session, or set one by name (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`). `Alt+M` steps to the next one |
 | `/mcp` | MCP servers and their status; pick one to authenticate (opens the sign-in page), reconnect, enable or disable it, or clear its authentication |
 | `/chrome` | Claude in Chrome: extension status, enable or disable it for this session (restarts claude with `--chrome`), and links to reconnect or manage permissions |
 | `/artifacts` | artifacts published in this session: `Enter`/`o` opens one, `c` copies its link |
+| `/diff [branch]` | the session folder's changes in place of the transcript, file by file with line numbers: against HEAD (what is not committed; config.json `diffBase` changes the default), or the branch you name. Files git does not track yet show as new. `↑↓`, `PgUp`/`PgDn` scroll, `n`/`p` jump between files, `Esc` closes |
+| `/files` | the files this tab's tool calls read, edited and wrote, the latest first: `Enter` opens one in your editor (config.json `editor`), `f` shows it in Finder, `c` copies its path. Paths in tool calls are also links (OSC 8): Cmd+click opens one in iTerm2 |
 | `/tasks` (`/bashes`) | background shells and agents, with the highlighted one's output (a shell's last lines, read every second; an agent's latest steps): `Enter` goes to the tab that started it, `x` stops it |
-| `/settings` | binder's `config.json`: permission mode for new sessions, sticky prompt, markdown style, and config dirs (add one by typing its folder and config dir, `Tab` completes; `Enter` on one removes it) |
+| `/plugins` | plugins (`/plugin` too): the installed ones (Enter enables or disables one, or uninstalls it), `Install a plugin…` (your marketplaces' plugins; typing filters; Enter installs it for your user), and `claude.ai connectors…` (the ones this session has, with their state; `/mcp` acts on them). A change loads into the running session at once (config.json `pluginReload`), its commands included |
+| `/schedule [when prompt]` | scheduled tasks (config.json `schedules`): `/schedule weekdays 9:00 Summarize what changed yesterday` runs that prompt in a fresh session in this folder, named for it, on that schedule (`daily 9:00`, `weekdays 17:30`, `weekends 10am`, `mon,thu 8:00`, `hourly`, `every 15m`, `every 2h`, or a cron line, whose day of week takes `7` for Sunday as well as `0`, ranges such as `1-7` and names such as `mon,thu`). A time binder cannot read (`daily 25:00`) is named in the error. Alone, it lists them: one opens Run it now, Pause, Runs (a run opens its session once it is done) and Delete. They run while binder or the Mac app is open; a run missed while neither was runs once at the next minute either is |
+| `/btw <question>` | a side question (config.json `sideChat`): Claude answers from the conversation so far, without tools, in a side chat that takes the transcript's place and stays out of it; it works while a turn runs. While the side chat is open the prompt asks it (each with the earlier side questions); `Esc` closes it. Not in a Codex session |
+| `/findings` | the latest code review's findings (config.json `findingsCard`): `Apply fixes` asks Claude to fix all of them in one prompt, or pick one to fix it; the prompt goes into the review's tab |
+| `/pr` | the branch's pull request (config.json `prWatch`): open it, fix the failing checks or the review, merge when ready, or look again |
+| `/markdown [style]` (`/md`) | switch the markdown style for responses, `vivid` or `classic` (see Output rendering), in this binder only; no style switches to the other one. config.json `markdownStyle` sets the default |
+| `/settings` | binder's `config.json`: permission mode for new sessions, sticky prompt, markdown style, status text, artifacts, fast mode, always allow, pull request watching and auto-fix, findings card, plugin changes, scheduled tasks, side chat, diff base, worktrees, workflow card, todo panel, editor, images, bell, plan approval, and config dirs (add one by typing its folder and config dir, `Tab` completes; `Enter` on one removes it) |
 | `/exit` (`/quit`) | quit |
 
 `/resume`, `/clear`, `/fork`, `/rewind` and `/cd` wait until no turn is running or queued.
@@ -249,7 +358,10 @@ computers" in `../gui/README.md`). `binder start --cwd <dir> --session-id|--resu
 sure a host runs a session and prints its socket; `binder attach <id>` connects stdin and stdout
 to that socket. Run over SSH on macOS, `binder start` has launchd start the host in the login
 session (`gui/<uid>`): a process under sshd cannot read Claude Code's sign-in from the login
-keychain. That needs the user logged in at the Mac's screen.
+keychain. That needs the user logged in at the Mac's screen. `binder sessions` lists the
+sessions as JSON (`--search <text>` searches them; `--archive <id>` and `--unarchive <id>` move
+one out of the lists and back); an unknown or missing id, or an unknown flag, prints
+`{"error": ...}` and exits 1.
 
 `binder remote status` shows the key, clients, relay, roots and the log
 (`~/.config/binder/remote.log`, one line per client request). `binder remote pause` refuses

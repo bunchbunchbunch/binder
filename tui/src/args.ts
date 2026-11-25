@@ -3,7 +3,8 @@ import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logPath, replay } from './eventLog.js';
 import { findTranscript, replayTranscript } from './transcripts.js';
-import { findSession, latestSessionForCwd } from './sessions.js';
+import { findSession, latestSessionForCwd, upsertSession } from './sessions.js';
+import { createWorktree } from './worktree.js';
 import { loadCachedUsage } from './statusline.js';
 import type { State } from './store.js';
 import { Session, type Agent, type AgentSession } from './session.js';
@@ -25,6 +26,8 @@ export const USAGE = `BinderTUI: one headless Claude Code session, in tabs
   binder -r <id> --fork-session
                              continue a session as a new one (the original stays as it was)
   binder --codex             start a Codex session instead of a Claude Code one
+  binder --worktree [name]   start a new session in a new git worktree of this repo
+                             (config.json worktrees: location, branchPrefix)
   binder -- <claude args>    pass flags to claude (e.g. binder -- --model opus)
   binder --codex -- <args>   --model, --permission-mode, or codex app-server flags (-c key=value)
 
@@ -35,6 +38,13 @@ Remote control (docs/remote-protocol.md):
   binder attach <id>         connect stdin and stdout to a live session's host socket
   binder serve               the gateway: connect to the relay and serve enrolled clients
   binder sessions            list sessions (live ones first) as JSON, for the Mac app
+  binder sessions --search <text>
+                             the sessions whose prompts or replies hold <text>, with a snippet
+  binder sessions --archive <id>, --unarchive <id>
+                             move a session out of the lists, or back
+  binder schedule [command]  scheduled tasks, as JSON: list (the default), add [--when <when>]
+                             [--cwd <dir>] [--name <name>] [--mode <mode>] -- <prompt>,
+                             remove|pause|resume|run <id>, history [id], tick (starts the due ones)
   binder remote <command>    init, enroll <key> [name], revoke <name>, status
 `;
 
@@ -54,6 +64,7 @@ export function parseArgs(
   let draft: string | undefined;
   let fork = false;
   let codex = false;
+  let worktree: string | undefined;
   for (let i = 0; i < own.length; i++) {
     const a = own[i];
     if (a === '-r' || a === '--resume') {
@@ -72,6 +83,10 @@ export function parseArgs(
       fork = true;
     } else if (a === '--codex') {
       codex = true;
+    } else if (a === '--worktree' || a === '-w') {
+      // An optional name: the next word, unless it is a flag or a session id.
+      const next = own[i + 1];
+      worktree = next !== undefined && !next.startsWith('-') && !UUID.test(next) ? (i++, next) : '';
     } else if (a === '--draft') {
       draft = own[++i];
       if (draft === undefined) return { error: '--draft needs the text to put in the prompt' };
@@ -84,12 +99,22 @@ export function parseArgs(
   }
   if (resume && (!sessionId || !UUID.test(sessionId))) return { error: `Session id must be a UUID, got: ${sessionId ?? '(none)'}` };
   if (fork && !resume) return { error: '--fork-session needs a session to fork: binder -r <id> --fork-session' };
+  if (worktree !== undefined && (resume || fork)) return { error: '--worktree starts a new session; it cannot resume one' };
   // A session binder ran keeps its agent; a new one takes --codex or config.json's agent.
   const known = sessionId ? findSession(sessionId)?.agent : undefined;
   const agent: Agent = known ?? (codex || (!resume && binderConfig().agent === 'codex') ? 'codex' : 'claude');
   const which = agent === 'codex' ? { agent } : {};
   if (fork) return { sessionId: randomUUID(), resume: true, forkFrom: sessionId, ...(draft !== undefined && { draft }), ...which, passthrough };
-  return { sessionId: sessionId ?? randomUUID(), resume, ...(draft !== undefined && { draft }), ...which, passthrough };
+  return { sessionId: sessionId ?? randomUUID(), resume, ...(draft !== undefined && { draft }), ...(worktree !== undefined && { worktree }), ...which, passthrough };
+}
+
+/** --worktree: makes the worktree, moves there, and records it with the session; returns the folder to work in. */
+export function enterWorktree(launch: Launch, cwd: string): string {
+  if (launch.worktree === undefined) return cwd;
+  const w = createWorktree(cwd, launch.worktree || undefined);
+  process.chdir(w.cwd);
+  upsertSession({ id: launch.sessionId, cwd: w.cwd, configDir: configDir(childEnv(w.cwd)), worktree: { path: w.path, branch: w.branch, repo: w.repo } });
+  return w.cwd;
 }
 
 // The model shown before the first turn: the --model flag, else settings.json's default.
@@ -108,7 +133,8 @@ export function defaultModel(cfg: string): string | undefined {
 }
 
 // agent is absent for Claude Code.
-export type Launch = { sessionId: string; resume: boolean; draft?: string; forkFrom?: string; agent?: Agent; passthrough: string[] };
+// `worktree`: start in a new git worktree ('' lets binder name it).
+export type Launch = { sessionId: string; resume: boolean; draft?: string; forkFrom?: string; agent?: Agent; worktree?: string; passthrough: string[] };
 
 /** The session a launch runs: Claude Code's, or Codex's. */
 export function sessionFor({ sessionId, resume, passthrough, forkFrom, agent }: Launch, cwd: string): AgentSession {

@@ -29,7 +29,8 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-export type StartArgs = { cwd: string; sessionId: string; resume: boolean; passthrough: string[] };
+// `worktree`: the host starts the session in a new git worktree (binder host --worktree).
+export type StartArgs = { cwd: string; sessionId: string; resume: boolean; worktree?: boolean; passthrough: string[] };
 
 export function parseStartArgs(argv: string[], cwd: string): StartArgs | { error: string } {
   const dash = argv.indexOf('--');
@@ -38,9 +39,11 @@ export function parseStartArgs(argv: string[], cwd: string): StartArgs | { error
   let dir = cwd;
   let sessionId: string | undefined;
   let resume = false;
+  let worktree = false;
   for (let i = 0; i < own.length; i++) {
     const a = own[i];
     if (a === '--cwd') dir = own[++i] ?? '';
+    else if (a === '--worktree') worktree = true;
     else if (a === '--session-id' || a === '--resume') {
       sessionId = own[++i];
       resume = a === '--resume';
@@ -48,7 +51,7 @@ export function parseStartArgs(argv: string[], cwd: string): StartArgs | { error
   }
   if (!sessionId || !UUID.test(sessionId)) return { error: `Session id must be a UUID, got: ${sessionId ?? '(none)'}` };
   if (!dir) return { error: '--cwd needs a folder' };
-  return { cwd: expandHome(dir), sessionId, resume, passthrough };
+  return { cwd: expandHome(dir), sessionId, resume, ...(worktree && { worktree }), passthrough };
 }
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -133,21 +136,30 @@ function startInLoginSession(dir: string, args: string[], log: string, sessionId
     loadJob(domain, join(jobs, `${label}.plist`), jobPlist(label, [process.execPath, BINDER_BIN, ...args], dir, hostEnv(process.env), log));
   } catch (e) {
     const why = String((e as { stderr?: string }).stderr ?? (e as Error).message).trim();
-    fail(`Could not start the session in this Mac's login session (${why}). Is ${process.env.USER ?? 'this user'} logged in at its screen?`);
+    throw new Error(`Could not start the session in this Mac's login session (${why}). Is ${process.env.USER ?? 'this user'} logged in at its screen?`);
   }
 }
 
 export async function startMain(argv: string[]): Promise<void> {
   const a = parseStartArgs(argv, process.cwd());
   if ('error' in a) fail(a.error);
-  const out = () => process.stdout.write(JSON.stringify({ socket: socketPath(a.sessionId) }) + '\n');
-  if (await hostInfo(a.sessionId)) return void out();
-  if (!existsSync(a.cwd)) fail(`The session's folder is gone: ${a.cwd}`);
-  if (!statSync(a.cwd).isDirectory()) fail(`Not a directory: ${a.cwd}`);
+  try {
+    await startHost(a);
+  } catch (e) {
+    fail((e as Error).message);
+  }
+  process.stdout.write(JSON.stringify({ socket: socketPath(a.sessionId) }) + '\n');
+}
+
+/** Makes sure a host serves the session, starting one (headless) when none does; throws why it could not. */
+export async function startHost(a: StartArgs): Promise<void> {
+  if (await hostInfo(a.sessionId)) return;
+  if (!existsSync(a.cwd)) throw new Error(`The session's folder is gone: ${a.cwd}`);
+  if (!statSync(a.cwd).isDirectory()) throw new Error(`Not a directory: ${a.cwd}`);
   const other = sessionProcess(a.sessionId);
-  if (other) fail(`That session is open in another program (${other}). Quit it there first.`);
+  if (other) throw new Error(`That session is open in another program (${other}). Quit it there first.`);
   const log = join(stateDir(), `host-${a.sessionId}.log`);
-  const args = ['host', a.resume ? '--resume' : '--session-id', a.sessionId, ...(a.passthrough.length ? ['--', ...a.passthrough] : [])];
+  const args = ['host', a.resume ? '--resume' : '--session-id', a.sessionId, ...(a.worktree ? ['--worktree'] : []), ...(a.passthrough.length ? ['--', ...a.passthrough] : [])];
   let failed: string | null = null;
   if (process.platform === 'darwin' && process.env.SSH_CONNECTION) startInLoginSession(a.cwd, args, log, a.sessionId);
   else {
@@ -158,11 +170,10 @@ export async function startMain(argv: string[]): Promise<void> {
   }
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (!(await hostInfo(a.sessionId, 1000))) {
-    if (failed) fail(failed);
-    if (Date.now() > deadline) fail(`The session did not start (see ${log})`);
+    if (failed) throw new Error(failed);
+    if (Date.now() > deadline) throw new Error(`The session did not start (see ${log})`);
     await sleep(200);
   }
-  out();
 }
 
 export function attachMain(argv: string[]): void {

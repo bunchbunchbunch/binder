@@ -9,7 +9,7 @@ import { appendLocal, appendPrompt, appendRaw, type LocalMarker } from '../event
 import { binderConfig } from '../config.js';
 import { childEnv, codexHome, stateDir } from '../paths.js';
 import { findSession, upsertSession } from '../sessions.js';
-import type { AgentSession, PermissionRequest, SessionEvents, SessionOptions, SwitchOptions } from '../session.js';
+import type { AgentSession, FastReport, PermissionRequest, SessionEvents, SessionOptions, SwitchOptions } from '../session.js';
 import { CodexRpc, type Params, type ServerRequest } from './rpc.js';
 import { Translator, patchInput, rateLimitEvent, shellCommand, type RateLimits } from './translate.js';
 
@@ -78,8 +78,10 @@ function saveImage(img: ImageAttachment): string {
   return path;
 }
 
+// Images as files Codex reads; a text file's text as more of the prompt (host.send refuses PDFs).
 function input(text: string, images: ImageAttachment[]): Params[] {
-  return [{ type: 'text', text, text_elements: [] }, ...images.map((img) => ({ type: 'localImage', path: saveImage(img) }))];
+  const files = images.filter((a) => a.mediaType === 'text/plain').map((a) => `\n\nAttached file ${a.name ?? ''}:\n\n${Buffer.from(a.data, 'base64').toString('utf8')}`);
+  return [{ type: 'text', text: text + files.join(''), text_elements: [] }, ...images.filter((a) => a.mediaType.startsWith('image/')).map((img) => ({ type: 'localImage', path: saveImage(img) }))];
 }
 
 // The Codex thread behind a binder session id: the one binder recorded, else
@@ -268,6 +270,10 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
   }
 
   // The control requests binder's panels send, answered from Codex where it has an equivalent.
+  cli(): Promise<string> {
+    return Promise.reject(new Error('Not available in a Codex session'));
+  }
+
   async request(subtype: string, fields: Record<string, unknown> = {}, timeoutMs = 20000): Promise<Record<string, unknown>> {
     const rpc = this.rpc;
     if (!rpc) throw new Error('codex is not running');
@@ -431,6 +437,12 @@ export class CodexSession extends EventEmitter<SessionEvents> implements AgentSe
 
   deny(req: PermissionRequest): void {
     this.decide(req, 'decline');
+  }
+
+  readonly fastMode = false;
+
+  async setFastMode(): Promise<FastReport> {
+    throw new Error('Fast mode is not available in a Codex session');
   }
 
   async close(): Promise<void> {

@@ -4,14 +4,17 @@ import type { Block } from '../store.js';
 // last tool call) and the "response" (every text block). Text never folds:
 // a turn can answer and then keep calling tools (a closing skill, a log
 // write), and the answer must stay visible. A pending AskUserQuestion call is
-// neither: the picker at the bottom shows it.
+// neither: the picker at the bottom shows it. A plan (ExitPlanMode) is part of
+// the response: it is what the user approves.
+const isPlan = (b: Block) => b.kind === 'tool_use' && b.name === 'ExitPlanMode';
+
 export function splitWork(blocks: Block[]): { work: Block[]; response: Block[] } {
   let lastTool = -1;
   blocks.forEach((b, i) => {
     if (b.kind === 'tool_use' && !(b.name === 'AskUserQuestion' && !b.result)) lastTool = i;
   });
-  const work = blocks.slice(0, lastTool + 1).filter((b) => b.kind !== 'text');
-  const response = blocks.filter((b) => b.kind === 'text' && b.text.trim());
+  const work = blocks.slice(0, lastTool + 1).filter((b) => b.kind !== 'text' && !isPlan(b));
+  const response = blocks.filter((b) => (b.kind === 'text' && b.text.trim()) || isPlan(b));
   return { work, response };
 }
 

@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import { dirname } from 'node:path';
 import { EventEmitter } from 'node:events';
-import { createInterface } from 'node:readline';
+import { onLines } from '../lines.js';
 
 // One `codex app-server`: JSON-RPC 2.0 over stdio, one message per line,
 // without the "jsonrpc" field. Requests go both ways: binder's (initialize,
@@ -63,7 +63,7 @@ export class CodexRpc extends EventEmitter<RpcEvents> {
     // A write after the child died is reported by its exit, not as a crash.
     child.stdin.on('error', () => {});
 
-    createInterface({ input: child.stdout }).on('line', (line) => {
+    onLines(child.stdout, (line) => {
       this.emit('line', 'in', line);
       let m: { id?: RpcId; method?: string; params?: Params; result?: Params; error?: { code: number; message: string } };
       try {
@@ -77,7 +77,7 @@ export class CodexRpc extends EventEmitter<RpcEvents> {
       else if (m.id !== undefined) this.settle(m.id, m.result, m.error);
     });
 
-    createInterface({ input: child.stderr }).on('line', (line) => {
+    onLines(child.stderr, (line) => {
       this.stderrLog?.write(line + '\n');
       this.recentStderr.push(line);
       if (this.recentStderr.length > 20) this.recentStderr.shift();

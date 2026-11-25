@@ -4,24 +4,40 @@ import { App } from './ui/App.js';
 import { RENDER_OPTIONS } from './renderOptions.js';
 import { filterInput, keypadToText } from './keypad.js';
 import { MOUSE_OFF, MOUSE_ON, takeMouse } from './mouse.js';
+import { FOCUS_OFF, FOCUS_ON, takeFocus } from './attention.js';
+import { setShowImages } from './ui/images.js';
 import { SessionHost } from './host.js';
 import { HostServer } from './remote/hostServer.js';
 import { liveElsewhere } from './remote/sockets.js';
 import { upsertSession } from './sessions.js';
 import { binderConfig } from './config.js';
 import { readStatusLineCommand } from './statusline.js';
-import { USAGE, initialStateFor, launchConfigDir, parseArgs, sessionFor } from './args.js';
+import { USAGE, initialStateFor, launchConfigDir, parseArgs, sessionFor, enterWorktree } from './args.js';
 import { stampFrames } from './ui/lineAttrs.js';
 import { MARKDOWN_STYLES, setMarkdownStyle } from './ui/md/theme.js';
 
 export { parseArgs };
 
 export function main(argv = process.argv.slice(2)): void {
-  const cwd = process.cwd();
-  const parsed = parseArgs(argv, cwd);
+  let parsed: ReturnType<typeof parseArgs>;
+  // A config.json that does not parse: say which and why in one line, and leave it as it is.
+  try {
+    parsed = parseArgs(argv, process.cwd());
+    if (!('error' in parsed)) binderConfig();
+  } catch (e) {
+    process.stderr.write(`binder: ${(e as Error).message}\n`);
+    process.exit(1);
+  }
   if ('error' in parsed) {
     process.stderr.write(parsed.error.endsWith('\n') ? parsed.error : parsed.error + '\n');
     process.exit(parsed.error === USAGE ? 0 : 1);
+  }
+  let cwd: string;
+  try {
+    cwd = enterWorktree(parsed, process.cwd());
+  } catch (e) {
+    process.stderr.write(`${(e as Error).message}\n`);
+    process.exit(1);
   }
   const { sessionId, draft } = parsed;
   const other = liveElsewhere(sessionId);
@@ -60,17 +76,22 @@ export function main(argv = process.argv.slice(2)): void {
   // classic; /md switches while running.
   const style = (s?: string) => MARKDOWN_STYLES.find((m) => m === s);
   setMarkdownStyle(style(process.env.BINDER_MD) ?? style(binderConfig().markdownStyle) ?? 'vivid');
+  setShowImages(binderConfig().showImages !== false);
   const app = render(
-    <App host={host} configDir={cfg} statusLineCommand={readStatusLineCommand(cfg)} draft={draft} stickyPrompt={binderConfig().stickyPrompt !== false} statusText={binderConfig().statusText} onQuit={shutdown} />,
-    { ...RENDER_OPTIONS, stdin: filterInput(process.stdin, (chunk) => takeMouse(keypadToText(chunk))) },
+    <App host={host} configDir={cfg} statusLineCommand={readStatusLineCommand(cfg)} draft={draft} stickyPrompt={binderConfig().stickyPrompt !== false} statusText={binderConfig().statusText} bell={binderConfig().bell !== false} todoPanel={binderConfig().todoPanel !== false} onQuit={shutdown} />,
+    { ...RENDER_OPTIONS, stdin: filterInput(process.stdin, (chunk) => takeFocus(takeMouse(keypadToText(chunk)))) },
   );
-  // The wheel scrolls the tab (see mouse.ts). Turned off on any exit, or the
-  // shell would get mouse reports.
+  // The wheel scrolls the tab (see mouse.ts), and focus reports say when to
+  // ring the bell (attention.ts). Turned off on any exit, or the shell would
+  // get the reports.
   if (process.stdout.isTTY) {
-    process.stdout.write(MOUSE_ON);
-    process.on('exit', () => process.stdout.write(MOUSE_OFF));
+    process.stdout.write(MOUSE_ON + FOCUS_ON);
+    process.on('exit', () => process.stdout.write(MOUSE_OFF + FOCUS_OFF));
   }
   app.waitUntilExit().then(shutdown);
+  // Scheduled tasks run while binder is open (schedule.ts; the Mac app ticks too).
+  const ticker = setInterval(() => void import('./schedule.js').then((m) => m.tick()).catch(() => {}), 60_000);
+  ticker.unref();
   process.on('SIGTERM', shutdown);
   process.on('SIGHUP', shutdown);
 }

@@ -3,19 +3,22 @@ import { firstLine } from './format';
 
 // How a turn is laid out, as in bindertui's TUI: the "work" (thinking and tool
 // calls up to the last tool call) folds into a summary once the response
-// lands; text blocks never fold. A pending AskUserQuestion call is neither:
-// the question card shows it.
+// lands; text blocks never fold. A pending AskUserQuestion call or plan is
+// neither: the question card shows it. An answered plan (ExitPlanMode) is part
+// of the response, as what the user approved.
+const isPlan = (b: WireBlock) => b.kind === 'tool_use' && b.name === 'ExitPlanMode';
+
 export function lastToolIndex(blocks: WireBlock[]): number {
   let lastTool = -1;
   blocks.forEach((b, i) => {
-    if (b.kind === 'tool_use' && !(b.name === 'AskUserQuestion' && !b.result)) lastTool = i;
+    if (b.kind === 'tool_use' && !(['AskUserQuestion', 'ExitPlanMode'].includes(b.name) && !b.result)) lastTool = i;
   });
   return lastTool;
 }
 
 export function splitWork(blocks: WireBlock[]): { work: WireBlock[]; response: WireBlock[] } {
-  const work = blocks.slice(0, lastToolIndex(blocks) + 1).filter((b) => b.kind !== 'text');
-  const response = blocks.filter((b) => b.kind === 'text' && b.text.trim());
+  const work = blocks.slice(0, lastToolIndex(blocks) + 1).filter((b) => b.kind !== 'text' && !isPlan(b));
+  const response = blocks.filter((b) => (b.kind === 'text' && b.text.trim()) || (isPlan(b) && b.kind === 'tool_use' && b.result !== undefined));
   return { work, response };
 }
 

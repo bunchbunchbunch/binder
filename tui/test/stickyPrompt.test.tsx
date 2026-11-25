@@ -1,8 +1,11 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { Box } from 'ink';
 import { render } from 'ink-testing-library';
 import { TabView } from '../src/ui/TabView.js';
+import { FIXTURES } from './helpers.js';
 import type { Block, Tab, Turn } from '../src/store.js';
 
 const HOME = '\x1b[H';
@@ -106,6 +109,14 @@ describe('sticky prompt', () => {
     expect(rows(ui)[0]).toBe('│ run the build');
     expect(rows(ui)).toContain('⏺ Background task finished: build');
     expect(count(ui, 'run the build')).toBe(1);
+    ui.unmount();
+  });
+
+  it('shows the images sent with the held prompt under the header', async () => {
+    const png = readFileSync(join(FIXTURES, 'orange.png')).toString('base64');
+    const ui = mount(tabOf({ ...turn('[Image #1] what is this?', [answer('answer', 3)]), images: [{ mediaType: 'image/png', data: png }] }));
+    await until(() => rows(ui).some((l) => l.includes('answer 2')));
+    expect(rows(ui).slice(0, 3)).toEqual(['│ [Image #1] what is this?', expect.stringMatching(/^╌+$/), '  ▣ PNG image, 64×64, 1 KB']);
     ui.unmount();
   });
 

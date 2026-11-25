@@ -74,6 +74,30 @@ test('changes config.json from the menu, ⌘, and /settings', async () => {
   await expect(page.locator('.composer textarea')).toBeFocused();
 });
 
+test('Sticky prompt and Artifacts turned back on leave config.json without their keys; the terminal row says how its command runs', async () => {
+  const config = join(mkdtempSync('/tmp/bgc-'), 'config.json');
+  writeFileSync(config, JSON.stringify({ mine: true }));
+  const saved = () => JSON.parse(readFileSync(config, 'utf8'));
+  run = await launch(SHOWCASE, { BINDER_CONFIG: config });
+  const { page } = run;
+  const picker = page.locator('.picker');
+  const row = (label: string) => picker.locator('.picker-item', { has: page.locator('.label', { hasText: new RegExp(`^${label}$`) }) });
+  await page.keyboard.press('Meta+Comma');
+  for (const [label, key] of [['Sticky prompt', 'stickyPrompt'], ['Artifacts', 'artifacts']]) {
+    await row(label).click();
+    await expect(row(label).locator('.desc')).toHaveText('Off');
+    expect(saved()).toEqual({ mine: true, [key]: false });
+    await row(label).click();
+    await expect(row(label).locator('.desc')).not.toHaveText('Off');
+    expect(saved()).toEqual({ mine: true });
+  }
+  await row('Session terminal').click();
+  await page.keyboard.type('exec fish -l');
+  await expect(picker.locator('.picker-item', { hasText: 'Save: exec fish -l' }).locator('.desc')).toHaveText("Run with your shell ($SHELL -c) in the session's folder");
+  await page.keyboard.press('Escape');
+  expect(saved()).toEqual({ mine: true });
+});
+
 test('says why when config.json does not parse, and leaves it alone', async () => {
   const config = join(mkdtempSync('/tmp/bgc-'), 'config.json');
   writeFileSync(config, '{');

@@ -14,13 +14,16 @@ const KEYS: Array<[string, string]> = [
   ['Ctrl+L', 'pick the model (/model)'],
   ['Ctrl+P / Shift+Ctrl+P', 'next / previous model'],
   ['Shift+Tab', "the model's next effort level"],
+  ['Alt+M', 'the next permission mode (/permission-mode picks one)'],
+  ['Alt+O', 'fast mode on / off (/fast)'],
   ['Wheel, PgUp / PgDn, Home / End', 'scroll the tab (Option+drag selects text)'],
   ['Esc', 'interrupt the running turn (twice when idle: rewind)'],
   ['Ctrl+]', 'open the latest artifact'],
   ['Ctrl+E', 'expand / collapse the work behind a response'],
   ['Ctrl+O', 'full tool output, thinking, and subagent detail'],
+  ['Ctrl+T', 'open the pinned todos and plan in full, or close them'],
   ['Ctrl+B', 'move the running command or agent to the background (/tasks lists them)'],
-  ['Ctrl+V', 'paste the clipboard: an image, or its text'],
+  ['Ctrl+V', 'paste the clipboard: an image, a file copied in Finder, or its text'],
   ['Ctrl+C (text selected)', 'copy the selection'],
   ['Ctrl+C twice', 'quit'],
 ];
@@ -39,7 +42,7 @@ export function HelpView({ commandCount }: { commandCount: number }) {
       ))}
       <Text> </Text>
       <Text bold color="#7CC4FF">Commands</Text>
-      <Text>{`  Type / to browse all ${commandCount}. Binder runs /help, /resume, /clear, /fork, /rename, /rewind, /cd, /model, /effort, /mcp, /chrome, /artifacts, /settings and /exit itself; the rest go to Claude Code.`}</Text>
+      <Text>{`  Type / to browse all ${commandCount}. Binder runs its own, such as /resume, /fast, /diff, /btw, /schedule and /plugins, itself; the rest go to Claude Code.`}</Text>
       <Text> </Text>
       <Text dimColor>  Esc closes this.</Text>
     </Box>

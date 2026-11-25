@@ -3,11 +3,14 @@ import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import { dirname } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { createInterface } from 'node:readline';
 import { parseEventLine, type ClaudeEvent } from './events.js';
+import { onLines } from './lines.js';
 import { binderConfig, type BinderConfig } from './config.js';
+import { attachmentBlocks } from './attachments.js';
 
-export type ImageAttachment = { mediaType: string; data: string };
+// Something sent with a prompt, base64: an image, or (with its file name) a
+// PDF or a text file (attachments.ts says how each reaches Claude).
+export type ImageAttachment = { mediaType: string; data: string; name?: string };
 
 export type SpawnOptions = {
   bin: string;
@@ -84,15 +87,13 @@ export class ClaudeProcess extends EventEmitter<ProcessEvents> {
     });
     this.child = child;
 
-    const out = createInterface({ input: child.stdout });
-    out.on('line', (line) => {
+    onLines(child.stdout, (line) => {
       this.emit('raw', line);
       const event = parseEventLine(line);
       if (event) this.emit('event', event);
     });
 
-    const err = createInterface({ input: child.stderr });
-    err.on('line', (line) => {
+    onLines(child.stderr, (line) => {
       this.stderrLog?.write(line + '\n');
       this.recentStderr.push(line);
       if (this.recentStderr.length > 20) this.recentStderr.shift();
@@ -115,9 +116,7 @@ export class ClaudeProcess extends EventEmitter<ProcessEvents> {
   // A uuid lets the child report the message's progress (command_lifecycle)
   // and lets sendNow() name it.
   sendPrompt(text: string, images: ImageAttachment[] = [], uuid?: string): void {
-    const content = images.length
-      ? [{ type: 'text', text }, ...images.map((img) => ({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } }))]
-      : text;
+    const content = images.length ? [{ type: 'text', text }, ...attachmentBlocks(images)] : text;
     this.send({ type: 'user', message: { role: 'user', content }, ...(uuid && { uuid }) });
   }
 

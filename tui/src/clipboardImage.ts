@@ -16,6 +16,14 @@ function osascript(lines: string[]): Promise<void> {
   });
 }
 
+// A file copied in Finder: its path, or null.
+export async function readClipboardFile(): Promise<string | null> {
+  if (process.platform !== 'darwin') return null;
+  return new Promise((done) => {
+    execFile('osascript', ['-e', 'POSIX path of (the clipboard as «class furl»)'], { timeout: 5000 }, (err, out) => done(err ? null : out.trim() || null));
+  });
+}
+
 // Reads an image off the macOS clipboard (the way Claude Code's Ctrl+V does)
 // and returns it base64-encoded, or null when the clipboard holds no image.
 export async function readClipboardImage(): Promise<ClipboardImage | null> {

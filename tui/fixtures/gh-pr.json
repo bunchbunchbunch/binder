@@ -1,0 +1,48 @@
+{
+  "number": 12,
+  "title": "Fix the parser",
+  "url": "https://github.com/me/app/pull/12",
+  "state": "OPEN",
+  "isDraft": false,
+  "headRefOid": "abc123",
+  "mergeable": "MERGEABLE",
+  "reviewDecision": "REVIEW_REQUIRED",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "lint",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "test",
+      "status": "COMPLETED",
+      "conclusion": "TIMED_OUT"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "build",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "e2e",
+      "status": "IN_PROGRESS",
+      "conclusion": ""
+    },
+    {
+      "__typename": "StatusContext",
+      "context": "ci/legacy",
+      "state": "SUCCESS"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "docs",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED"
+    }
+  ],
+  "latestReviews": []
+}

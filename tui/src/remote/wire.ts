@@ -1,4 +1,4 @@
-import type { Block, Question, State, Tab, Turn } from '../store.js';
+import type { Block, ImageData, Question, State, Tab, Turn } from '../store.js';
 
 // The session state as remote viewers see it (docs/remote-protocol.md,
 // section 4): a snapshot, then patches computed from the reducer's immutable
@@ -15,13 +15,17 @@ export type WireBlock =
       name: string;
       input: unknown;
       final: boolean;
-      result?: { content: string; isError: boolean; length?: number };
+      result?: { content: string; isError: boolean; length?: number; images?: WireImage[] };
       children: WireBlock[];
       inputChars?: number;
     };
 
+// An image's kind and size; its bytes come with the `image` request.
+export type WireImage = { mediaType: string; bytes: number };
+
 // `auto`: a turn the child or binder started about background work, headed by what finished.
-export type WireTurn = { prompt: string; status: string; blocks: WireBlock[]; result?: Turn['result']; uuid?: string; bash?: boolean; auto?: boolean };
+// `seq`: its place in the session's send order across all tabs.
+export type WireTurn = { prompt: string; status: string; blocks: WireBlock[]; result?: Turn['result']; uuid?: string; bash?: boolean; auto?: boolean; images?: WireImage[]; seq?: number };
 export type WireTab = WireTurn & { id: number; earlier: WireTurn[] };
 
 export type WireQuestion = {
@@ -31,6 +35,10 @@ export type WireQuestion = {
   toolInput?: unknown;
   // Why a permission prompt was raised, as the child explains it.
   reason?: string;
+  // ExitPlanMode: the plan to approve (markdown), in full.
+  plan?: string;
+  // Workflow: its name, description and phases, from its script.
+  workflow?: Question['workflow'];
   questions: Question['questions'];
 };
 
@@ -39,6 +47,8 @@ export type WireMeta = {
   cwd: string;
   model: string | null;
   permissionMode: string | null;
+  // Fast mode: 'on', 'cooldown' (paused after a rate limit) or 'off'; null until the child says.
+  fastMode: string | null;
   usage: State['usage'] | null;
   contextTokens: number | null;
   // The model's context window, once a turn has reported it.
@@ -62,14 +72,18 @@ export type WireMeta = {
   // The next prompt Claude Code predicts after a turn, until anything is sent.
   suggestion: string | null;
   // Background shells and agents still running.
-  backgroundTasks: { id: string; type: string; description: string }[];
+  backgroundTasks: State['backgroundTasks'];
   // The session's name (/rename), or null.
   title: string | null;
+  // The host runs binder's code from before its latest build (`binder host` only).
+  outdated: boolean;
+  // The pull request for the session folder's branch (gh), or null.
+  pr: State['pr'] | null;
 };
 
 export type WireState = WireMeta & { tabs: WireTab[] };
 
-type TabFields = { prompt: string; status: string; result: Turn['result'] | null; uuid: string | null; bash: boolean; auto: boolean };
+type TabFields = { prompt: string; status: string; result: Turn['result'] | null; uuid: string | null; bash: boolean; auto: boolean; seq?: number };
 
 export type TabOp =
   | { op: 'set'; tab: WireTab }
@@ -80,7 +94,7 @@ export type TabOp =
 export type Patch = { t: 'patch'; meta?: Partial<WireMeta>; tabs?: TabOp[] };
 
 /** What a diff compares: the reducer state plus the host's own facts. */
-export type Source = { state: State; cwd: string; effort?: string; runningSince?: number };
+export type Source = { state: State; cwd: string; effort?: string; runningSince?: number; outdated?: boolean };
 
 // Long strings in a tool's input (file contents, big commands) are cut.
 function cutStrings(v: unknown, max: number): unknown {
@@ -89,6 +103,10 @@ function cutStrings(v: unknown, max: number): unknown {
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cutStrings(x, max)]));
   return v;
 }
+
+// Base64's length, less its padding, gives the bytes.
+const bytesOf = (data: string) => Math.floor((data.length * 3) / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+const wireImages = (images: ImageData[]): WireImage[] => images.map((i) => ({ mediaType: i.mediaType, bytes: bytesOf(i.data) }));
 
 export function wireBlock(b: Block, full = false): WireBlock {
   if (b.kind !== 'tool_use') return { kind: b.kind, text: b.text, final: b.final };
@@ -104,12 +122,13 @@ export function wireBlock(b: Block, full = false): WireBlock {
   if (b.result) {
     const c = b.result.content;
     out.result = !full && c.length > RESULT_MAX ? { content: c.slice(0, RESULT_MAX), isError: b.result.isError, length: c.length } : { content: c, isError: b.result.isError };
+    if (b.result.images?.length) out.result.images = wireImages(b.result.images);
   }
   return out;
 }
 
 function wireTurn(t: Turn): WireTurn {
-  return { prompt: t.prompt, status: t.status, blocks: t.blocks.map((b) => wireBlock(b)), result: t.result, uuid: t.uuid, bash: t.bash, auto: t.auto };
+  return { prompt: t.prompt, status: t.status, blocks: t.blocks.map((b) => wireBlock(b)), result: t.result, uuid: t.uuid, bash: t.bash, auto: t.auto, seq: t.seq, ...(t.images?.length && { images: wireImages(t.images) }) };
 }
 
 export function wireTab(t: Tab): WireTab {
@@ -125,6 +144,8 @@ function wireQuestion(q: Question | undefined): WireQuestion | null {
     toolName: q.toolName,
     ...(permission && { toolInput: cutStrings(q.toolInput ?? {}, INPUT_STRING_MAX) }),
     ...(permission && q.reason && { reason: q.reason }),
+    ...(q.plan !== undefined && { plan: q.plan }),
+    ...(q.workflow && { workflow: q.workflow }),
     questions: q.questions,
   };
 }
@@ -136,6 +157,7 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   cwd: [(s) => s.cwd, (s) => s.cwd],
   model: [(s) => s.state.model, (s) => s.state.model ?? null],
   permissionMode: [(s) => s.state.permissionMode, (s) => s.state.permissionMode ?? null],
+  fastMode: [(s) => s.state.fastMode, (s) => s.state.fastMode ?? null],
   usage: [(s) => s.state.usage, (s) => s.state.usage ?? null],
   contextTokens: [(s) => s.state.contextTokens, (s) => s.state.contextTokens ?? null],
   contextWindow: [(s) => s.state.contextWindow, (s) => s.state.contextWindow ?? null],
@@ -154,6 +176,8 @@ const META: { [K in keyof WireMeta]: [(s: Source) => unknown, (s: Source) => Wir
   suggestion: [(s) => s.state.suggestion, (s) => s.state.suggestion ?? null],
   backgroundTasks: [(s) => s.state.backgroundTasks, (s) => s.state.backgroundTasks],
   title: [(s) => s.state.title, (s) => s.state.title ?? null],
+  outdated: [(s) => s.outdated, (s) => s.outdated === true],
+  pr: [(s) => s.state.pr, (s) => s.state.pr ?? null],
 };
 
 export function wireState(src: Source): WireState {
@@ -162,7 +186,7 @@ export function wireState(src: Source): WireState {
 }
 
 function tabFields(t: Tab): TabFields {
-  return { prompt: t.prompt, status: t.status, result: t.result ?? null, uuid: t.uuid ?? null, bash: Boolean(t.bash), auto: Boolean(t.auto) };
+  return { prompt: t.prompt, status: t.status, result: t.result ?? null, uuid: t.uuid ?? null, bash: Boolean(t.bash), auto: Boolean(t.auto), ...(t.seq !== undefined && { seq: t.seq }) };
 }
 
 export function diffTabs(prev: Tab[], next: Tab[]): TabOp[] {
@@ -221,7 +245,7 @@ export function applyPatch(s: WireState, p: Patch): WireState {
       tabs = tabs.map((t) => {
         if (t.id !== op.id) return t;
         const f = op.fields;
-        const fields = { prompt: f.prompt, status: f.status, result: f.result ?? undefined, uuid: f.uuid ?? undefined, bash: f.bash || undefined, auto: f.auto || undefined };
+        const fields = { prompt: f.prompt, status: f.status, result: f.result ?? undefined, uuid: f.uuid ?? undefined, bash: f.bash || undefined, auto: f.auto || undefined, seq: f.seq };
         if (op.op === 'blocks') return { ...t, ...fields, blocks: t.blocks.slice(0, op.from).concat(op.blocks) };
         const blocks = t.blocks.map((b, i) => (i === op.index && b.kind !== 'tool_use' ? { ...b, text: b.text + op.text } : b));
         return { ...t, ...fields, blocks };

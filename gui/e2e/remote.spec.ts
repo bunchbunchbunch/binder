@@ -135,3 +135,24 @@ test("a computer that cannot be reached says why, and this Mac's sessions still 
   await expect(page.locator('.picker-item', { hasText: 'Fix the table alignment' })).toBeVisible();
   await expect(page.locator('.picker')).toContainText('offline: ssh: connect to host offline port 22: Operation timed out');
 });
+
+test("the simulator pane's Show Claude refuses a session on another computer: the simulator is this Mac's", async () => {
+  const dir = mkdtempSync('/tmp/bgr-');
+  const sim = join(dir, 'sim.json');
+  const log = join(dir, 'xcrun.log');
+  writeFileSync(sim, JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-27-2': [{ udid: 'B1', name: 'iPhone 17', state: 'Booted' }] } }));
+  run = await launch(SHOWCASE, { ...computers(dir, ['mini']), BINDER_XCRUN: join(ROOT, 'e2e/fakeXcrun.mjs'), BINDER_FAKE_SIM: sim, BINDER_FAKE_SIM_LOG: log, BINDER_FAKE_SIM_IMAGE: join(ROOT, '../tui/fixtures/orange.png') });
+  const { page, project } = run;
+  await page.keyboard.press('Meta+n');
+  await page.locator('.picker-search').fill(project);
+  await page.locator('.picker-item', { hasText: `Start in ${project} on mini` }).click();
+  await page.locator('.session:not([hidden]) .composer textarea').waitFor({ state: 'visible', timeout: 30000 });
+  await page.keyboard.type('/simulator');
+  await page.keyboard.press('Enter');
+  const pane = page.locator('.sim-pane');
+  await expect(pane.locator('.sim-screen img')).toBeVisible({ timeout: 20000 });
+  const png = () => readFileSync(log, 'utf8').split('\n').filter((l) => l.includes('--type=png')).length;
+  await pane.locator('button.show-claude').click();
+  await expect(page.locator('.toast')).toHaveText('The simulator runs on this Mac: show it to a session here');
+  expect(png()).toBe(0);
+});

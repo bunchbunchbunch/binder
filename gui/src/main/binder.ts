@@ -1,10 +1,10 @@
 import { execFile, spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
-import type { SessionRow, Settings, SettingsPatch, SidebarConfig, SidebarScriptInput } from '../shared/api';
+import type { SessionRow, Settings, SettingsPatch, SidebarConfig, SidebarScriptInput, SessionHit } from '../shared/api';
+import { onLines } from './lines';
 
 export type PaneConfig = { name: string; command: string; cwd?: string };
 // A web pane: a page (http or https) rather than a program.
@@ -131,9 +131,9 @@ export function readSettings(env: NodeJS.ProcessEnv): Settings {
     const c = readConfig(path);
     const dirs = c.configDirs && typeof c.configDirs === 'object' ? (c.configDirs as Record<string, string>) : {};
     const appearance = c.appearance === 'light' || c.appearance === 'dark' ? c.appearance : 'auto';
-    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, artifacts: c.artifacts !== false, statusText: typeof c.statusText === 'string' ? c.statusText : null, appearance, configDirs: dirs, sidebar: readSidebar(c.sidebar) };
+    return { path, permissionMode: typeof c.permissionMode === 'string' ? c.permissionMode : null, stickyPrompt: c.stickyPrompt !== false, artifacts: c.artifacts !== false, fastMode: c.fastMode === true, alwaysAllow: c.alwaysAllow !== false, planApproval: c.planApproval !== false, restartOnUpdate: c.restartOnUpdate !== false, notifications: c.notifications !== false, claudeLinks: c.claudeLinks === 'browser' ? 'browser' : 'pane', showImages: c.showImages !== false, editor: typeof c.editor === 'string' && c.editor.trim() ? c.editor : 'open', todoPanel: c.todoPanel !== false, workflowCard: c.workflowCard !== false, worktrees: c.worktrees && typeof c.worktrees === 'object' ? (c.worktrees as { location?: string; branchPrefix?: string }) : {}, diffBase: typeof c.diffBase === 'string' && c.diffBase ? c.diffBase : 'HEAD', terminalCommand: typeof c.terminalCommand === 'string' && c.terminalCommand.trim() ? c.terminalCommand : null, prWatch: c.prWatch !== false, prAutoFix: c.prAutoFix === true, findingsCard: c.findingsCard !== false, fileEditing: c.fileEditing !== false, splitView: c.splitView !== false, sideChat: c.sideChat !== false, schedules: c.schedules !== false, pluginReload: c.pluginReload !== false, previewReload: c.previewReload !== false, previewCommand: typeof c.previewCommand === 'string' && c.previewCommand.trim() ? c.previewCommand : null, simulatorFps: [1, 2, 4].includes(c.simulatorFps as number) ? (c.simulatorFps as number) : 1, statusText: typeof c.statusText === 'string' ? c.statusText : null, appearance, configDirs: dirs, sidebar: readSidebar(c.sidebar) };
   } catch (e) {
-    return { path, permissionMode: null, stickyPrompt: true, artifacts: true, statusText: null, appearance: 'auto', configDirs: {}, sidebar: {}, error: (e as Error).message };
+    return { path, permissionMode: null, stickyPrompt: true, artifacts: true, fastMode: false, alwaysAllow: true, planApproval: true, restartOnUpdate: true, notifications: true, claudeLinks: 'pane', showImages: true, editor: 'open', todoPanel: true, workflowCard: true, worktrees: {}, diffBase: 'HEAD', terminalCommand: null, prWatch: true, prAutoFix: false, findingsCard: true, fileEditing: true, splitView: true, sideChat: true, schedules: true, pluginReload: true, previewReload: true, previewCommand: null, simulatorFps: 1, statusText: null, appearance: 'auto', configDirs: {}, sidebar: {}, error: (e as Error).message };
   }
 }
 
@@ -232,9 +232,8 @@ export function hostInfo(path: string, timeoutMs = 1500): Promise<HostInfo | nul
     };
     const timer = setTimeout(() => finish(null), timeoutMs);
     s.on('error', () => finish(null));
-    const lines = createInterface({ input: s });
-    lines.on('error', () => {});
-    lines.once('line', (line) => {
+    // The first line settles it: finish ends the socket.
+    onLines(s, (line) => {
       try {
         const m = JSON.parse(line);
         finish(m.t === 'info' ? m : null);
@@ -244,6 +243,26 @@ export function hostInfo(path: string, timeoutMs = 1500): Promise<HostInfo | nul
     });
     s.write(JSON.stringify({ t: 'hello', want: 'info' }) + '\n');
   });
+}
+
+/** This Mac's sessions whose prompts or replies hold `query`. */
+export async function searchSessions(b: Binder, query: string): Promise<SessionHit[]> {
+  return JSON.parse(await run(...binderArgs(b, 'sessions', '--search', query), { env: b.env, timeout: 60000 }));
+}
+
+const SCHEDULE_SUBS = new Set(['list', 'add', 'remove', 'pause', 'resume', 'run', 'history', 'tick']);
+
+/** `binder schedule ...` (scheduled tasks, bindertui's schedule.ts), its JSON parsed. */
+export async function scheduleCommand(b: Binder, args: string[]): Promise<unknown> {
+  if (!SCHEDULE_SUBS.has(args[0]) || args.some((a) => typeof a !== 'string')) throw new Error('Not a schedule command');
+  // The app is the Mac's login session, even when started over ssh: its runs' hosts start here, not through launchd.
+  const env = Object.fromEntries(Object.entries(b.env).filter(([k]) => !k.startsWith('SSH_')));
+  return JSON.parse((await run(...binderArgs(b, 'schedule', ...args), { env, timeout: 60000 })) || 'null');
+}
+
+export async function archiveSession(b: Binder, id: string, on: boolean): Promise<string> {
+  const out = await run(...binderArgs(b, 'sessions', on ? '--archive' : '--unarchive', id), { env: b.env, timeout: 30000 });
+  return (JSON.parse(out || '{}') as { message?: string }).message ?? (on ? 'Archived' : 'Unarchived');
 }
 
 export async function listSessions(b: Binder): Promise<SessionRow[]> {
@@ -278,7 +297,7 @@ async function sessionProcess(sessionId: string): Promise<string | undefined> {
 }
 
 /** Makes sure a host serves `sessionId`, starting `binder host` in `cwd` (with `claudeArgs` for claude) when none does. Returns its socket path. */
-export async function ensureHost(b: Binder, cwd: string, sessionId: string, resume: boolean, claudeArgs: string[] = []): Promise<string> {
+export async function ensureHost(b: Binder, cwd: string, sessionId: string, resume: boolean, claudeArgs: string[] = [], worktree = false): Promise<string> {
   const path = socketPath(b.env, sessionId);
   if (await hostInfo(path)) return path;
   const other = await sessionProcess(sessionId);
@@ -288,7 +307,9 @@ export async function ensureHost(b: Binder, cwd: string, sessionId: string, resu
   mkdirSync(dir, { recursive: true });
   const log = join(dir, `host-${sessionId}.log`);
   const out = openSync(log, 'a', 0o600);
-  const [cmd, args] = binderArgs(b, 'host', resume ? '--resume' : '--session-id', sessionId, ...(claudeArgs.length ? ['--', ...claudeArgs] : []));
+  // Where this run's output starts: the log keeps earlier hosts' too.
+  const from = fstatSync(out).size;
+  const [cmd, args] = binderArgs(b, 'host', resume ? '--resume' : '--session-id', sessionId, ...(worktree ? ['--worktree'] : []), ...(claudeArgs.length ? ['--', ...claudeArgs] : []));
   const child = spawn(cmd, args, { cwd, env: b.env, detached: true, stdio: ['ignore', out, out] });
   closeSync(out);
   // A failure to start, or an early exit, ends the wait at once.
@@ -298,7 +319,11 @@ export async function ensureHost(b: Binder, cwd: string, sessionId: string, resu
     forget();
   });
   child.on('exit', (code) => {
-    failed ??= `binder host exited (code ${code}); see ${log}`;
+    // Why, from what it said: an uncaught error's own line (not the stack or the
+    // fields printed after it), else its last line with words ("Not in a git repo").
+    const said = readFileSync(log).subarray(from).toString('utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('at ') && !l.startsWith('Node.js v'));
+    const why = said.findLast((l) => /^\w*Error\b[^:]*: /.test(l)) ?? said.findLast((l) => /[A-Za-z]{2}/.test(l));
+    failed ??= why ?? `binder host exited (code ${code}); see ${log}`;
   });
   child.unref();
   const deadline = Date.now() + START_TIMEOUT_MS;

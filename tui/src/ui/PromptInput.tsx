@@ -1,18 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useInput, usePaste } from 'ink';
 import wrapAnsi from 'wrap-ansi';
-import { readClipboardImage, type ClipboardImage } from '../clipboardImage.js';
+import { readClipboardFile, readClipboardImage } from '../clipboardImage.js';
+import type { ImageAttachment } from '../claudeProcess.js';
+import { attachFile, attachmentLabel, pastedPaths } from '../attachments.js';
 import * as ed from './editor.js';
 import { matchCommands, type SlashCommand } from '../slashCommands.js';
 import { commonPrefix, completeCommand, completePath, wordAt } from '../complete.js';
 import { glimmerAt, keywordColors, SWEEP_MS, ultrathinkRanges } from './ultrathink.js';
 import { copyText, readClipboardText } from '../openUrl.js';
 
-export type Attachment = ClipboardImage & { id: number };
+// An image, PDF or text file, and the "[Image #n]" / "[File #n: name]" that stands for it in the text.
+export type Attachment = ImageAttachment & { id: number; label: string };
 
 type Props = {
   // followup: Ctrl+Enter, send into the current tab instead of a new one.
-  onSubmit: (text: string, images: ClipboardImage[], followup: boolean) => void;
+  // False: it was not sent, so the prompt keeps its text and attachments.
+  onSubmit: (text: string, images: ImageAttachment[], followup: boolean) => void | false;
   isActive: boolean;
   placeholder?: string;
   // The next prompt Claude Code predicts: shown in place of the placeholder,
@@ -56,7 +60,9 @@ const THINK_NOTICE = 'Deeper reasoning requested for this turn';
 //   Up/Down walk the prompt history from the first/last line. Up on an empty
 //   prompt edits the tab's queued prompt first, when it has one.
 //   On an empty prompt, Tab or Right takes the suggested next prompt, as in Claude Code.
-//   Ctrl+V attaches the clipboard image as "[Image #n]", like Claude Code.
+//   Ctrl+V attaches the clipboard image as "[Image #n]", like Claude Code, or a
+//   file copied in Finder; a pasted path to a file (what iTerm2 types for a
+//   dropped file) attaches it too: "[File #n: name]" for a PDF or text file.
 //   Typing "/" opens the command menu and "@" a file menu: Up/Down pick, Tab
 //   or Enter takes the pick, Esc closes. Tab completes paths (and commands
 //   after "!"); with several matches it fills the common part, then lists them.
@@ -144,6 +150,8 @@ export function PromptInput({ onSubmit, isActive, placeholder, suggestion, width
   // an await, when `e` may be stale.
   const pasteText = (raw: string) => {
     const text = raw.replace(/\r\n?/g, '\n').replace(/\n$/, '');
+    const paths = pastedPaths(text);
+    if (paths && attachPaths(paths)) return;
     const breaks = text.split('\n').length - 1;
     if (text.length <= PASTE_INLINE_CHARS && breaks <= PASTE_INLINE_BREAKS) return setE((cur) => ed.insert(cur, text));
     const id = pastes.length + 1;
@@ -156,26 +164,49 @@ export function PromptInput({ onSubmit, isActive, placeholder, suggestion, width
   const submit = (state: ed.Editor, followup = false) => {
     if (!state.value.trim() && !editing) return;
     // Only send images whose placeholder is still in the text.
-    const kept = images.filter((img) => state.value.includes(`[Image #${img.id}]`)).map(({ id: _id, ...img }) => img);
+    const kept = images.filter((img) => state.value.includes(img.label)).map(({ id: _id, label: _label, ...img }) => img);
     // Pasted text goes in place of its placeholder (split/join: no $ patterns).
     const text = pastes.reduce((v, p) => v.split(p.label).join(p.text), state.value);
-    onSubmit(text, kept, followup);
+    if (onSubmit(text, kept, followup) === false) return;
     setE(ed.empty);
     setImages([]);
+    nextAttachment.current = 1;
     setPastes([]);
     setHist(null);
   };
 
-  // Ctrl+V: the clipboard image as "[Image #n]", else the clipboard text.
+  // Numbered from a counter, so attachments added at once (or after an await) each get their own.
+  const nextAttachment = useRef(1);
+  const attach = (a: ImageAttachment) => {
+    const id = nextAttachment.current++;
+    const label = attachmentLabel(a, id);
+    setImages((cur) => cur.concat({ ...a, id, label }));
+    setE((e) => ed.insert(e, label));
+  };
+
+  // Pasted or dropped paths: each file becomes an attachment, and one that
+  // cannot be stays in the prompt as its path, with why. False when none is a
+  // file, so the text pastes as it is.
+  const attachPaths = (paths: Array<{ text: string; path: string }>): boolean => {
+    const found = paths.map((p) => attachFile(p.path));
+    if (found.every((a) => typeof a === 'string' && (a.startsWith('No such file') || a.startsWith('Not a file')))) return false;
+    found.forEach((a, i) => {
+      if (i) setE((cur) => ed.insert(cur, ' '));
+      if (typeof a !== 'string') return attach(a);
+      flash(a);
+      setE((cur) => ed.insert(cur, paths[i].text));
+    });
+    return true;
+  };
+
+  // Ctrl+V: the clipboard image as "[Image #n]", a file copied in Finder, else the clipboard text.
   const pasteClipboard = async () => {
     const img = await readClipboardImage();
-    if (!img) {
-      const text = await readClipboardText();
-      return text ? pasteText(text) : flash('the clipboard is empty');
-    }
-    const id = images.length ? Math.max(...images.map((i) => i.id)) + 1 : 1;
-    setImages(images.concat({ ...img, id }));
-    setE((cur) => ed.insert(cur, `[Image #${id}]`));
+    if (img) return attach(img);
+    const file = await readClipboardFile();
+    if (file && attachPaths([{ text: file, path: file }])) return;
+    const text = await readClipboardText();
+    return text ? pasteText(text) : flash('the clipboard is empty');
   };
 
   // Tab with no menu: complete the word before the cursor.

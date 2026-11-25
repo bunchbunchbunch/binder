@@ -1,4 +1,4 @@
-import type { WireState } from '@shared/wire';
+import { prLine, type PrStatus, type WireState } from '@shared/wire';
 import { modelDisplayName, shortPath } from '../lib/format';
 
 // Permission modes: the badge, and what it means for someone new to Claude Code.
@@ -28,13 +28,27 @@ function Meter({ label, w }: { label: string; w?: { utilization: number; resetsA
   );
 }
 
+/**
+ * The PR badge: its class and what follows "PR #12". Failing checks or a
+ * review asking for changes are red, running checks gold, passing ones green;
+ * no checks, or only skipped ones, neutral.
+ */
+export function prBadge(pr: PrStatus): { tone: 'merged' | 'failing' | 'pending' | 'passing' | 'neutral'; mark: string } {
+  const c = pr.checks;
+  if (pr.state === 'MERGED') return { tone: 'merged', mark: 'merged' };
+  const mark = c.failing.length ? `✗ ${c.failing.length}` : c.pending ? '◐' : c.passing ? '✓' : '';
+  if (c.failing.length || pr.review === 'CHANGES_REQUESTED') return { tone: 'failing', mark };
+  return { tone: c.pending ? 'pending' : c.passing ? 'passing' : 'neutral', mark };
+}
+
 // Under the prompt: where and what is running, the permission mode, the
 // context (`text`, from config.json's statusText), and the account's usage. A
 // click on the folder, the model, the effort level or the permission mode
 // opens its picker; on the context, its breakdown.
-export function StatusBar({ s, text, onPick }: { s: WireState; text: string; onPick: (panel: 'cd' | 'model' | 'effort' | 'mode' | 'context') => void }) {
+export function StatusBar({ s, text, onPick, onFast }: { s: WireState; text: string; onPick: (panel: 'cd' | 'model' | 'effort' | 'mode' | 'context' | 'pr') => void; onFast: () => void }) {
   const model = modelDisplayName(s.model);
   const mode = s.permissionMode ? PERMISSION_MODES[s.permissionMode] : undefined;
+  const pr = s.pr ? prBadge(s.pr) : null;
   return (
     <div className="statusbar">
       <div className="left">
@@ -59,6 +73,20 @@ export function StatusBar({ s, text, onPick }: { s: WireState; text: string; onP
         {mode && (
           <span className={`badge ${s.permissionMode}`} title={`${mode[1]}. Click to change it.`} onClick={() => onPick('mode')}>
             {mode[0]}
+          </span>
+        )}
+        {s.pr && pr && s.pr.state !== 'CLOSED' && (
+          <span
+            className={`badge pr ${pr.tone}`}
+            title={`${prLine(s.pr)}\n${s.pr.title}\nClick for its checks, a fix, or merge when ready (/pr).`}
+            onClick={() => onPick('pr')}
+          >
+            PR #{s.pr.number}{pr.mark && ` ${pr.mark}`}
+          </span>
+        )}
+        {(s.fastMode === 'on' || s.fastMode === 'cooldown') && (
+          <span className={`badge fast ${s.fastMode}`} title={`${s.fastMode === 'on' ? 'Fast mode is on' : 'Fast mode is paused after a rate limit and comes back on by itself'}. Click to turn it off (⌥O).`} onClick={onFast}>
+            {s.fastMode === 'on' ? '↯ fast' : '↯ fast (paused)'}
           </span>
         )}
       </div>

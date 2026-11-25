@@ -1,8 +1,13 @@
-import type { ClaudeEvent, CommandLifecycleEvent, ContentBlock, PromptSuggestionEvent, RateLimitEvent, StreamEvent } from './events.js';
+import type { ClaudeEvent, CommandLifecycleEvent, ContentBlock, FastModeState, PromptSuggestionEvent, RateLimitEvent, StreamEvent } from './events.js';
 import { isInit } from './events.js';
+import { workflowLine, workflowRun } from './workflow.js';
+import type { PrStatus } from './pr.js';
 import type { ImageAttachment } from './claudeProcess.js';
 
-export type ToolResult = { content: string; isError: boolean };
+// An image in a tool's result or sent with a prompt, base64.
+export type ImageData = { mediaType: string; data: string };
+
+export type ToolResult = { content: string; isError: boolean; images?: ImageData[] };
 
 export type Block =
   | { kind: 'thinking'; text: string; final: boolean }
@@ -36,6 +41,8 @@ export type Turn = {
   bash?: boolean;
   // A turn the child started on its own, to report background work that finished.
   auto?: boolean;
+  // Images sent with the prompt (kept in memory only: the event log leaves them out).
+  images?: ImageData[];
 };
 
 // A tab is its latest turn plus the turns before it (follow-ups sent with
@@ -65,7 +72,12 @@ export type BackgroundTask = {
   startedAt?: number;
   // An agent's latest step, e.g. "Searching for …" (task_progress).
   progress?: string;
+  // A workflow's phases so far and its agents (task_progress's workflow_progress).
+  workflow?: WorkflowRun;
 };
+
+export type WorkflowAgent = { label: string; phase?: string; state: string; model?: string; tokens?: number; durationMs?: number; result?: string };
+export type WorkflowRun = { phases: string[]; agents: WorkflowAgent[] };
 
 // Background work that finished, until a turn takes in its result.
 export type Notice = { toolUseId: string; status: string; summary?: string };
@@ -78,6 +90,10 @@ export type Question = {
   toolInput?: Record<string, unknown>;
   // Why a permission prompt was raised, as the child explains it.
   reason?: string;
+  // ExitPlanMode: the plan to approve (markdown).
+  plan?: string;
+  // Workflow: what its script says it is (the approval card shows this, not the script).
+  workflow?: { name?: string; description?: string; phases: string[] };
   questions: Array<{
     question: string;
     header?: string;
@@ -104,6 +120,8 @@ export type State = {
   model?: string;
   cwd?: string;
   permissionMode?: string;
+  // Fast mode as the child last reported it (init, result, or after /fast).
+  fastMode?: FastModeState;
   usage?: Usage;
   question?: Question;
   // Prompt size of the latest API call (input + cache tokens), like Claude Code's context counter.
@@ -142,6 +160,8 @@ export type State = {
   suggestion?: string;
   // The session's name (/rename, /fork's title, claude -n), shown above the tabs.
   title?: string;
+  // The pull request for the session folder's branch, as gh last reported it.
+  pr?: PrStatus;
 };
 
 export type Action =
@@ -163,6 +183,10 @@ export type Action =
   | { type: 'model'; model: string }
   // A viewer changed the permission mode; the next init confirms.
   | { type: 'permission_mode'; mode: string }
+  // Fast mode turned on or off (/fast, Alt+O), as the child then reports it.
+  | { type: 'fast_mode'; state: FastModeState }
+  // The session's pull request, or none.
+  | { type: 'pr'; pr: PrStatus | null }
   | { type: 'event'; event: ClaudeEvent }
   | { type: 'events'; events: ClaudeEvent[] }
   | { type: 'select'; index: number }
@@ -270,11 +294,22 @@ function finalizeBlocks(blocks: Block[], content: ContentBlock[]): Block[] {
   return out;
 }
 
+// The images in a tool result's content (a screenshot, a Read of an image file).
+function toolResultImages(content: unknown): ImageData[] {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((c) => {
+    const src = (c as { type?: unknown; source?: { type?: unknown; media_type?: unknown; data?: unknown } } | null)?.source;
+    if ((c as { type?: unknown })?.type !== 'image' || src?.type !== 'base64' || typeof src.media_type !== 'string' || typeof src.data !== 'string') return [];
+    return [{ mediaType: src.media_type, data: src.data }];
+  });
+}
+
 function attachToolResults(blocks: Block[], content: ContentBlock[]): Block[] {
   let out = blocks;
   for (const cb of content) {
     if (cb.type !== 'tool_result') continue;
-    out = mapTool(out, cb.tool_use_id, (b) => ({ ...b, result: { content: toolResultText(cb.content), isError: Boolean(cb.is_error) } }));
+    const images = toolResultImages(cb.content);
+    out = mapTool(out, cb.tool_use_id, (b) => ({ ...b, result: { content: toolResultText(cb.content), isError: Boolean(cb.is_error), ...(images.length && { images }) } }));
   }
   return out;
 }
@@ -501,11 +536,20 @@ function noteCost(state: State, ev: ClaudeEvent): State {
   return window && window !== state.contextWindow ? { ...next, contextWindow: window } : next;
 }
 
+const FAST_STATES: readonly unknown[] = ['off', 'cooldown', 'on'];
+
+// Init and result carry fast mode's state; older CLIs leave it out.
+function noteFast(state: State, ev: ClaudeEvent): State {
+  const f = (ev as { fast_mode_state?: unknown }).fast_mode_state;
+  return FAST_STATES.includes(f) && f !== state.fastMode ? { ...state, fastMode: f as FastModeState } : state;
+}
+
 function applyEvent(state: State, ev: ClaudeEvent): State {
   // Binder started a new child, which counts cost from zero.
   if (ev.type === 'hc_spawn') return state.processCost ? { ...state, costBase: (state.costBase ?? 0) + state.processCost, processCost: 0 } : state;
-  if (ev.type === 'result') state = noteCost(state, ev);
+  if (ev.type === 'result') state = noteFast(noteCost(state, ev), ev);
   if (isInit(ev)) {
+    state = noteFast(state, ev);
     const caps = ev.capabilities ?? [];
     const canSteer = caps.includes('interrupt_send_now_v1') && caps.includes('msg_lifecycle_v1');
     const next = { ...state, model: ev.model, cwd: ev.cwd, permissionMode: ev.permissionMode, canSteer, suggestion: undefined };
@@ -579,11 +623,13 @@ function applyEvent(state: State, ev: ClaudeEvent): State {
       return state.backgroundTasks.some((b) => b.id === t.task_id) ? { ...next, backgroundTasks: placeTasks(next, next.backgroundTasks) } : next;
     }
     if (sub === 'task_progress') {
-      const p = ev as { task_id?: string; description?: string };
+      const p = ev as { task_id?: string; description?: string; workflow_progress?: unknown };
       const task = state.backgroundTasks.find((t) => t.id === p.task_id);
-      const progress = p.description && p.description !== task?.description ? p.description : undefined;
-      if (!task || progress === task.progress) return state;
-      return { ...state, backgroundTasks: state.backgroundTasks.map((t) => (t === task ? { ...t, progress } : t)) };
+      const workflow = workflowRun(p.workflow_progress);
+      // A workflow's step is its phase and agents; another task's, the description.
+      const progress = workflow ? workflowLine(workflow) : p.description && p.description !== task?.description ? p.description : undefined;
+      if (!task || (progress === task.progress && !workflow)) return state;
+      return { ...state, backgroundTasks: state.backgroundTasks.map((t) => (t === task ? { ...t, progress, ...(workflow && { workflow }) } : t)) };
     }
     // What finishes waits for a turn to take it in: the running turn's next
     // request, else a turn the child starts on its own about it.
@@ -739,7 +785,7 @@ function step(state: State, action: Action): State {
       const item = state.queue[at];
       const started = item.followup ? startTurn(tab, item.prompt) : { ...tab, status: 'running' as const };
       return {
-        ...replaceTab(state, { ...started, uuid: action.uuid, seq: state.seq, ...(item.auto && { auto: true }) }),
+        ...replaceTab(state, { ...started, uuid: action.uuid, seq: state.seq, ...(item.auto && { auto: true }), ...(item.images.some((i) => i.mediaType.startsWith('image/')) && { images: item.images.filter((i) => i.mediaType.startsWith('image/')) }) }),
         queue: state.queue.filter((_, i) => i !== at),
         running: action.tabId,
         streamIndex: {},
@@ -791,10 +837,14 @@ function step(state: State, action: Action): State {
       return { ...state, model: action.model };
     case 'permission_mode':
       return { ...state, permissionMode: action.mode };
+    case 'fast_mode':
+      return action.state === state.fastMode ? state : { ...state, fastMode: action.state };
+    case 'pr':
+      return JSON.stringify(action.pr ?? undefined) === JSON.stringify(state.pr) ? state : { ...state, pr: action.pr ?? undefined };
     case 'reset': {
       // Account-wide and per-process facts carry over until the new child reports its own.
       const next = action.state;
-      return { ...next, usage: next.usage ?? state.usage, model: next.model ?? state.model, cwd: next.cwd ?? state.cwd, permissionMode: next.permissionMode ?? state.permissionMode, canSteer: state.canSteer };
+      return { ...next, usage: next.usage ?? state.usage, model: next.model ?? state.model, cwd: next.cwd ?? state.cwd, permissionMode: next.permissionMode ?? state.permissionMode, fastMode: next.fastMode ?? state.fastMode, canSteer: state.canSteer };
     }
     default:
       return state;

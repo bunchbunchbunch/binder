@@ -1,4 +1,5 @@
 import type { DOMElement } from 'ink';
+import { drawImages, inlineImages } from './images.js';
 
 // Double-height rows for big headings. iTerm2 and Terminal.app draw a row at
 // twice the size when it carries the DEC line attribute ESC#3 (top half) or
@@ -48,6 +49,12 @@ function screenTop(node: DOMElement): number {
   return y;
 }
 
+function screenLeft(node: DOMElement): number {
+  let x = 0;
+  for (let n: DOMElement | undefined = node; n; n = n.parentNode) x += n.yogaNode?.getComputedLeft() ?? 0;
+  return x;
+}
+
 // Rows under a box drawn over the viewport (the "?" shortcuts): stamped, they
 // would draw the box at double size.
 function coveredRows(): Set<number> {
@@ -88,6 +95,39 @@ export function stampRows(): string {
   return atRows(rows);
 }
 
+// Images (images.ts) are drawn once the viewport settles: Ink rewrites only
+// the rows that change, so an image stays until its rows do. A new layout of
+// the viewport (scrolling, new text, a box drawn over it) draws them again
+// IMAGE_SETTLE_MS later; a frame that leaves the viewport as it was (the
+// spinner) draws nothing.
+const IMAGE_SETTLE_MS = 120;
+let imageLayout = '';
+let imageTimer: NodeJS.Timeout | null = null;
+
+function viewportImages(): { layout: string; draw: () => string } {
+  if (!viewport?.yogaNode) return { layout: '', draw: () => '' };
+  const node = viewport;
+  const lines = textOf(node).split('\n');
+  const covered = coveredRows();
+  const top = screenTop(node);
+  // The viewport's padding (paddingX={1}) is where its text starts.
+  const left = screenLeft(node) + (node.yogaNode?.getComputedPadding(0 /* Yoga's Edge.Left */) ?? 0);
+  return { layout: `${top},${left},${[...covered].join(' ')}\n${lines.join('\n')}`, draw: () => drawImages(lines, top, left, covered) };
+}
+
+function scheduleImages(write: (s: string) => void): void {
+  if (!inlineImages) return;
+  if (viewportImages().layout === imageLayout) return;
+  if (imageTimer) clearTimeout(imageTimer);
+  imageTimer = setTimeout(() => {
+    imageTimer = null;
+    const v = viewportImages();
+    imageLayout = v.layout;
+    const seq = v.draw();
+    if (seq) write(seq);
+  }, IMAGE_SETTLE_MS);
+}
+
 // Ink wraps every frame in a synchronized update, so the terminal never shows
 // the rows between the unstamp and the stamp.
 export function stampFrames(stream: NodeJS.WriteStream): void {
@@ -98,6 +138,7 @@ export function stampFrames(stream: NodeJS.WriteStream): void {
     const ok = write(chunk, ...rest);
     const after = chunk === BEGIN_SYNC ? unstampRows() : '';
     if (after) write(after);
+    if (chunk === END_SYNC) scheduleImages((s) => void write(s));
     return ok;
   }) as typeof stream.write;
 }

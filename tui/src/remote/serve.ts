@@ -1,11 +1,12 @@
 import WebSocket from 'ws';
+import { archivedIds } from '../archive.js';
 import { connect, type Socket } from 'node:net';
 import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, unlinkSync, unwatchFile, watchFile } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline';
+import { onLines } from '../lines.js';
 import { Handshake, Opener, fingerprint, seal, type CipherState } from './noise.js';
 import { configPath, expandHome, loadConfig, logPathFor, type Device, type RemoteConfig } from './config.js';
 import { lockPath, socketPath, socketSessionIds } from './sockets.js';
@@ -34,7 +35,8 @@ const oneLine = (s: string) => s.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/
 const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 type HostInfo = { sessionId: string; cwd: string; title: string; running: boolean; pid: number };
-export type SessionRow = { id: string; cwd: string; title: string; live: boolean; running: boolean; lastUsedAt: string; branch?: string };
+// `archived`: archived out of the lists (only with includeArchived).
+export type SessionRow = { id: string; cwd: string; title: string; live: boolean; running: boolean; lastUsedAt: string; branch?: string; archived?: boolean };
 
 /** Asks a host socket what it runs; null when nothing answers. */
 export function hostInfo(sessionId: string, timeoutMs = 1500): Promise<HostInfo | null> {
@@ -47,9 +49,8 @@ export function hostInfo(sessionId: string, timeoutMs = 1500): Promise<HostInfo 
     };
     const timer = setTimeout(() => finish(null), timeoutMs);
     s.on('error', () => finish(null));
-    const lines = createInterface({ input: s });
-    lines.on('error', () => {});
-    lines.once('line', (line) => {
+    // The first line settles it: finish ends the socket.
+    onLines(s, (line) => {
       try {
         const m = JSON.parse(line);
         finish(m.t === 'info' ? m : null);
@@ -85,10 +86,12 @@ type ListOptions = {
   configDirs?: string[];
   // Leave out headless runs binder did not start (scripts and hooks that call `claude -p`), as /resume does.
   interactiveOnly?: boolean;
+  // Archived sessions too, marked (the Mac app shows them on request); otherwise they are left out.
+  includeArchived?: boolean;
 };
 
 /** Live hosts first, then what /resume would offer, newest first, inside the allowed roots. */
-export async function listSessions(roots: string[] | undefined, { configDirs = [configDir()], interactiveOnly = false }: ListOptions = {}): Promise<SessionRow[]> {
+export async function listSessions(roots: string[] | undefined, { configDirs = [configDir()], interactiveOnly = false, includeArchived = false }: ListOptions = {}): Promise<SessionRow[]> {
   const rows = new Map<string, SessionRow>();
   const transcripts = configDirs
     .flatMap((d) => listTranscripts(d))
@@ -111,8 +114,10 @@ export async function listSessions(roots: string[] | undefined, { configDirs = [
     const prev = rows.get(id);
     rows.set(id, { id, cwd: info.cwd, title: info.title || prev?.title || '', live: true, running: info.running, lastUsedAt: new Date().toISOString(), branch: prev?.branch });
   }
+  const archived = archivedIds();
   return [...rows.values()]
-    .filter((r) => r.cwd && insideRoots(r.cwd, roots))
+    .filter((r) => r.cwd && insideRoots(r.cwd, roots) && (includeArchived || r.live || !archived.has(r.id)))
+    .map((r) => (archived.has(r.id) ? { ...r, archived: true } : r))
     .sort((a, b) => Number(b.live) - Number(a.live) || b.lastUsedAt.localeCompare(a.lastUsedAt))
     .slice(0, 150);
 }
@@ -344,9 +349,7 @@ class Client {
       socket.on('error', () => {
         if (first) refuse('That session is not running');
       });
-      const lines = createInterface({ input: socket, crlfDelay: Infinity });
-      lines.on('error', () => {});
-      lines.on('line', (line) => {
+      onLines(socket, (line) => {
         if (first) {
           let m: { t?: string; error?: string } | null = null;
           try {

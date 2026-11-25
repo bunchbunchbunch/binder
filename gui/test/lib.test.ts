@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type { WireBlock } from '../src/shared/wire';
+import type { PrStatus, WireBlock, WireTab } from '../src/shared/wire';
 import { lastToolIndex, splitWork, turnVerb, ultrathinkParts, workSummary } from '../src/renderer/src/lib/work';
 import { diffLines, unifiedDiffRows, withContext } from '../src/renderer/src/lib/diff';
 import { commonPrefix, localCommand, matchCommands, visibleCommands, wordAt } from '../src/renderer/src/lib/commands';
 import { elapsed, fmtCost, fmtTokens, modelDisplayName } from '../src/renderer/src/lib/format';
 import { findModel, stepEffort, stepModel } from '../src/renderer/src/lib/models';
+import { sessionChecklist } from '../src/renderer/src/lib/checklist';
+import { tabsFindings } from '../src/renderer/src/lib/findings';
+import { prBadge } from '../src/renderer/src/components/StatusBar';
 
 const text = (t: string, final = true): WireBlock => ({ kind: 'text', text: t, final });
 const tool = (name: string, result = true): WireBlock => ({ kind: 'tool_use', id: name, name, input: {}, final: true, children: [], ...(result && { result: { content: 'ok', isError: false } }) });
@@ -100,6 +103,13 @@ describe('commands', () => {
     expect(matchCommands(commands, '/model x')).toEqual([]);
   });
 
+  it('puts an exact name or alias first, so Enter runs it', () => {
+    const more = [...commands, { name: 'permission-mode', description: '', aliases: ['mode'] }];
+    expect(matchCommands(more, '/mode').map((c) => c.name)).toEqual(['permission-mode', 'model']);
+    expect(matchCommands(more, '/mcp').map((c) => c.name)).toEqual(['mcp']);
+    expect(matchCommands(more, '/new').map((c) => c.name)).toEqual(['clear']);
+  });
+
   it("hides the TUI's markdown switch", () => {
     expect(visibleCommands(commands).map((c) => c.name)).not.toContain('markdown');
   });
@@ -155,5 +165,44 @@ describe("pi's model and effort steps", () => {
     expect(stepEffort(findModel(models, 'sonnet'), 'xhigh')).toBe('low');
     expect(stepEffort(findModel(models, 'sonnet'), null)).toBe('low');
     expect(stepEffort(findModel(models, 'claude-haiku-4-5-20251001'), 'high')).toBeUndefined();
+  });
+});
+
+describe('the pinned todos', () => {
+  const todo = (id: string, content: string): WireBlock => ({ kind: 'tool_use', id, name: 'TodoWrite', input: { todos: [{ content, status: 'pending' }] }, final: true, children: [], result: { content: 'ok', isError: false } });
+  const turn = (seq: number | undefined, block: WireBlock) => ({ prompt: 'p', status: 'done' as const, blocks: [block], ...(seq !== undefined && { seq }) });
+
+  it('takes the latest list in send order, across tabs', () => {
+    // Tab 1 was sent first, then tab 2, then a follow-up into tab 1.
+    const tabs: WireTab[] = [
+      { id: 1, ...turn(3, todo('c', 'follow-up')), earlier: [turn(1, todo('a', 'first'))] },
+      { id: 2, ...turn(2, todo('b', 'second')), earlier: [] },
+    ];
+    expect(sessionChecklist(tabs)?.items.map((i) => i.text)).toEqual(['follow-up']);
+    // An older host sends no order: tabs as they were made.
+    const old = tabs.map((t) => ({ ...turn(undefined, t.blocks[0]), id: t.id, earlier: t.earlier.map((e) => turn(undefined, e.blocks[0])) }));
+    expect(sessionChecklist(old)?.items.map((i) => i.text)).toEqual(['second']);
+  });
+});
+
+describe('findings', () => {
+  it("names the review's turn, so a later review with the same text starts fresh", () => {
+    const review = { prompt: '/code-review', status: 'done' as const, blocks: [{ kind: 'text' as const, text: '1 finding:\n\n1. 🔴 Important `calc.js:3`: Off by one', final: true }] };
+    const fix = { prompt: 'Fix this finding', status: 'done' as const, blocks: [] };
+    expect(tabsFindings([{ id: 1, ...fix, earlier: [review] }], 0)).toMatchObject({ tabId: 1, turn: 0 });
+    expect(tabsFindings([{ id: 1, ...review, earlier: [review, fix] }], 0)).toMatchObject({ tabId: 1, turn: 2 });
+  });
+});
+
+describe('the PR badge', () => {
+  const pr = (checks: Partial<PrStatus['checks']>, more: Partial<PrStatus> = {}): PrStatus => ({ number: 12, title: 't', url: 'u', state: 'OPEN', draft: false, head: 'h', mergeable: 'MERGEABLE', review: '', checks: { passing: 0, failing: [], pending: 0, ...checks }, ...more });
+
+  it('is green only for passing checks; none, or only skipped ones, is neutral; changes requested is red', () => {
+    expect(prBadge(pr({ passing: 3 }))).toEqual({ tone: 'passing', mark: '✓' });
+    expect(prBadge(pr({}))).toEqual({ tone: 'neutral', mark: '' });
+    expect(prBadge(pr({ passing: 3 }, { review: 'CHANGES_REQUESTED' }))).toEqual({ tone: 'failing', mark: '✓' });
+    expect(prBadge(pr({ failing: ['lint', 'test'], passing: 1 }))).toEqual({ tone: 'failing', mark: '✗ 2' });
+    expect(prBadge(pr({ pending: 1, passing: 1 }))).toEqual({ tone: 'pending', mark: '◐' });
+    expect(prBadge(pr({ passing: 1 }, { state: 'MERGED' }))).toEqual({ tone: 'merged', mark: 'merged' });
   });
 });

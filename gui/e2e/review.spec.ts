@@ -95,7 +95,7 @@ test('two images pasted at once each get their own label', async () => {
   await expect(page.locator('.attachment')).toHaveCount(2);
 });
 
-test('an image in a response is a link and is never fetched', async () => {
+test('an image from the web in a response waits to be asked for, and is never fetched on its own', async () => {
   run = await launch(SHOWCASE);
   const { page, project } = run;
   const fetched: string[] = [];
@@ -105,7 +105,7 @@ test('an image in a response is a link and is never fetched', async () => {
   await page.keyboard.press('Enter');
   await expect(page.locator('.turn-note')).toContainText('48.2s', { timeout: 20000 });
   await expect(page.locator('.md img')).toHaveCount(0);
-  await expect(page.locator('.md .md-image')).toHaveText('Image: Alignment before and after (example.com)');
+  await expect(page.locator('.md .md-image')).toHaveText('Image: Alignment before and after · load from example.com');
   expect(fetched.filter((u) => u.includes('example.com'))).toEqual([]);
 });
 
@@ -133,5 +133,5 @@ test('a host that cannot start says so at once', async () => {
   await page.locator('.picker-search').fill(project);
   await page.locator('.picker-item', { hasText: `Start in ${project}` }).waitFor();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.banner')).toContainText('binder host exited', { timeout: 8000 });
+  await expect(page.locator('.banner')).toContainText('Cannot find module', { timeout: 8000 });
 });

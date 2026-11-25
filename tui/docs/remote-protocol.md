@@ -97,14 +97,14 @@ paused, or this client revoked).
 
 | `t` | Fields | Result |
 |-----|--------|--------|
-| `send` | `text`, `images?`, `tabId?` | `{tabId}`. A new tab, or into tab `tabId` (sent at once on its running turn when the child supports it, else after it). Text starting with `!` runs in bash mode. `images` is `[{mediaType, data}]`, data base64 |
+| `send` | `text`, `images?`, `tabId?` | `{tabId}`. A new tab, or into tab `tabId` (sent at once on its running turn when the child supports it, else after it). Text starting with `!` runs in bash mode. `images` is `[{mediaType, data, name?}]`, data base64: an image (`image/png`, `jpeg`, `gif`, `webp`), a PDF (`application/pdf`, which Claude reads as a document) or a text file (`text/plain`, sent as its text); `name` is the file's. A Codex session refuses PDFs |
 | `edit_queued` | `tabId`, `prompt`, `text` | `{}`. The prompt still in `queue` for tab `tabId` whose text is `prompt` becomes `text`, keeping its place and images. An empty `text` removes it; for the prompt that opens a new tab, the tab goes too, with anything queued into it. Refused once the prompt is no longer queued (sent, or removed) |
 | `interrupt` | | `{}` |
 | `stop_bash` | `tabId` | `{}` |
 | `stop_task` | `taskId` | `{}`; stops a background shell or agent (an id from `backgroundTasks`). Nothing follows up on its end |
 | `task_output` | `taskId` | `{output, totalBytes, truncated}`: the end of a background shell's or monitor's output, at most its last 8 KiB, escape sequences included. Refused for an agent |
 | `background` | | `{}`; the running turn's foreground commands and agents carry on in the background (Claude Code's `Ctrl+B`) |
-| `answer` | `requestId`, `answers` | `{}`; AskUserQuestion: `answers` maps question text to the chosen label(s) (comma-separated for multi-select) |
+| `answer` | `requestId`, `answers` | `{}`; AskUserQuestion: `answers` maps question text to the chosen label(s) (comma-separated for multi-select). A permission prompt: the chosen option's label, `Allow`, `Deny`, or one of its "always allow" options, which also applies the rules or mode switch Claude Code suggested. Any other label, or `{}`, is refused (`Not a choice on this prompt: …`) and the prompt stays open; a plan to approve takes any text (below) |
 | `allow` / `deny` | `requestId` | `{}`; a permission prompt. `deny` also declines an AskUserQuestion: Claude is told the user declined and carries on |
 | `rewind_targets` | | `{targets: [{uuid, prompt, tabId}]}` newest first |
 | `rewind_preview` | `uuid` | `{canRewind, files, error}`: whether the code can be restored to before that prompt, and how many files it would change |
@@ -117,7 +117,9 @@ paused, or this client revoked).
 | `models` | | `{models: [{value, displayName, description?, resolvedModel?, supportedEffortLevels?}]}` |
 | `set_model` | `model` | `{}` |
 | `set_effort` | `level` | `{}` |
-| `set_permission_mode` | `mode` (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`) | `{}`; until the child restarts. Claude Code refuses `bypassPermissions` in a session it did not start in that mode, and `auto` where auto mode is off |
+| `set_permission_mode` | `mode` (`default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`) | `{}`; until the child restarts. Another name is refused, listing these (`Not a permission mode: bogus (one of default, acceptEdits, …)`); `manual` is taken as `default`. Claude Code refuses `bypassPermissions` in a session it did not start in that mode, and `auto` where auto mode is off |
+| `cycle_mode` | | `{message}`; the next permission mode in the order `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`, skipping any the child refuses (Claude Code's `Shift+Tab`) |
+| `set_fast_mode` | `on?` | `{message}`: what to tell the user. Turns fast mode on or off (without `on`, flips it). When fast mode cannot serve, the host stops asking for it and `message` says why. Refused in a Codex session |
 | `mcp_status` | | `{servers: [{name, status, error?}]}` |
 | `mcp_toggle` | `server`, `enabled` | `{}` |
 | `mcp_reconnect` | `server` | `{}` |
@@ -130,7 +132,29 @@ paused, or this client revoked).
 | `history` | | `{prompts: string[]}` oldest first, at most 200 |
 | `complete` | `partial`, `command?` | `{items: string[]}`: paths in the session folder, or command names |
 | `tool_detail` | `tabId`, `toolUseId` | `{block}`: the tool call untruncated |
+| `diff` | `base?` | `{base, repo, files: [{path, status, patch, cut?}]}`: the session folder's working tree against `base` (else config.json's `diffBase`, else HEAD), as unified diffs; `status` is `modified`, `added`, `deleted`, `renamed` or `untracked` (shown as all added; an untracked symlink shows the path it points to, as git would commit it, and an untracked folder such as a repo of its own is left out). Refused outside a git repo, and when `base` is not a branch or commit there (one starting with `-` is never passed to git) |
+| `branches` | | `{branches}`: the repo's branches, the current one first |
+| `plugins` | `available?` | `{installed: [{id, version, scope, enabled}], available?: [{pluginId, name, description, marketplaceName}]}`: `claude plugin list` run as the session's claude runs (its config dir and folder); `available` adds the marketplaces' plugins. Refused in a Codex session |
+| `plugin_action` | `action`, `plugin`, `scope?` | `{message}`; `action` is `install`, `uninstall`, `enable` or `disable` (`claude plugin <action>`). Unless config.json's `pluginReload` is false, the change then loads into the running claude (its `reload_plugins` control request; after the turn, if one runs), and the session's `commands` follow. A plugin that installs by running a command is refused: install it from a terminal |
+| `side_question` | `question`, `history?` | `{response, synthetic}`: a side question (`/btw`), answered from the conversation so far without tools and kept out of the transcript; `history` is the side chat's earlier `[{question, response}]` (binder leaves out an entry whose response is its own "No answer for this side question" placeholder). Works while a turn runs. Refused in a Codex session |
+| `file_list` | `dir?` | `{dir, entries: [{name, dir}]}`: one folder of the session folder (`dir` relative to it, the folder itself by default), folders first; `.git` and `.DS_Store` are left out, and a symlink to a folder outside the session folder is listed as a file (`dir: false`). A path outside the session folder (`..`, a symlink leading out) is refused, here and in the three below |
+| `file_index` | | `{files, cut}`: every file in the session folder, relative to it, for finding one by name: git's list (tracked, and untracked files git does not ignore), else a walk that skips `node_modules` and other build folders; at most 20,000 (`cut` says there were more) |
+| `file_read` | `path` | `{path, size, mtime, text}`, or `{path, size, mtime, binary: true}` for a file with a NUL byte in its first 8,000 bytes. Refused over 2 MB, and for text that is not UTF-8 (a save would change it) |
+| `file_write` | `path`, `text`, `mtime?`, `force?` | `{path, mtime, size}`; saves `text` over the file, or makes it. With `mtime` (as `file_read` gave it), refused when the file changed on disk since, unless `force`. Refused when the host's config.json has `fileEditing: false`. Never writes outside the session folder: the folder the file goes in must be inside it by its real path (so a new file through a symlinked folder leading out is refused), a broken symlink is refused, and the file is opened without following a symlink and checked to be the one inside before anything is written |
+| `pr` | | `{pr}`: asks gh about the session folder's branch now and returns its PR (as in the state), or null |
+| `pr_fix` | | `{message}`; sends a prompt asking Claude to fix the PR's failing checks, else to address the review asking for changes. Refused when there is neither |
+| `pr_merge` | | `{message}`; `gh pr merge --auto --squash`: GitHub merges the PR once its checks pass and it is approved |
+| `image` | `tabId`, `toolUseId` or `turn`, `index` | `{mediaType, data}` (base64): image `index` of a tool's result, or of the prompt of turn `turn` (its place among the tab's turns, oldest first). The state carries only each image's `{mediaType, bytes}` |
 | `restart` | | `{}`; restarts claude after it exited |
+| `restart_host` | | `{}`; a headless `binder host` lets claude exit, then ends (`ended`), so the viewer can open the session again on binder's newer code. Refused while a turn runs or is queued, a question is open, or a background task or bash command runs, and by the terminal app's own host |
+
+`binder sessions` (what the Mac app lists, over ssh for another computer) prints the
+sessions as JSON, archived ones marked `archived: true`; `binder sessions --search <text>`
+prints `[{id, snippet}]` for the ones whose prompts or replies hold the text, and `binder
+sessions --archive <id>` / `--unarchive <id>` move one out of the lists and back (archiving
+keeps the worktree binder made for a session while a host still runs it). An unknown id,
+a missing one, or an unknown flag prints `{error}` and exits 1, changing nothing. The
+gateway's own list leaves archived sessions out.
 
 `/resume`, `/clear`, `/fork`, `/rewind`, `/cd` and `/chrome` are refused while a turn
 runs or is queued. Slash commands binder runs itself (see README) must be sent as these
@@ -149,6 +173,11 @@ writes the hello itself. The first line is a hello the gateway writes (a client'
   takes session requests. With `roots`, it refuses (`{"t":"error"}`) when its folder is
   outside them, and refuses `cd` and `resume` targets outside them.
 
+A line may be at most 64 MiB (a 32 MB PDF is about 45 MB as base64). The host refuses a
+longer request without taking it in and keeps the connection: the reply goes to the
+request when its `id` is at the start or end of the line (the Mac app writes it last), else
+a `notice` says why.
+
 ## 4. Session state
 
 After `attach` (and after the host moves to another session), the host sends a full
@@ -165,7 +194,8 @@ snapshot, then patches at most every 120 ms while something changes.
 `ended` means the host is shutting down (its binder quit); the gateway then reports
 `detached`.
 
-`state` fields: `sessionId`, `cwd` (the folder Claude is in, which follows its own `cd`), `model`, `permissionMode`, `usage`, `contextTokens`, `contextWindow` (the model's context window,
+`state` fields: `sessionId`, `cwd` (the folder Claude is in, which follows its own `cd`), `model`, `permissionMode`, `fastMode`
+(`on`, `cooldown` while paused after a rate limit, `off`, or null until the child says), `usage`, `contextTokens`, `contextWindow` (the model's context window,
 once a turn has reported it, or null), `costUsd` (what the session has cost, in dollars at
 API list prices, summed across every child binder ran for it, or null),
 `running` (tab id or null), `runningSince` (when the running turn started, in ms since the
@@ -176,18 +206,39 @@ Code's estimate of the running turn's thinking tokens so far, 0 when idle), `int
 work another tab's turn took in, which the user cannot edit), `steer` (`{tabId, prompt}` or null), `question`,
 `childExit` (`{code, stderr}` or null), `effort`, `suggestion` (the next prompt Claude Code
 predicts after a turn, or null), `backgroundTasks` (`[{id, type, description, toolUseId?,
-tabId?, startedAt?, progress?}]`, shells and agents still running: the tool call that
+tabId?, startedAt?, progress?, workflow?}]`, shells, agents and workflows still running
+(`workflow`: `{phases, agents: [{label, phase?, state, model?, tokens?, durationMs?, result?}]}`):
+the tool call that
 started each and the tab whose turn made it, when it started in ms since the epoch, and an
 agent's latest step), `title` (the session's name, from `rename`, `fork`'s title, or
-Claude Code, or null; a session's name can change but never goes back to null), `tabs`.
+Claude Code, or null; a session's name can change but never goes back to null), `outdated`
+(true once binder was rebuilt after this `binder host` started, so it runs the older code and
+may not know newer requests; the Mac app then sends `restart_host` when the session is idle), `pr`
+(the pull request for the session folder's branch, as `gh pr view` last reported it, or null:
+`{number, title, url, state, draft, head, mergeable, review, checks: {passing, failing, pending},
+changesRequested?}`, where `state` is `OPEN`, `MERGED` or `CLOSED`, `review` is GitHub's review
+decision, `failing` names the failed checks, and `changesRequested` is `{at, by}` for the latest
+review asking for changes; the host asks when it starts, after each turn, and every minute while
+the PR is open, unless config.json's `prWatch` is false), `tabs`.
 
 `question` is null or `{requestId, kind, toolName, toolInput?, reason?, questions}`, where `kind`
 is `ask` (AskUserQuestion) or `permission` (allow or deny `toolName` with `toolInput`; `reason`
-is why Claude Code asks, when it says),
+is why Claude Code asks, when it says; its options are `Allow`, any "always allow" options
+built from Claude Code's suggestions, and `Deny`). A plan to approve (ExitPlanMode) is a
+`permission` question with `plan`, the plan's markdown in full; its options are `Yes, and …`
+choices that also set the permission mode, and `No, keep planning`. Answer it with a
+choice's label, or with any other text: what Claude should change before it starts. A
+workflow (the Workflow tool) is a `permission` question with `workflow`
+(`{name?, description?, phases}`, read from its script); its options are `Run once`, `Always
+allow workflows` and `Deny`,
 and `questions` is `[{question, header?, multiSelect?, options: [{label, description?}]}]`.
 
-A tab: `{id, prompt, status, blocks, result?, uuid?, bash?, auto?, earlier}`, where `earlier`
-holds the tab's previous turns, each `{prompt, status, blocks, result?, uuid?, bash?, auto?}`.
+A tab: `{id, prompt, status, blocks, result?, uuid?, bash?, auto?, images?, seq?, earlier}`, where `earlier`
+holds the tab's previous turns, each `{prompt, status, blocks, result?, uuid?, bash?, auto?, images?, seq?}`.
+`seq` is a turn's place in the session's send order across all tabs, so the turn sent last is
+the one with the highest `seq`, whichever tab it is in.
+`images` (`[{mediaType, bytes}]`) are the ones sent with the prompt, kept while the host runs
+(the event log leaves them out); a tool result's `images` are the same shape. Fetch one with `image`.
 `auto` marks a turn about background work that finished, started by Claude Code or by
 binder; its `prompt` is a heading (`Background task finished: …`), not the user's.
 `status` is `queued`, `running`, `done`, `error`, `interrupted` or `superseded`. A block is
@@ -212,5 +263,5 @@ operations, applied in order:
 |------|--------|--------|
 | `set` | `tab` | add or replace the whole tab (tabs stay sorted by id) |
 | `remove` | `id` | drop the tab |
-| `blocks` | `id`, `from`, `blocks`, `fields` | replace the tab's blocks from index `from` on, then copy `fields` (`prompt`, `status`, `result`, `uuid`, `bash`, `auto`) onto the tab |
+| `blocks` | `id`, `from`, `blocks`, `fields` | replace the tab's blocks from index `from` on, then copy `fields` (`prompt`, `status`, `result`, `uuid`, `bash`, `auto`, `seq`) onto the tab |
 | `append` | `id`, `index`, `text`, `fields` | append `text` to the text or thinking block at `index`, then copy `fields` |

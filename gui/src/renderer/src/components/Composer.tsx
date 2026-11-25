@@ -33,7 +33,11 @@ type Props = {
   onEditQueued?: () => void;
   // A queued prompt is being edited: Enter on an empty prompt submits too (it removes it).
   editing: boolean;
-  onSubmit: (text: string, images: ImageAttachment[], followup: boolean) => void;
+  // Whether the prompt holds text, each time that changes.
+  onTyping: (typing: boolean) => void;
+  // False: the send was refused, and the prompt stays as it is. A promise of
+  // false: it failed, and the prompt comes back (unless you typed anew).
+  onSubmit: (text: string, images: ImageAttachment[], followup: boolean) => false | Promise<boolean> | void;
 };
 
 type MenuItem = { key: string; label: string; description?: string; start: number; end: number; text: string; run?: boolean; needsArg?: boolean };
@@ -41,19 +45,39 @@ type MenuItem = { key: string; label: string; description?: string; start: numbe
 const PASTE_INLINE_CHARS = 800;
 const PASTE_INLINE_BREAKS = 2;
 const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
+// Text files go as their text (bindertui's attachments.ts has the same list).
+const TEXT_EXTS = /\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|xml|html|css|[cm]?js|tsx?|jsx|py|rb|go|rs|java|kt|swift|c|h|cc|cpp|hpp|m|sh|zsh|bash|sql|log|ini|cfg|conf|tex|rst|svg)$/i;
+const LIMITS = { image: 5 * 1024 * 1024, pdf: 32 * 1024 * 1024, text: 512 * 1024 };
 
-type Attached = ImageAttachment & { id: number; url: string };
+// `label` stands for it in the text: "[Image #1]", or "[File #2: notes.pdf]".
+type Attached = ImageAttachment & { id: number; url: string; label: string };
 
-function readImage(file: File): Promise<ImageAttachment> {
+function readFile(file: File, mediaType: string, name?: string): Promise<ImageAttachment> {
   return new Promise((done, fail) => {
     const r = new FileReader();
-    r.onload = () => done({ mediaType: file.type, data: String(r.result).replace(/^data:[^,]*,/, '') });
+    r.onload = () => done({ mediaType, data: String(r.result).replace(/^data:[^,]*,/, ''), ...(name && { name }) });
     r.onerror = () => fail(r.error);
     r.readAsDataURL(file);
   });
 }
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ conn, cwd, commands, suggestion, running, active, draft = '', onEditQueued, editing, onSubmit }, ref) {
+const readImage = (file: File) => readFile(file, file.type);
+
+// What a dropped or pasted file can be sent as: an image, a PDF, a text file, or why not (null: mention it instead).
+function fileKind(f: File): { kind: 'image' | 'pdf' | 'text' } | { error: string } | null {
+  if (IMAGE_TYPES.test(f.type)) return f.size > LIMITS.image ? { error: `${f.name} is over 5 MB, the most an image can be` } : { kind: 'image' };
+  if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) return f.size > LIMITS.pdf ? { error: `${f.name} is over 32 MB, the most a PDF can be` } : { kind: 'pdf' };
+  if (f.type.startsWith('text/') || /^application\/(json|xml|x-yaml|toml)/.test(f.type) || TEXT_EXTS.test(f.name)) return f.size > LIMITS.text ? null : { kind: 'text' };
+  return null;
+}
+
+// A file of any other name (a Makefile) is text if it has no NULs and reads as UTF-8 (bindertui's attachments.ts).
+async function looksLikeText(f: File): Promise<boolean> {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  return !bytes.subarray(0, 8192).includes(0) && !new TextDecoder().decode(bytes).includes('\uFFFD');
+}
+
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ conn, cwd, commands, suggestion, running, active, draft = '', onEditQueued, editing, onTyping, onSubmit }, ref) {
   const ta = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState(draft);
   const [cursor, setCursor] = useState(draft.length);
@@ -97,6 +121,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
   useEffect(() => {
     if (active) ta.current?.focus();
   }, [active]);
+
+  // Text in the prompt: the session holds off restarting its host for it, and
+  // a failed send's prompt comes back only to an empty one.
+  const typing = value !== '';
+  const typingNow = useRef(typing);
+  typingNow.current = typing;
+  useEffect(() => onTyping(typing), [typing]);
 
   // Grow with the text, up to the CSS max-height.
   useLayoutEffect(() => {
@@ -186,13 +217,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
   const nextImage = useRef(1);
   const attach = (img: ImageAttachment) => {
     const id = nextImage.current++;
-    setImages((cur) => cur.concat({ ...img, id, url: `data:${img.mediaType};base64,${img.data}` }));
-    insert(`[Image #${id}]`);
+    const label = img.mediaType.startsWith('image/') ? `[Image #${id}]` : `[File #${id}: ${img.name ?? 'file'}]`;
+    setImages((cur) => cur.concat({ ...img, id, label, url: `data:${img.mediaType};base64,${img.data}` }));
+    insert(label);
   };
 
+  // Images, PDFs and text files go with the prompt; any other file on this Mac is mentioned by its path.
   const attachFiles = async (files: File[]) => {
     for (const f of files) {
-      if (IMAGE_TYPES.test(f.type)) attach(await readImage(f));
+      const k = fileKind(f);
+      if (k && 'error' in k) flash(k.error);
+      else if (k?.kind === 'image') attach(await readImage(f));
+      else if (k?.kind === 'pdf') attach(await readFile(f, 'application/pdf', f.name));
+      else if (k?.kind === 'text' || (f.size <= LIMITS.text && (await looksLikeText(f)))) attach(await readFile(f, 'text/plain', f.name));
       else {
         const path = window.binder.pathForFile(f);
         if (path) insert(`@${path} `);
@@ -211,17 +248,29 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
 
   const submit = (text: string, followup: boolean) => {
     if (!text.trim() && !editing) return;
-    const kept = images.filter((img) => text.includes(`[Image #${img.id}]`)).map(({ mediaType, data }) => ({ mediaType, data }));
+    const kept = images.filter((img) => text.includes(img.label)).map(({ mediaType, data, name }) => ({ mediaType, data, ...(name && { name }) }));
     // Pasted text goes in place of its placeholder (split/join: no $ patterns).
     const full = pastes.reduce((v, p) => v.split(p.label).join(p.text), text);
-    onSubmit(full, kept, followup);
+    const sent = onSubmit(full, kept, followup);
+    // Refused: the text and its attachments stay for another try.
+    if (sent === false) return;
     if (full.trim()) setHistory((h) => (h[h.length - 1] === full ? h : h.concat(full)));
+    const was = { images, pastes, next: nextImage.current };
     set('');
     setImages([]);
     setPastes([]);
     nextImage.current = 1;
     setHist(null);
     setTabMenu(null);
+    // Failed: they come back, unless something new was typed meanwhile.
+    if (!(sent instanceof Promise)) return;
+    void sent.then((ok) => {
+      if (ok || typingNow.current) return;
+      set(text);
+      setImages(was.images);
+      setPastes(was.pastes);
+      nextImage.current = was.next;
+    });
   };
 
   // Tab with no menu: complete the word before the cursor.
@@ -345,7 +394,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
 
   const bash = value.startsWith('!');
   const think = /\bultrathink\b/i.test(value);
-  const shownImages = images.filter((img) => value.includes(`[Image #${img.id}]`));
+  const shownImages = images.filter((img) => value.includes(img.label));
   const placeholder = editing ? 'Enter removes the queued prompt, Esc keeps it' : suggestion || (running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : 'Ask Claude anything. ? for shortcuts');
   const hint = useMemo(() => {
     if (editing) return 'editing the queued prompt · ⏎ saves · esc cancels';
@@ -381,9 +430,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ co
         {shownImages.length > 0 && (
           <div className="attachments">
             {shownImages.map((img) => (
-              <span key={img.id} className="attachment">
-                <img src={img.url} alt="" />
-                Image #{img.id}
+              <span key={img.id} className={`attachment${img.mediaType.startsWith('image/') ? '' : ' file'}`} title={img.name}>
+                {img.mediaType.startsWith('image/') ? <img src={img.url} alt="" /> : <span className="file-icon">{img.mediaType === 'application/pdf' ? 'PDF' : 'TXT'}</span>}
+                {img.mediaType.startsWith('image/') ? `Image #${img.id}` : `File #${img.id}: ${img.name ?? 'file'}`}
               </span>
             ))}
           </div>

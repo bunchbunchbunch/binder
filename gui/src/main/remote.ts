@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SessionList, SessionRow, SidebarScriptInput } from '../shared/api';
+import type { SessionList, SessionRow, SidebarScriptInput, SessionHit } from '../shared/api';
 
 // Another computer's sessions, over SSH: config.json's `computers`, each an
 // SSH destination (a Host in ~/.ssh/config, say). That computer's own binder
@@ -91,6 +91,18 @@ export class Remote {
     return `export PATH=${shellQuote((await this.locate()).path)}; ${command}`;
   }
 
+  async search(query: string): Promise<SessionHit[]> {
+    const { command } = await this.locate();
+    const hits: SessionHit[] = JSON.parse(await this.exec(await this.withPath(`exec ${sh([...command, 'sessions', '--search', query])}`), { timeout: 60000 }));
+    return hits.map((h) => ({ ...h, computer: this.name }));
+  }
+
+  async archive(id: string, on: boolean): Promise<string> {
+    const { command } = await this.locate();
+    const out = await this.exec(await this.withPath(`exec ${sh([...command, 'sessions', on ? '--archive' : '--unarchive', id])}`));
+    return (JSON.parse(out || '{}') as { message?: string }).message ?? (on ? 'Archived' : 'Unarchived');
+  }
+
   async sessions(): Promise<SessionList> {
     const { home, command } = await this.locate();
     const rows: SessionRow[] = JSON.parse(await this.exec(await this.withPath(`exec ${sh([...command, 'sessions'])}`)));
@@ -101,9 +113,9 @@ export class Remote {
    * Makes sure a host serves the session there. `binder start` runs in the
    * login shell, so the host gets the environment a terminal would have.
    */
-  async start(cwd: string, sessionId: string, resume: boolean, claudeArgs: string[] = []): Promise<void> {
+  async start(cwd: string, sessionId: string, resume: boolean, claudeArgs: string[] = [], worktree = false): Promise<void> {
     const { command } = await this.locate();
-    const start = [...command, 'start', '--cwd', cwd, resume ? '--resume' : '--session-id', sessionId, ...(claudeArgs.length ? ['--', ...claudeArgs] : [])];
+    const start = [...command, 'start', '--cwd', cwd, resume ? '--resume' : '--session-id', sessionId, ...(worktree ? ['--worktree'] : []), ...(claudeArgs.length ? ['--', ...claudeArgs] : [])];
     await this.exec(`exec "$SHELL" -l -i -c ${shellQuote(`exec ${sh(start)}`)}`, { timeout: 45000 });
   }
 

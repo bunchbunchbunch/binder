@@ -1,8 +1,8 @@
 import type { ChildProcess } from 'node:child_process';
 import { connect } from 'node:net';
-import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
 import type { HostMessage } from '../shared/wire';
+import { onLines } from './lines';
 
 type Pending = { resolve: (r: Record<string, unknown>) => void; reject: (e: Error) => void };
 
@@ -53,17 +53,15 @@ export class HostConnection {
   attach(): Promise<void> {
     return new Promise((done, fail) => {
       let attached = false;
-      const lines = createInterface({ input: this.stream.input, crlfDelay: Infinity });
-      lines.on('error', () => {});
-      // readline buffers a line with no newline without bound; drop the stream
-      // if a remote computer floods one, so it cannot grow memory without limit.
+      // A line with no newline is buffered without bound; drop the stream if a
+      // remote computer floods one, so it cannot grow memory without limit.
       let sinceNewline = 0;
       this.stream.input.on('data', (chunk: Buffer) => {
         const nl = chunk.lastIndexOf(0x0a);
         sinceNewline = nl === -1 ? sinceNewline + chunk.length : chunk.length - nl - 1;
         if (sinceNewline > 16 * 1024 * 1024) this.stream.input.destroy();
       });
-      lines.on('line', (line) => {
+      onLines(this.stream.input, (line) => {
         let m: Record<string, unknown>;
         try {
           m = JSON.parse(line);

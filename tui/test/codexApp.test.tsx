@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { App } from '../src/ui/App.js';
@@ -33,6 +33,31 @@ function setup(fixture: string) {
 }
 
 describe('App on a Codex session', () => {
+  it('refuses a PDF with a notice and keeps the prompt, instead of crashing', async () => {
+    const cwd = process.cwd();
+    const stateDir = setup('approve.jsonl');
+    const pdf = join(stateDir, 'doc.pdf');
+    writeFileSync(pdf, '%PDF-1.4 fake');
+    const launch = parseArgs(['--codex'], cwd) as Launch;
+    const session = sessionFor(launch, cwd);
+    const cfg = join(cwd, 'nonexistent-codex-home');
+    session.start();
+    const host = new SessionHost(session, initialState(launch.sessionId), cwd, cfg);
+    const ui = render(<App host={host} configDir={cfg} onQuit={() => {}} />);
+    await until(() => plainFrame(ui).includes('GPT-6-Luna'), 8000, () => ui.lastFrame());
+    ui.stdin.write(`\x1b[200~${pdf} \x1b[201~`);
+    await until(() => plainFrame(ui).includes('[File #1: doc.pdf]'), 8000, () => ui.lastFrame());
+    ui.stdin.write(' summarize');
+    await sleep(30);
+    ui.stdin.write('\r');
+    await until(() => plainFrame(ui).includes('Codex reads images and text files, not PDFs'), 8000, () => ui.lastFrame());
+    expect(plainFrame(ui)).toContain('❯ [File #1: doc.pdf] summarize');
+    expect(host.state.tabs).toEqual([]);
+    await session.close();
+    ui.unmount();
+  });
+
+
   it('runs a prompt with an approval, shows Codex in the bar, and resumes as Codex from the session index', async () => {
     const cwd = process.cwd();
     const stateDir = setup('approve.jsonl');

@@ -4,6 +4,7 @@ import { stateDir, STATE_FILE_MODE } from './paths.js';
 import type { Agent } from './session.js';
 import type { SessionSummary } from './transcripts.js';
 import { logPath } from './eventLog.js';
+import type { Worktree } from './worktree.js';
 
 export type SessionRecord = {
   id: string;
@@ -18,6 +19,8 @@ export type SessionRecord = {
   agent?: Agent;
   // A Codex session's thread, which Codex names itself (binder's id is its own).
   threadId?: string;
+  // The worktree binder made for it (binder --worktree); archiving removes it.
+  worktree?: Worktree;
 };
 
 function indexPath(): string {
@@ -35,7 +38,7 @@ export function readSessions(): SessionRecord[] {
   }
 }
 
-export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'configDir'> & Partial<Pick<SessionRecord, 'firstPrompt' | 'title' | 'agent' | 'threadId'>>): void {
+export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'configDir'> & Partial<Pick<SessionRecord, 'firstPrompt' | 'title' | 'agent' | 'threadId' | 'worktree'>>): void {
   const now = new Date().toISOString();
   const all = readSessions();
   const existing = all.find((s) => s.id === update.id);
@@ -47,6 +50,7 @@ export function upsertSession(update: Pick<SessionRecord, 'id' | 'cwd' | 'config
     if (update.title) existing.title = update.title;
     if (update.agent) existing.agent = update.agent;
     if (update.threadId) existing.threadId = update.threadId;
+    if (update.worktree) existing.worktree = update.worktree;
   } else {
     all.push({ ...update, createdAt: now, lastUsedAt: now });
   }

@@ -1,8 +1,13 @@
 import { memo } from 'react';
+import { HostImage } from './Images';
 import type { WireTab, WireTurn } from '@shared/wire';
 import { fmtDuration, plural } from '../lib/format';
 import { lastToolIndex, RAINBOW, splitWork, ultrathinkParts, workSummary } from '../lib/work';
 import { Blocks, type BlockCtx } from './Blocks';
+import { FindingsCard } from './FindingsCard';
+import { turnFindings } from '../lib/findings';
+import { useApp } from '../store';
+import type { WireBlock } from '@shared/wire';
 
 // One tab: each turn's prompt, its work (folded into a summary once the
 // response lands, unless expanded), the response, and follow-ups waiting
@@ -44,10 +49,15 @@ export function PromptText({ text }: { text: string }) {
 }
 
 // `pinned`: the prompt is held in the sticky header instead.
-function Turn({ turn, expanded, onToggle, ctx, latest, pinned, queued }: { turn: WireTurn; expanded: boolean; onToggle: () => void; ctx: BlockCtx; latest: boolean; pinned?: boolean; queued?: QueueControls }) {
+// `index`: the turn's place among the tab's turns, oldest first (how the host finds its images).
+function Turn({ turn, index, expanded, onToggle, ctx, latest, pinned, queued }: { turn: WireTurn; index: number; expanded: boolean; onToggle: () => void; ctx: BlockCtx; latest: boolean; pinned?: boolean; queued?: QueueControls }) {
   const { work, response } = splitWork(turn.blocks);
   // Expanded, the work keeps the text written between tool calls in place.
   const split = lastToolIndex(turn.blocks) + 1;
+  // A code review's findings show as a card, in place of the review's text.
+  const findingsCard = useApp((st) => st.findingsCard);
+  const found = findingsCard && turn.status !== 'running' ? turnFindings(turn) : null;
+  const shown = (bs: WireBlock[]) => (found?.fromText ? bs.filter((b) => b !== found.block) : bs);
   return (
     <div className="turn" data-turn data-latest={latest || undefined}>
       {turn.auto ? (
@@ -59,6 +69,14 @@ function Turn({ turn, expanded, onToggle, ctx, latest, pinned, queued }: { turn:
           </div>
         )
       )}
+      {/* Images sent with the prompt, under it (also while the prompt itself is pinned above the tabs). */}
+      {turn.images?.length ? (
+        <div className="prompt-images">
+          {turn.images.map((img, i) => (
+            <HostImage key={i} img={img} at={{ conn: ctx.conn, session: ctx.session, tabId: ctx.tabId, turn: index, index: i }} />
+          ))}
+        </div>
+      ) : null}
       {work.length > 0 && (
         <button className={`work-toggle${expanded ? ' open' : ''}`} onClick={onToggle} data-work={latest || undefined}>
           <span className="chev">▶</span>
@@ -69,13 +87,14 @@ function Turn({ turn, expanded, onToggle, ctx, latest, pinned, queued }: { turn:
       {expanded && work.length > 0 ? (
         <>
           <div className="work">
-            <Blocks blocks={turn.blocks.slice(0, split)} ctx={ctx} />
+            <Blocks blocks={shown(turn.blocks.slice(0, split))} ctx={ctx} />
           </div>
-          <Blocks blocks={turn.blocks.slice(split)} ctx={ctx} />
+          <Blocks blocks={shown(turn.blocks.slice(split))} ctx={ctx} />
         </>
       ) : (
-        <Blocks blocks={expanded ? turn.blocks : response} ctx={ctx} />
+        <Blocks blocks={shown(expanded ? turn.blocks : response)} ctx={ctx} />
       )}
+      {found && <FindingsCard findings={found.findings} review={{ conn: ctx.conn, tabId: ctx.tabId, turn: index, cwd: ctx.cwd, local: ctx.local }} />}
       {turn.status === 'queued' && (
         <div className="turn-note">
           Queued, waiting for the current turn to finish
@@ -111,9 +130,9 @@ function TranscriptImpl({ tab, ctx, expanded, expandEarlier, onToggle, pending, 
   return (
     <div className="transcript">
       {tab.earlier.map((turn, i) => (
-        <Turn key={i} turn={turn} expanded={expandEarlier} onToggle={onToggle} ctx={ctx} latest={false} pinned={turn === pinned} />
+        <Turn key={i} turn={turn} index={i} expanded={expandEarlier} onToggle={onToggle} ctx={ctx} latest={false} pinned={turn === pinned} />
       ))}
-      <Turn turn={tab} expanded={expanded} onToggle={onToggle} ctx={ctx} latest pinned={tab === pinned} queued={queued} />
+      <Turn turn={tab} index={tab.earlier.length} expanded={expanded} onToggle={onToggle} ctx={ctx} latest pinned={tab === pinned} queued={queued} />
       {pending.map((p, i) =>
         p.auto ? (
           <div key={i} className="turn">

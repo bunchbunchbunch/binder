@@ -4,6 +4,7 @@ import { highlightCode } from './md/highlight.js';
 import { clean, truncate, width as strWidth, wrap } from './md/text.js';
 import { styled, theme, type Style } from './md/theme.js';
 import { toolSummary } from './toolSummary.js';
+import { findingPlace, reportedFindings, severityName, type Finding } from '../findings.js';
 
 type ToolBlock = Extract<Block, { kind: 'tool_use' }>;
 
@@ -47,6 +48,13 @@ function cleanDeep<T>(v: T): T {
   if (Array.isArray(v)) return v.map((x) => cleanDeep(x)) as T;
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) as T;
   return v;
+}
+
+// A file path as an OSC 8 link to the file: iTerm2 opens it on Cmd+click.
+// Each part is encoded whole, so a # or ? in a name is not read as a fragment or query.
+function fileLink(label: string, path: string): string {
+  const abs = path.startsWith('/') ? path : `${process.cwd()}/${path}`;
+  return `\x1b]8;;file://${abs.split('/').map(encodeURIComponent).join('/')}\x1b\\${label}\x1b]8;;\x1b\\`;
 }
 
 function shortPath(p: string): string {
@@ -97,6 +105,19 @@ function renderUnifiedDiff(diff: string, kind: string, w: number): string[] {
   });
 }
 
+const SEVERITY: Record<string, Style> = { important: { fg: '#E06C75' }, pre_existing: { fg: '#C9A0FF' }, nit: { fg: '#E8C07D' } };
+
+/** A code review's findings, one or more rows each: severity, place (unless `place` is false), what is wrong (and, in detail, how it fails). */
+export function findingRows(findings: Finding[], w: number, detail = false, place = true): string[] {
+  return findings.flatMap((f) => {
+    const sev = f.severity ? styled(`● ${severityName(f.severity)}`, SEVERITY[f.severity]) + ' ' : styled('● ', MUTED);
+    const head = sev + (place ? `${styled(clean(findingPlace(f)), PATH)}  ` : '');
+    const summary = clean(f.summary).replace(/\s+/g, ' ');
+    if (!detail) return [truncate(head + summary, w)];
+    return [...wrap(head + summary, w), ...(f.scenario ? wrap(styled(`  Failure scenario: ${clean(f.scenario).replace(/\s+/g, ' ')}`, MUTED), w) : [])];
+  });
+}
+
 export function renderTool(block: ToolBlock, w: number): ToolRendering {
   const a = cleanDeep(args(block));
   const name = block.name;
@@ -107,7 +128,7 @@ export function renderTool(block: ToolBlock, w: number): ToolRendering {
       const path = str(a.file_path);
       const body = renderDiff(str(a.old_string), str(a.new_string), w);
       if (block.result?.isError) body.push(...resultLines(block, w));
-      return { title: `Edit ${styled(shortPath(path), PATH)}${a.replace_all ? styled(' (all)', MUTED) : ''}`, body, preview: 12 };
+      return { title: `Edit ${fileLink(styled(shortPath(path), PATH), path)}${a.replace_all ? styled(' (all)', MUTED) : ''}`, body, preview: 12 };
     }
     case 'Write': {
       const path = str(a.file_path);
@@ -116,12 +137,12 @@ export function renderTool(block: ToolBlock, w: number): ToolRendering {
       const code = highlightCode(lines.slice(0, 200).join('\n'), langFromPath(path)).split('\n');
       const body = code.map((l) => styled('+ ', ADD) + truncate(l, w - 2));
       if (block.result?.isError) body.push(...resultLines(block, w));
-      return { title: `Write ${styled(shortPath(path), PATH)} ${styled(`${lines.length} lines`, MUTED)}`, body, preview: 6 };
+      return { title: `Write ${fileLink(styled(shortPath(path), PATH), path)} ${styled(`${lines.length} lines`, MUTED)}`, body, preview: 6 };
     }
     case 'Patch': {
       const changes = Array.isArray(a.changes) ? (a.changes as Array<{ path: string; kind?: string; diff?: string }>) : [];
       const many = changes.length > 1;
-      const label = (c: { path: string; kind?: string }) => styled(shortPath(c.path), PATH) + (c.kind === 'add' ? styled(' (new)', MUTED) : c.kind === 'delete' ? styled(' (deleted)', MUTED) : '');
+      const label = (c: { path: string; kind?: string }) => fileLink(styled(shortPath(c.path), PATH), c.path) + (c.kind === 'add' ? styled(' (new)', MUTED) : c.kind === 'delete' ? styled(' (deleted)', MUTED) : '');
       const body = changes.flatMap((c) => [...(many ? [label(c)] : []), ...renderUnifiedDiff(c.diff ?? '', c.kind ?? 'update', w)]);
       if (block.result?.isError) body.push(...resultLines(block, w));
       const title = changes.length ? `Patch ${many ? styled(`${changes.length} files`, MUTED) : label(changes[0])}` : 'Patch';
@@ -131,7 +152,9 @@ export function renderTool(block: ToolBlock, w: number): ToolRendering {
       const path = str(a.file_path);
       const range = a.offset || a.limit ? styled(` lines ${a.offset ?? 1}${a.limit ? `-${Number(a.offset ?? 1) + Number(a.limit) - 1}` : '+'}`, MUTED) : '';
       const n = block.result ? block.result.content.split('\n').length : 0;
-      return { title: `Read ${styled(shortPath(path), PATH)}${range}${done ? styled(` · ${n} lines`, MUTED) : ''}`, body: block.result?.isError ? resultLines(block, w) : [], preview: 0 };
+      const pics = block.result?.images?.length ?? 0;
+      const count = pics ? `${pics} image${pics === 1 ? '' : 's'}` : `${n} lines`;
+      return { title: `Read ${fileLink(styled(shortPath(path), PATH), path)}${range}${done ? styled(` · ${count}`, MUTED) : ''}`, body: block.result?.isError ? resultLines(block, w) : [], preview: 0 };
     }
     case 'Bash': {
       const cmd = str(a.command).replace(/\s+/g, ' ').trim();
@@ -171,6 +194,10 @@ export function renderTool(block: ToolBlock, w: number): ToolRendering {
       return { title: `WebSearch ${styled(str(a.query), { fg: '#E8C07D' })}`, body: resultLines(block, w), preview: 3 };
     case 'Skill':
       return { title: `Skill ${styled('/' + str(a.skill), { fg: '#C9A0FF' })}${a.args ? ' ' + str(a.args) : ''}`, body: [], preview: 0 };
+    case 'ReportFindings': {
+      const findings = reportedFindings(block.input);
+      return { title: `Findings ${styled(`${findings.length}`, MUTED)}`, body: findingRows(findings, w), preview: 10 };
+    }
     case 'AskUserQuestion': {
       const qs = Array.isArray(a.questions) ? (a.questions as Array<{ question: string }>) : [];
       const answered = clean(block.result?.content ?? '').match(/"([^"]+)"="([^"]+)"/g) ?? [];

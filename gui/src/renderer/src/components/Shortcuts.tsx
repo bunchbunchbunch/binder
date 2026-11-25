@@ -17,17 +17,24 @@ const SHORTCUTS: [key: string, action: string][] = [
   ['esc esc', 'to rewind'],
   ['⌃E', 'to expand the work'],
   ['⌃O', 'for full detail'],
+  ['⌃T', 'for todos and the plan'],
+  ['⌃`', "for the session's terminal"],
   ['⌃B', 'to run in background'],
   ['⌃L', 'to pick a model'],
   ['⌃P', 'to cycle models'],
   ['⇧ tab', 'to cycle effort'],
+  ['⌥M', 'to cycle permission modes'],
+  ['⌥O', 'for fast mode'],
   ['⌃← / ⌃→', 'to switch tabs'],
   ['⌥1-9', 'to jump to a tab'],
   ['pgup / pgdn', 'to scroll'],
   ['⌃V', 'to paste an image'],
   ['⌃]', 'for the latest artifact'],
+  ['⌃\\', 'to close or reopen the claude.ai pane'],
   ['⌘N', 'for a new session'],
   ['⌘K', 'to open a session'],
+  ['⌘P', 'to find a file'],
+  ['⌘\\', 'for two sessions side by side'],
   ['⌘1-9', 'to switch sessions'],
   ['⌘W', 'to close a session'],
   ['⌃⌘S', 'to hide the sidebar'],
@@ -61,13 +68,18 @@ const KEYS: [string, string][] = [
   ['Ctrl+L', 'Pick the model (/model)'],
   ['Ctrl+P / Shift+Ctrl+P', 'Switch to the next / previous model, as in pi'],
   ['Shift+Tab', "Switch to the model's next effort level, as in pi"],
+  ['Option+M', 'The next permission mode, skipping any Claude refuses (/permission-mode picks one)'],
+  ['Option+O', 'Fast mode on or off (/fast). The status bar shows ↯ fast while it is on'],
   ['PgUp / PgDn, Home / End', 'Scroll the tab'],
   ['Esc', 'Interrupt the running turn (or stop a bash command); twice when idle: rewind'],
   ['Ctrl+E', 'Expand or collapse the work (thinking and tool calls) behind a response'],
   ['Ctrl+O', 'Full tool output, thinking, and subagent detail'],
+  ['Ctrl+T', 'Open the pinned todos and plan in full, or close them'],
+  ['Ctrl+`', "The session's terminal: show (and focus) it, or hide it"],
   ['Ctrl+B', 'Move the running command or agent to the background; /tasks or a click on its row shows its output'],
-  ['Ctrl+V', 'Paste the clipboard: an image as [Image #n], or its text. Cmd+V and drag and drop work too'],
+  ['Ctrl+V', 'Paste the clipboard: an image as [Image #n], or its text. Cmd+V and drag and drop work too, and take files: a PDF or text file as [File #n: name], another file as its path'],
   ['Ctrl+]', 'Open the latest artifact'],
+  ['Ctrl+\\', 'Close the claude.ai pane beside the session, or open its last page again'],
   ['Ctrl+R', 'Restart claude after it exits, or reopen a session that ended'],
   ['Ctrl+C', 'Copy the selection; twice with nothing selected quits'],
 ];
@@ -76,9 +88,12 @@ const KEYS: [string, string][] = [
 const WINDOW_KEYS: [string, string][] = [
   ['Cmd+N or Cmd+T', 'New session in a folder'],
   ['Cmd+K', 'Open a session (search all of them)'],
+  ['Cmd+P', 'Find a file in the session folder, to read or edit it (/open)'],
+  ['Cmd+\\', 'Two sessions side by side, or one again (/window gives a session a window of its own)'],
   ['Cmd+1-9, Cmd+Shift+[ / ]', 'Switch between open sessions'],
   ['Cmd+W', 'Close the session in the app (its host keeps running until idle)'],
   ['Ctrl+Cmd+S', 'Hide or show the sidebar'],
+  ['Cmd+,', "Settings: binder's config.json (/settings)"],
   ['Cmd+/', 'This guide: the keys and the thinking behind them'],
 ];
 
@@ -106,8 +121,9 @@ export function HelpView({ commandCount }: { commandCount: number }) {
       <KeyTable keys={[...KEYS, ...WINDOW_KEYS]} />
       <h2>Commands</h2>
       <p>
-        Type / to browse all {commandCount}. Binder runs /help, /resume, /clear, /fork, /rename, /rewind, /cd, /model, /effort, /mcp, /chrome, /artifacts and /exit itself; the rest
-        go to Claude Code.
+        Type / to browse all {commandCount}. Binder runs /help, /resume, /clear, /fork, /rename, /rewind, /cd, /model, /effort, /fast, /permission-mode, /mcp, /chrome,
+        /artifacts, /files, /diff, /findings, /btw, /schedule, /plugins, /pr, /tasks, /preview, /simulator, /open, /window, /settings and /exit itself; the rest go to
+        Claude Code.
       </p>
       <p style={{ color: 'var(--text-faint)' }}>Esc closes this.</p>
     </div>
@@ -117,7 +133,7 @@ export function HelpView({ commandCount }: { commandCount: number }) {
 // What the guide says before the keys. Edit freely: it is the app's pitch.
 const PRINCIPLES: [lead: string, rest: string][] = [
   ['Keyboard first.', 'Every action has a key, and most are one chord. The mouse works too, but nothing needs it.'],
-  ["The terminal's keys.", "These are binder's TUI keys, so your hands work the same in a terminal and here. The only additions are ⌘ keys, and they act on the window: sessions, the sidebar, settings."],
+  ["The terminal's keys.", "These are binder's TUI keys, so your hands work the same in a terminal and here. The only additions are ⌘ keys, which act on the window (sessions, files, the sidebar, settings), and ⌃` and ⌃\\ for the session's terminal and the claude.ai pane."],
   ['One shape for every panel.', 'Sessions, folders, models, settings: each is a list. Type to filter, ↑↓ to move, ⏎ to pick, esc to back out.'],
   ['A GUI where it pays.', 'Responses render as documents, with real heading sizes, tables, highlighted code, and diffs, which a terminal can only approximate.'],
   ['Sessions outlive the window.', 'As with tmux, the app attaches to a session host. The TUI and the phone can attach to the same session, and quitting the app leaves a running turn running.'],

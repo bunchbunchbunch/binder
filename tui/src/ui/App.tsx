@@ -16,10 +16,20 @@ import { PromptInput } from './PromptInput.js';
 import { QuestionView } from './QuestionView.js';
 import { StatusBar } from './StatusBar.js';
 import { BackgroundTasks } from './BackgroundTasks.js';
+import { PinnedPanel } from './Pinned.js';
+import { DiffView } from './DiffView.js';
+import { SideChat, type SideItem } from './SideChat.js';
+import { prLine, prTone } from '../pr.js';
+import { tabsFindings } from '../findings.js';
+import { addSchedule, describeWhen, nextFor, splitWhen } from '../schedule.js';
+import { binderConfig } from '../config.js';
 import { HelpView } from './HelpView.js';
 import { Shortcuts } from './Shortcuts.js';
 import { Welcome } from './Welcome.js';
-import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, McpPanel, ModelPanel, ResumePanel, RewindPanel, SettingsPanel, TasksPanel, rewindTargets } from './panels.js';
+import { ArtifactsPanel, ChromePanel, ConfirmPanel, EffortPanel, FilesPanel, McpPanel, ModePanel, ModelPanel, PrPanel, FindingsPanel, SchedulePanel, PluginsPanel, whenText, ResumePanel, RewindPanel, SettingsPanel, TasksPanel, rewindTargets } from './panels.js';
+import { modeLabel } from '../permissions.js';
+import { ring } from '../attention.js';
+import { setShowImages } from './images.js';
 import { SPINNER, elapsed, statusText, thinkingCount, turnVerb } from './tabLayout.js';
 import { MARKDOWN_STYLES, markdownStyle, setMarkdownStyle, type MarkdownStyle } from './md/theme.js';
 import { clean } from './md/text.js';
@@ -41,12 +51,17 @@ function permissionModeLine(mode?: string): { text: string; color: string } | un
       return { text: ' ⏸ plan mode on', color: 'green' };
     case 'dontAsk':
       return { text: ' ▸▸ dont ask on', color: 'yellow' };
+    case 'auto':
+      return { text: ' ▸▸ auto mode on', color: '#C9A0FF' };
     default:
       return undefined;
   }
 }
 
 const DOUBLE_ESC_MS = 600;
+
+// The PR row: red, gold or green; neutral (no checks, or only skipped ones) in the default color.
+const PR_COLORS: Record<ReturnType<typeof prTone>, string | undefined> = { failing: '#E06C75', pending: '#E8C07D', passing: '#98C379', neutral: undefined };
 
 // A command or agent the running turn waits on, which Ctrl+B moves to the background.
 function waitsOnForeground(blocks: Block[]): boolean {
@@ -57,7 +72,7 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 // binder's own panels, shown in place of the transcript.
 type Panel =
-  | { kind: 'resume' | 'mcp' | 'model' | 'effort' | 'chrome' | 'rewind' | 'artifacts' | 'tasks' | 'settings' }
+  | { kind: 'resume' | 'mcp' | 'model' | 'effort' | 'mode' | 'chrome' | 'rewind' | 'artifacts' | 'files' | 'pr' | 'findings' | 'schedule' | 'plugins' | 'tasks' | 'settings' }
   | { kind: 'confirm'; title: string; question: string; yes: string; onYes: () => void };
 
 
@@ -71,10 +86,14 @@ export type AppProps = {
   stickyPrompt?: boolean;
   /** The status row's right end (config.json statusText), a template. */
   statusText?: string;
+  /** Ring the bell when a turn ends or a question arrives in the background (config.json bell). */
+  bell?: boolean;
+  /** The latest todo list and plan, pinned above the prompt (config.json todoPanel). */
+  todoPanel?: boolean;
   onQuit: () => void;
 };
 
-export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, statusText: statusTextAtStart, onQuit }: AppProps) {
+export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, statusText: statusTextAtStart, bell: bellAtStart, todoPanel: todoPanelAtStart, onQuit }: AppProps) {
   const state = useSyncExternalStore(host.subscribe, host.getState);
   const dispatch = host.dispatch.bind(host);
   const session = host.session;
@@ -94,6 +113,23 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
   const [menuOpen, setMenuOpen] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
   const [help, setHelp] = useState(false);
+  // /diff: the session's changes in place of the transcript, against this base.
+  const [diffBase, setDiffBase] = useState<string | null>(null);
+  // /btw's side chat, while open: its questions and answers (null while waiting).
+  const [side, setSide] = useState<SideItem[] | null>(null);
+  const sideIds = useRef(0);
+  const askSide = (question: string) => {
+    // binder's own "no answer" is not history.
+    const history = (side ?? []).flatMap((it) => (it.response !== null && !it.error && !it.synthetic ? [{ question: it.question, response: it.response }] : []));
+    // The answer lands on its own question: not another one, nor a side chat opened since.
+    const id = ++sideIds.current;
+    const set = (item: Partial<SideItem>) => setSide((items) => (items ? items.map((it) => (it.id === id ? { ...it, ...item } : it)) : items));
+    setSide((items) => [...(items ?? []), { id, question, response: null }]);
+    host.sideQuestion(question, history).then(
+      (r) => set({ response: r.response, ...(r.synthetic && { synthetic: true }) }),
+      (e) => set({ error: errText(e) }),
+    );
+  };
   const [mdStyle, setMdStyle] = useState(markdownStyle);
   const [sticky, setSticky] = useState(stickyPrompt === true);
   const [statusTemplate, setStatusTemplate] = useState(statusTextAtStart);
@@ -127,6 +163,22 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
       host.off('plan', setPlan);
     };
   }, [host]);
+
+  // The bell, when the work stops or a question arrives (attention.ts rings
+  // only while the terminal is in the background).
+  const [bell, setBell] = useState(bellAtStart === true);
+  const [pinned, setPinned] = useState(todoPanelAtStart !== false);
+  // Ctrl+T, as in Claude Code: the pinned panel opens to every todo and the plan.
+  const [pinnedOpen, setPinnedOpen] = useState(false);
+  // Only to redraw the tab when /settings switches images (images.ts holds the switch).
+  const [images, setImages] = useState(0);
+  const seen = useRef({ running: state.running, question: state.question?.requestId });
+  useEffect(() => {
+    const finished = seen.current.running !== null && state.running === null;
+    const asked = state.question !== undefined && state.question.requestId !== seen.current.question;
+    seen.current = { running: state.running, question: state.question?.requestId };
+    if (bell && (finished || asked)) ring();
+  }, [state.running, state.question, bell]);
 
   // Spinner while a turn runs.
   const running = state.running !== null;
@@ -234,6 +286,20 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
       .catch((e) => flash(`/effort: ${errText(e)}`));
   };
 
+  const setMode = (mode: string) => {
+    setPanel(null);
+    host
+      .setPermissionMode(mode === 'manual' ? 'default' : mode)
+      .then(() => flash(`Permission mode: ${modeLabel(host.state.permissionMode ?? mode)}`))
+      .catch((e) => flash(`/permission-mode: ${errText(e)}`));
+  };
+
+  // /fast on|off, or no argument (and Alt+O) to flip it.
+  const setFast = (arg: string) => {
+    if (arg && arg !== 'on' && arg !== 'off') return flash('/fast takes on or off');
+    host.setFastMode(arg ? arg === 'on' : undefined).then(flash, (e) => flash(`/fast: ${errText(e)}`));
+  };
+
   const openLatestArtifact = () => {
     const latest = sessionArtifacts(state.tabs).at(-1);
     if (!latest) return flash('No artifact published in this session yet');
@@ -253,6 +319,33 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
         return setHelp(true);
       case 'exit':
         return quit();
+      case 'files':
+        return state.tabs[state.active] ? setPanel({ kind: 'files' }) : flash('No tab yet');
+      case 'diff':
+        return setDiffBase(args || binderConfig().diffBase || 'HEAD');
+      case 'pr':
+        return setPanel({ kind: 'pr' });
+      case 'plugins':
+        return setPanel({ kind: 'plugins' });
+      case 'schedule': {
+        if (!args) return setPanel({ kind: 'schedule' });
+        try {
+          const split = splitWhen(args);
+          if (!split || !split.prompt) return flash('Start with when it runs, then the prompt: daily 9:00, weekdays 17:30, mon,thu 8:00, hourly, every 15m, or a cron line');
+          const s = addSchedule({ ...split, cwd });
+          const next = nextFor(s);
+          return flash(`Scheduled "${s.name}": ${describeWhen(s.when)}${next ? `, next ${whenText(next.getTime())}` : ''}${binderConfig().schedules === false ? ' (scheduled tasks are off in config.json)' : ''}`);
+        } catch (e) {
+          return flash(errText(e));
+        }
+      }
+      case 'btw':
+        // Off: Claude Code gets it as typed.
+        if (host.config.sideChat === false) return void host.send(`/btw ${args}`.trim());
+        if (!args) return setSide((items) => items ?? []);
+        return askSide(args);
+      case 'findings':
+        return setPanel({ kind: 'findings' });
       case 'artifacts':
       case 'tasks':
       case 'mcp':
@@ -263,6 +356,10 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
         return args ? setModel(args) : setPanel({ kind: 'model' });
       case 'effort':
         return args ? applyEffort(args) : setPanel({ kind: 'effort' });
+      case 'permission-mode':
+        return args ? setMode(args) : setPanel({ kind: 'mode' });
+      case 'fast':
+        return setFast(args);
       case 'rename':
         return void host.rename(args).catch((e) => flash(`/rename: ${errText(e)}`));
       case 'markdown': {
@@ -340,8 +437,9 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
       return;
     }
     if ((key.ctrl && input === ']') || input === '\x1d') return openLatestArtifact();
-    if (panel) return; // the panel has the keys
+    if (panel || diffBase !== null) return; // the panel (or /diff) has the keys
     if (key.escape && help) return setHelp(false);
+    if (key.escape && side && !menuOpen) return setSide(null);
     if (key.escape && !answering && !menuOpen) {
       if (editing) return cancelEdit();
       if (active?.bash && active.status === 'running') return host.stopBash(active.id);
@@ -355,6 +453,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
       return;
     }
     if (key.ctrl && input === 'o') return setDetail((d) => !d);
+    if (key.ctrl && input === 't') return setPinnedOpen((o) => !o);
     // As in Claude Code: the running turn's commands and agents carry on in the background.
     if (key.ctrl && input === 'b' && running) {
       const moved = waitsOnForeground(state.tabs.find((t) => t.id === state.running)?.blocks ?? []);
@@ -366,6 +465,9 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
     if (key.ctrl && input === 'l') return runLocal('model', '');
     if (key.ctrl && input === 'p') return void host.cycleModel(key.shift ? -1 : 1).then(flash, (e) => flash(errText(e)));
     if (key.tab && key.shift && !menuOpen) return void host.cycleEffort().then(flash, (e) => flash(errText(e)));
+    // Claude Code's keys for these: Alt+M steps the permission mode (its Shift+Tab, taken by effort here), Alt+O fast mode.
+    if (key.meta && input === 'm') return void host.cycleMode().then(flash, (e) => flash(errText(e)));
+    if (key.meta && input === 'o') return setFast('');
     if (key.meta && /^[1-9]$/.test(input)) return dispatch({ type: 'select', index: Number(input) - 1 });
     if (state.childExit && key.ctrl && input === 'r') host.restart();
   });
@@ -388,12 +490,34 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
         return <ModelPanel {...common} current={state.model} onModel={(m) => dispatch({ type: 'model', model: m })} />;
       case 'effort':
         return <EffortPanel {...common} model={state.model} current={effort} onEffort={(level) => host.noteEffort(level)} />;
+      case 'mode':
+        return <ModePanel close={closePanel} current={state.permissionMode} onMode={setMode} />;
       case 'chrome':
         return <ChromePanel {...common} onChrome={(on) => attempt(() => host.setChrome(on))} />;
       case 'rewind':
         return <RewindPanel {...common} tabs={state.tabs} onRewind={(t, mode) => void rewind(t, mode)} />;
       case 'artifacts':
         return <ArtifactsPanel {...common} tabs={state.tabs} />;
+      case 'plugins':
+        return <PluginsPanel {...common} list={(available) => host.plugins(available)} act={(action, plugin) => host.pluginAction(action, plugin)} />;
+      case 'schedule':
+        return (
+          <SchedulePanel
+            flash={flash}
+            close={closePanel}
+            onOpenRun={(id) => {
+              const hit = host.findSession(id);
+              if (hit) resumeSession(hit);
+              else flash(`Session ${id.slice(0, 8)} is not there yet: it is still running, or never started`);
+            }}
+          />
+        );
+      case 'findings':
+        return <FindingsPanel flash={flash} close={closePanel} review={tabsFindings(state.tabs, state.active)} onSend={(text, tabId) => void host.send(text, [], tabId)} />;
+      case 'pr':
+        return <PrPanel flash={flash} close={closePanel} pr={state.pr} onFix={() => host.fixPr()} onMerge={() => host.mergePr()} onRefresh={() => host.refreshPr()} />;
+      case 'files':
+        return state.tabs[state.active] ? <FilesPanel flash={flash} close={closePanel} tab={state.tabs[state.active]} cwd={cwd} /> : null;
       case 'tasks':
         return (
           <TasksPanel
@@ -406,7 +530,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
           />
         );
       case 'settings':
-        return <SettingsPanel flash={flash} close={closePanel} onSticky={setSticky} onStatusText={setStatusTemplate} onMarkdown={applyMarkdown} />;
+        return <SettingsPanel flash={flash} close={closePanel} onSticky={setSticky} onStatusText={setStatusTemplate} onMarkdown={applyMarkdown} onBell={setBell} onTodoPanel={setPinned} onImages={(on) => (setShowImages(on), setImages((n) => n + 1))} />;
       case 'confirm':
         return (
           <ConfirmPanel
@@ -442,6 +566,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
   const statusRows = Math.max(1, statusLine.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(stringWidth(l) / Math.max(1, columns - 2))), 0)) + (notice ? 1 : 0);
   const title = state.tabs[0] ? firstPrompt(state.tabs[0]).split('\n')[0].trim().slice(0, 40) : state.sessionId.slice(0, 8);
   const mode = permissionModeLine(state.permissionMode);
+  const fast = state.fastMode === 'on' ? ' ↯ fast mode on' : state.fastMode === 'cooldown' ? ' ↯ fast mode paused after a rate limit' : '';
   return (
     <Box flexDirection="column" width={columns} height={rows}>
       {state.title && (
@@ -454,10 +579,14 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
       <Box flexGrow={1} flexBasis={0} flexDirection="column" borderStyle="single" borderColor="gray" borderLeft={false} borderRight={false} borderBottom={false}>
         {panel ? (
           renderPanel(panel)
+        ) : side ? (
+          <SideChat items={side} />
+        ) : diffBase !== null ? (
+          <DiffView cwd={cwd} base={diffBase} onClose={() => setDiffBase(null)} findings={host.config.findingsCard !== false ? (tabsFindings(state.tabs, state.active)?.findings ?? []) : []} />
         ) : help ? (
           <HelpView commandCount={commands.length} />
         ) : active ? (
-          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} sticky={sticky} editing={editing?.tabId === active.id ? editing.prompt : undefined} />
+          <TabView key={active.id} tab={active} width={columns} detail={detail} scrollActive={!answering} questionPending={answering && state.running === active.id} pending={pendingFollowups} mdStyle={mdStyle} images={images % 2 === 1} sticky={sticky} findings={host.config.findingsCard !== false} editing={editing?.tabId === active.id ? editing.prompt : undefined} />
         ) : (
           <Welcome model={state.model} effort={effort} plan={plan} cwd={cwd} width={columns} />
         )}
@@ -479,6 +608,15 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
         <Text dimColor>{statusText(statusTemplate, state)}</Text>
       </Box>
       <BackgroundTasks tasks={state.backgroundTasks} />
+      {state.pr && state.pr.state !== 'CLOSED' && (
+        <Box height={1} paddingLeft={1}>
+          <Text wrap="truncate-end" color={PR_COLORS[prTone(state.pr)]}>
+            {`⎇ ${prLine(state.pr)}`}
+            <Text dimColor>{`  ${clean(state.pr.title)} · /pr`}</Text>
+          </Text>
+        </Box>
+      )}
+      {pinned && <PinnedPanel tabs={state.tabs} open={pinnedOpen} width={columns} maxRows={Math.max(4, Math.floor(rows / 2))} />}
       {editing ? (
         <Text color="#E8C07D" wrap="truncate-end">{titledRule(columns, 'editing the queued prompt · enter saves · esc cancels')}</Text>
       ) : (
@@ -493,7 +631,7 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
           key={fill.key}
           initialValue={fill.text}
           width={columns}
-          isActive={!answering && !panel}
+          isActive={!answering && !panel && diffBase === null}
           commands={commands}
           history={history}
           onEditQueued={lastQueued && !editing ? editQueued : undefined}
@@ -508,11 +646,19 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
             remember(text);
             const local = /^!\s*\S/.test(text) ? null : localCommand(text);
             if (local) return runLocal(local.name, local.args);
+            // The side chat open: the prompt asks it.
+            if (side) return askSide(text);
             // Ctrl+Enter keeps the prompt in the current tab: on a running turn it
             // is sent at once (Claude Code's "send now"), otherwise it waits its turn.
-            host.send(text, images, followup && !active?.bash ? active?.id : undefined);
+            try {
+              host.send(text, images, followup && !active?.bash ? active?.id : undefined);
+            } catch (e) {
+              // Refused (a PDF to Codex): say why, and the prompt stays as it was.
+              flash(errText(e));
+              return false;
+            }
           }}
-          placeholder={editing ? 'Enter removes the queued prompt, Esc keeps it' : running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : '? for shortcuts'}
+          placeholder={editing ? 'Enter removes the queued prompt, Esc keeps it' : side ? 'A side question (Esc closes the side chat)' : running ? 'Enter queues a new tab, Ctrl+Enter adds to this one' : '? for shortcuts'}
           suggestion={state.suggestion}
         />
       </Box>
@@ -520,8 +666,12 @@ export function App({ host, configDir, statusLineCommand, draft, stickyPrompt, s
       <Box height={statusRows} paddingX={1}>
         <StatusBar line={statusLine} notice={notice} />
       </Box>
-      {mode && (
-        <Text color={mode.color}>{mode.text}</Text>
+      {(mode || fast) && (
+        <Text>
+          {mode && <Text color={mode.color}>{mode.text}</Text>}
+          {mode && fast && <Text dimColor> ·</Text>}
+          {fast && <Text color="#FF9F43">{fast}</Text>}
+        </Text>
       )}
     </Box>
   );

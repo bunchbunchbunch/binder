@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { childEnv, stateDir, STATE_FILE_MODE } from '../src/paths.js';
 import { readConfig, saveConfig } from '../src/config.js';
+import { FIXTURES } from './helpers.js';
 
 describe('state dir is private to the user', () => {
   it('creates the state dir 0700 and self-heals a dir left 0755 by an older binder', () => {
@@ -71,6 +73,9 @@ describe('config.json', () => {
     expect(readConfig(join(dir, 'ok.json'))).toEqual({ permissionMode: 'plan' });
     writeFileSync(join(dir, 'bad.json'), '{');
     expect(() => readConfig(join(dir, 'bad.json'))).toThrow(join(dir, 'bad.json'));
+    // JSON, but not settings: named too, so binder can say so in one line.
+    writeFileSync(join(dir, 'null.json'), 'null');
+    expect(() => readConfig(join(dir, 'null.json'))).toThrow(`${join(dir, 'null.json')}: not a JSON object`);
   });
   it('saves keys in place: others kept, undefined removed, a symlink kept a symlink', () => {
     const target = join(dir, 'dotfiles.json');
@@ -86,5 +91,17 @@ describe('config.json', () => {
     writeFileSync(join(dir, 'broken.json'), '{');
     expect(() => saveConfig({ stickyPrompt: true }, join(dir, 'broken.json'))).toThrow(join(dir, 'broken.json'));
     expect(readFileSync(join(dir, 'broken.json'), 'utf8')).toBe('{');
+  });
+  it('stops binder at launch with one line naming the file and what is wrong, not a stack trace', () => {
+    const bin = join(FIXTURES, '..', 'bin', 'binder.mjs');
+    for (const [name, text, why] of [['bad.json', '{', "Expected property name or '}' in JSON at position 1"], ['null.json', 'null', 'not a JSON object']]) {
+      const file = join(dir, `launch-${name}`);
+      writeFileSync(file, text);
+      const r = spawnSync(process.execPath, [bin], { cwd: dir, env: { ...process.env, BINDER_CONFIG: file }, encoding: 'utf8', timeout: 20000 });
+      expect(r.status).toBe(1);
+      expect(r.stderr.startsWith(`binder: ${file}: ${why}`)).toBe(true);
+      expect(r.stderr.trimEnd().split('\n')).toHaveLength(1);
+      expect(readFileSync(file, 'utf8')).toBe(text);
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import WebSocket from 'ws';
-import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 // @ts-expect-error plain JavaScript, no types
 import { startRelay } from '../relay/relay.mjs';
@@ -343,5 +343,43 @@ describe('binder sessions', () => {
     const rows = JSON.parse(out) as { id: string; title: string; cwd: string; branch?: string; live: boolean }[];
     expect(rows.map((r) => r.title).sort()).toEqual(['Flaky test hunt', 'fix the parser', 'review the PR']);
     expect(rows[0]).toMatchObject({ cwd: '/private/tmp', branch: 'main', live: false });
+
+    // Archived: still listed for the Mac app, marked; searched by what was said.
+    const env = { ...process.env, BINDER_STATE_DIR: join(dir, 's'), CLAUDE_CONFIG_DIR: main, BINDER_CONFIG: config };
+    const binder = (...args: string[]) => execFileSync(process.execPath, [join(ROOT, 'bin/binder.mjs'), 'sessions', ...args], { encoding: 'utf8', env });
+    binder('--archive', '00000000-0000-4000-8000-0000000000b1');
+    const after = JSON.parse(binder()) as { id: string; archived?: boolean }[];
+    expect(after.find((r) => r.id === '00000000-0000-4000-8000-0000000000b1')?.archived).toBe(true);
+    expect(after.filter((r) => r.archived)).toHaveLength(1);
+    expect(JSON.parse(binder('--search', 'flaky'))).toEqual([{ id: '00000000-0000-4000-8000-0000000000b4', snippet: 'look into the flaky test' }]);
+    binder('--unarchive', '00000000-0000-4000-8000-0000000000b1');
+    expect((JSON.parse(binder()) as { archived?: boolean }[]).some((r) => r.archived)).toBe(false);
+  });
+
+  it('refuses an unknown or missing session id and an unknown flag, changing nothing', () => {
+    const dir = mkdtempSync('/tmp/bs-');
+    const env = { ...process.env, BINDER_STATE_DIR: join(dir, 's'), CLAUDE_CONFIG_DIR: join(dir, 'claude'), BINDER_CONFIG: join(dir, 'config.json') };
+    const cases: [string[], string][] = [
+      [['--archive', 'not-a-session'], 'No session not-a-session'],
+      [['--unarchive', 'not-a-session'], 'No session not-a-session'],
+      [['--archive'], 'binder sessions --archive needs a session id'],
+      [['--nope'], 'Unknown: binder sessions --nope (--search TEXT, --archive ID, --unarchive ID)'],
+    ];
+    for (const [args, error] of cases) {
+      const r = spawnSync(process.execPath, [join(ROOT, 'bin/binder.mjs'), 'sessions', ...args], { encoding: 'utf8', env });
+      expect([r.status, JSON.parse(r.stdout), r.stderr.trim()]).toEqual([1, { error }, error]);
+    }
+    expect(existsSync(join(dir, 's', 'archived.json'))).toBe(false);
+  });
+});
+
+describe('binder schedule add', () => {
+  it('keeps --cwd as an absolute path', () => {
+    const dir = realpathSync(mkdtempSync('/tmp/bs-'));
+    mkdirSync(join(dir, 'app'));
+    const env = { ...process.env, BINDER_STATE_DIR: join(dir, 's'), CLAUDE_CONFIG_DIR: join(dir, 'claude'), BINDER_CONFIG: join(dir, 'config.json') };
+    const add = (cwd: string) => JSON.parse(execFileSync(process.execPath, [join(ROOT, 'bin/binder.mjs'), 'schedule', 'add', '--when', 'hourly', '--cwd', cwd, '--', 'x'], { encoding: 'utf8', env, cwd: dir })).cwd;
+    expect(add('.')).toBe(dir);
+    expect(add('app')).toBe(join(dir, 'app'));
   });
 });

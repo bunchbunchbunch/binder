@@ -15,6 +15,10 @@ import { listTranscripts, replayTranscript, type SessionSummary } from './transc
 import { childEnv, configDir as configDirFor } from './paths.js';
 import { modelDisplayName, saveCachedUsage } from './statusline.js';
 import { liveElsewhere } from './remote/sockets.js';
+import { binderConfig, type BinderConfig } from './config.js';
+import { workflowMeta, type WorkflowMeta } from './workflow.js';
+import { fetchPr, fixPrompt, mergeWhenReady } from './pr.js';
+import { alwaysChoices, checkMode, KEEP_PLANNING, MODE_CYCLE, modeLabel, PLAN_FEEDBACK, planChoices, type AlwaysChoice } from './permissions.js';
 
 // Stream deltas arrive hundreds per second; they are applied in batches so
 // viewers render at most ~60 times a second instead of once per delta.
@@ -31,6 +35,49 @@ type HostEvents = {
   effort: [string];
   plan: [string];
 };
+
+// Why fast mode cannot serve (fast_mode_disabled_reason), in Claude Code's words where it has them.
+const FAST_UNAVAILABLE: Record<string, string> = {
+  free: 'Fast mode requires a paid subscription',
+  preference: 'Fast mode has been disabled by your organization',
+  extra_usage_disabled: 'Fast mode requires usage credits: turn on extra usage for your account',
+  network_error: 'Fast mode is unavailable: Claude Code could not reach the server',
+  not_first_party: 'Fast mode is not available on this provider',
+  model_not_allowed: "Fast mode's model is not in your organization's allowed models",
+};
+
+// "Always" on a workflow: a rule allowing the Workflow tool in this project.
+const WORKFLOW_ALWAYS: AlwaysChoice[] = [
+  {
+    label: 'Always allow workflows',
+    description: 'in this project, saved in .claude/settings.local.json',
+    updates: [{ type: 'addRules', rules: [{ toolName: 'Workflow' }], behavior: 'allow', destination: 'localSettings' }],
+  },
+];
+
+// A workflow's card: what its script's meta says, else (one re-run by name or
+// script path) its name and what the request says it does.
+function workflowCard(req: PermissionRequest): WorkflowMeta {
+  const meta = workflowMeta(req.input.script);
+  const name = meta.name ?? (typeof req.input.name === 'string' && req.input.name ? req.input.name : undefined);
+  const description = meta.description ?? req.description;
+  return { ...(name && { name }), ...(description && { description }), phases: meta.phases };
+}
+
+// What Claude reads when the plan is turned down without a word on what to change.
+const KEEP_PLANNING_MESSAGE = 'The user does not want to proceed with this plan yet. Stay in plan mode and ask what they would like to change.';
+
+const PLUGIN_ACTIONS = ['install', 'uninstall', 'enable', 'disable'];
+export type InstalledPlugin = { id: string; version?: string; scope?: string; enabled: boolean; projectEnabled?: boolean };
+export type AvailablePlugin = { pluginId: string; name: string; description?: string; marketplaceName?: string };
+
+// How long a side question (/btw) may take.
+const SIDE_QUESTION_MS = 180_000;
+// What a side question shows when Claude gives no answer: binder's words, not history to send back.
+const NO_SIDE_ANSWER = 'No answer for this side question. Try again, or ask in the conversation.';
+
+// How often an open PR is asked about.
+const PR_POLL_MS = 60_000;
 
 // An entry of the child's `list_models`.
 type ModelInfo = { value: string; resolvedModel?: string; supportedEffortLevels?: string[] };
@@ -56,11 +103,24 @@ export class SessionHost extends EventEmitter<HostEvents> {
   runningSince: number | undefined;
   private dir: string;
   private pending: PermissionRequest | null = null;
+  // The open permission prompt's "always allow" choices, by label.
+  private always: AlwaysChoice[] = [];
   private lastSent: QueuedPrompt | null = null;
   private bashRuns = new Map<number, () => void>();
   private batch: ClaudeEvent[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private cycling: Promise<unknown> = Promise.resolve();
+  // PR watching (pr.ts): the last refresh, the poll while a PR is open, and the
+  // auto-fix asks already made (one per head commit and failure, or review).
+  private prBusy = false;
+  private prTimer: NodeJS.Timeout | null = null;
+  private prAsked = new Set<string>();
+  private prFix: string | null = null;
+  // A plugin change waiting for the turn to end before it loads.
+  private pluginReloadWaiting = false;
+  // config.json as this session started (/clear, /resume and /fork start
+  // another): the settings for sessions opened from now on stay as they were.
+  config: BinderConfig = binderConfig();
 
   constructor(
     readonly session: AgentSession,
@@ -80,15 +140,54 @@ export class SessionHost extends EventEmitter<HostEvents> {
     session.on('permission', (req) => {
       this.flush();
       this.pending = req;
+      const config = this.config;
+      const plan = req.toolName === 'ExitPlanMode' && config.planApproval !== false && typeof req.input.plan === 'string' ? req.input.plan : undefined;
+      const workflow = req.toolName === 'Workflow' && config.workflowCard !== false ? workflowCard(req) : undefined;
+      const workflowAlways = config.alwaysAllow === false ? [] : WORKFLOW_ALWAYS;
+      this.always = plan !== undefined ? planChoices(req.returnMode) : workflow ? workflowAlways : config.alwaysAllow === false ? [] : alwaysChoices(req.suggestions);
       const question: Question =
-        req.toolName === 'AskUserQuestion'
+        workflow
+          ? {
+              requestId: req.requestId,
+              toolName: req.toolName,
+              toolInput: req.input,
+              workflow,
+              questions: [
+                {
+                  question: `Run the workflow${workflow.name ? ` ${workflow.name}` : ''}?`,
+                  header: 'Workflow',
+                  options: [{ label: 'Run once' }, ...workflowAlways.map(({ label, description }) => ({ label, description })), { label: 'Deny' }],
+                },
+              ],
+            }
+          : req.toolName === 'AskUserQuestion'
           ? { requestId: req.requestId, toolUseId: req.toolUseId, toolName: req.toolName, questions: (req.input.questions as Question['questions']) ?? [] }
+          : plan !== undefined
+          ? {
+              requestId: req.requestId,
+              toolName: req.toolName,
+              toolInput: req.input,
+              plan,
+              questions: [
+                {
+                  question: 'Ready to code?',
+                  header: 'Plan',
+                  options: [...this.always.map(({ label, description }) => ({ label, description })), { label: KEEP_PLANNING, description: 'stays in plan mode' }],
+                },
+              ],
+            }
           : {
               requestId: req.requestId,
               toolName: req.toolName,
               toolInput: req.input,
               reason: req.reason,
-              questions: [{ question: `Allow ${req.toolName}?`, header: 'Permission', options: [{ label: 'Allow' }, { label: 'Deny' }] }],
+              questions: [
+                {
+                  question: `Allow ${req.toolName}?`,
+                  header: 'Permission',
+                  options: [{ label: 'Allow' }, ...this.always.map(({ label, description }) => ({ label, description })), { label: 'Deny' }],
+                },
+              ],
             };
       this.dispatch({ type: 'question', question });
     });
@@ -109,6 +208,62 @@ export class SessionHost extends EventEmitter<HostEvents> {
       if (model) this.dispatch({ type: 'model', model });
       if (effort) this.noteEffort(effort);
     });
+    session.on('fast', ({ state }) => {
+      if (state) this.dispatch({ type: 'fast_mode', state });
+    });
+    this.watchPr();
+  }
+
+  // The session's PR: now, after each turn, and every minute while one is open.
+  private watchPr(): void {
+    this.prTimer = setInterval(() => {
+      if (this.config.prWatch !== false && this.current.pr?.state === 'OPEN') void this.refreshPr();
+    }, PR_POLL_MS);
+    this.prTimer.unref();
+    if (this.config.prWatch !== false) void this.refreshPr();
+  }
+
+  /** Asks gh about the session's PR now; with prAutoFix, a new failure or review becomes a prompt. */
+  async refreshPr(): Promise<void> {
+    if (this.prBusy) return;
+    this.prBusy = true;
+    try {
+      const pr = await fetchPr(this.dir);
+      this.dispatch({ type: 'pr', pr });
+      const fix = pr && this.config.prAutoFix === true ? fixPrompt(pr) : null;
+      if (fix && !this.prAsked.has(fix.key)) {
+        this.prAsked.add(fix.key);
+        this.prFix = fix.text;
+        this.sendPrFix();
+      }
+    } finally {
+      this.prBusy = false;
+    }
+  }
+
+  // An auto-fix waits for the session to be idle, then opens a tab of its own.
+  private sendPrFix(): void {
+    if (!this.prFix || this.busy || this.current.question || this.current.childExit) return;
+    const text = this.prFix;
+    this.prFix = null;
+    this.send(text);
+  }
+
+  /** /pr's "fix": the failing checks or the review, asked now. */
+  fixPr(): string {
+    const pr = this.current.pr;
+    const fix = pr ? fixPrompt(pr) : null;
+    if (!fix) throw new Error(pr ? `PR #${pr.number} has no failing check or review asking for changes` : 'No pull request for this branch');
+    this.prAsked.add(fix.key);
+    this.send(fix.text);
+    return 'Asked Claude to fix it';
+  }
+
+  /** /pr's "merge when ready" (gh pr merge --auto --squash). */
+  async mergePr(): Promise<string> {
+    const pr = this.current.pr;
+    if (!pr) throw new Error('No pull request for this branch');
+    return mergeWhenReady(this.dir, pr.number);
   }
 
   get state(): State {
@@ -154,6 +309,13 @@ export class SessionHost extends EventEmitter<HostEvents> {
     this.current = next;
     // Before pump(): a queued prompt it sends starts a turn of its own.
     if (next.running !== prev.running) this.runningSince = next.running === null ? undefined : Date.now();
+    // A turn that ends may have pushed: look at the PR again, and send an auto-fix that waited.
+    if (prev.running !== null && next.running === null) queueMicrotask(() => {
+      // Not if a queued prompt has started the next turn already: then after that one.
+      if (this.pluginReloadWaiting && this.current.running === null) void this.reloadPlugins().catch(() => {});
+      this.sendPrFix();
+      if (this.config.prWatch !== false) void this.refreshPr();
+    });
     if (next.usage && next.usage !== prev.usage) saveCachedUsage(this.configDir, next.usage);
     // Kept in binder's index too: Codex sessions have no transcript to read it from.
     if (next.title && next.title !== prev.title) upsertSession({ id: this.sessionId, cwd: this.session.cwd, configDir: this.configDir, title: next.title });
@@ -198,6 +360,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
    */
   send(text: string, images: ImageAttachment[] = [], intoTabId?: number): number {
     if (/^!\s*\S/.test(text)) return this.runBash(text.replace(/^!\s*/, ''));
+    if (this.session.agent === 'codex' && images.some((a) => a.mediaType === 'application/pdf')) throw new Error('Codex reads images and text files, not PDFs');
     const target = intoTabId === undefined ? undefined : this.current.tabs.find((t) => t.id === intoTabId && !t.bash);
     if (!target) {
       const tabId = this.nextTabId();
@@ -274,12 +437,26 @@ export class SessionHost extends EventEmitter<HostEvents> {
     return p;
   }
 
-  /** AskUserQuestion answers, or a permission prompt answered with the label "Allow" or "Deny". */
+  /**
+   * AskUserQuestion answers; a permission prompt answered with "Allow", "Deny"
+   * or an "always allow" choice's label; or a plan answered with one of its
+   * choices, "No, keep planning", or what to change (any other text).
+   */
   answer(requestId: string, answers: Record<string, string>): void {
     const p = this.openQuestion(requestId);
+    const label = Object.values(answers)[0];
+    const choice = this.always.find((c) => c.label === label);
+    const question = this.current.question;
+    const planning = question?.plan !== undefined;
+    // A permission prompt allows only on one of its own choices.
+    if (p.toolName !== 'AskUserQuestion' && !planning && !question?.questions[0]?.options.some((o) => o.label === label)) {
+      throw new Error(`Not a choice on this prompt: ${label ?? '(none)'}`);
+    }
     if (p.toolName === 'AskUserQuestion') this.session.answerQuestion(p, answers);
-    else if (Object.values(answers)[0] === 'Deny') this.session.deny(p);
-    else this.session.allow(p);
+    else if (planning && !choice) this.session.deny(p, [KEEP_PLANNING, PLAN_FEEDBACK, 'Deny'].includes(label) || !label?.trim() ? KEEP_PLANNING_MESSAGE : `The user wants changes to the plan before you start: ${label}`);
+    else if (label === 'Deny') this.session.deny(p);
+    // A plan's choice switches the mode for this session only: allowed once, as Claude Code sees it.
+    else this.session.allow(p, choice?.updates, planning ? 'user_temporary' : undefined);
     this.closeQuestion();
   }
 
@@ -289,12 +466,15 @@ export class SessionHost extends EventEmitter<HostEvents> {
   }
 
   deny(requestId: string): void {
-    this.session.deny(this.openQuestion(requestId));
+    const p = this.openQuestion(requestId);
+    if (this.current.question?.plan !== undefined) this.session.deny(p, KEEP_PLANNING_MESSAGE);
+    else this.session.deny(p);
     this.closeQuestion();
   }
 
   private closeQuestion(): void {
     this.pending = null;
+    this.always = [];
     this.dispatch({ type: 'question_answered' });
   }
 
@@ -320,7 +500,9 @@ export class SessionHost extends EventEmitter<HostEvents> {
     if (pid) throw new Error(`Session ${id.slice(0, 8)} is open in another binder (pid ${pid})`);
     this.flush();
     this.pending = null;
+    this.always = [];
     this.lastSent = null;
+    this.config = binderConfig();
     this.session.switchTo(id, opts);
     this.dispatch({ type: 'reset', state: next });
     // The new child starts in the session's folder, wherever the old one had moved to.
@@ -410,9 +592,101 @@ export class SessionHost extends EventEmitter<HostEvents> {
   }
 
   async setPermissionMode(mode: string): Promise<void> {
+    checkMode(mode);
     const r = await this.session.request('set_permission_mode', { mode });
     // Claude Code answers with the mode in effect ("manual" comes back as "default").
     this.dispatch({ type: 'permission_mode', mode: typeof r.mode === 'string' ? r.mode : mode });
+  }
+
+  /** Alt+M, as Shift+Tab in Claude Code: the next permission mode the child accepts. */
+  cycleMode(): Promise<string> {
+    return this.oneAtATime(async () => {
+      const mode = this.current.permissionMode === 'manual' ? 'default' : this.current.permissionMode ?? 'default';
+      const i = MODE_CYCLE.indexOf(mode);
+      // bypassPermissions needs a child started in it, and auto mode an account that has it: skip what is refused.
+      let refused: unknown;
+      for (const next of [...MODE_CYCLE.slice(i + 1), ...MODE_CYCLE.slice(0, Math.max(0, i))]) {
+        try {
+          await this.setPermissionMode(next);
+          return `Permission mode: ${modeLabel(this.current.permissionMode ?? next)}`;
+        } catch (e) {
+          refused = e;
+        }
+      }
+      throw refused instanceof Error ? refused : new Error('No other permission mode to switch to');
+    });
+  }
+
+  /**
+   * /fast and Alt+O: asks for fast mode, or stops (no argument flips it).
+   * Returns what to tell the user. When fast mode cannot serve, binder stops
+   * asking for it, so the next press tries again rather than turning it "off".
+   */
+  /** /plugins: the installed plugins (claude plugin list), and with `available` the marketplaces' too. */
+  async plugins(available = false): Promise<{ installed: InstalledPlugin[]; available?: AvailablePlugin[] }> {
+    if (this.session.agent === 'codex') throw new Error('Plugins are not available in a Codex session');
+    const d = JSON.parse(await this.session.cli(['plugin', 'list', '--json', ...(available ? ['--available'] : [])]));
+    return Array.isArray(d) ? { installed: d } : { installed: d.installed ?? [], ...(available && { available: d.available ?? [] }) };
+  }
+
+  /** Installs, uninstalls, enables or disables a plugin (claude plugin ...), then loads the change into this session (config.json pluginReload). */
+  async pluginAction(action: string, plugin: string, scope?: string): Promise<string> {
+    if (!PLUGIN_ACTIONS.includes(action)) throw new Error(`Not a plugin action: ${action}`);
+    if (this.session.agent === 'codex') throw new Error('Plugins are not available in a Codex session');
+    const out = await this.session.cli(['plugin', action, plugin, '--json', ...(scope ? ['--scope', scope] : [])]);
+    const line = out
+      .trim()
+      .split('\n')
+      .reverse()
+      .find((l: string) => l.startsWith('{'));
+    const r = line ? (JSON.parse(line) as { outcome?: string; message?: string }) : null;
+    if (!r || r.outcome !== 'ok') throw new Error(r?.message ?? `claude plugin ${action} said nothing`);
+    if (binderConfig().pluginReload === false) return `${r.message} (loads when claude next starts)`;
+    // Not into a running turn: once it ends.
+    if (this.current.running !== null) {
+      this.pluginReloadWaiting = true;
+      return `${r.message}. It loads when this turn ends`;
+    }
+    try {
+      return `${r.message}. ${await this.reloadPlugins()}`;
+    } catch (e) {
+      // A turn is running: once it ends.
+      this.pluginReloadWaiting = true;
+      return `${r.message}. It loads when this turn ends (${(e as Error).message})`;
+    }
+  }
+
+  /** Loads the plugins as they now are into the running claude, and takes its new commands. */
+  async reloadPlugins(): Promise<string> {
+    this.pluginReloadWaiting = false;
+    const r = await this.session.request('reload_plugins', { refuse_if_busy: true }, 60_000);
+    if (Array.isArray(r.commands)) {
+      this.commands = mergeCommands(r.commands as SlashCommand[], this.unsupported);
+      this.emit('commands', this.commands);
+    }
+    const n = (k: string) => (Array.isArray(r[k]) ? (r[k] as unknown[]).length : 0);
+    return `Loaded ${n('plugins')} plugin${n('plugins') === 1 ? '' : 's'} with ${n('commands')} commands${Number(r.error_count) > 0 ? `, ${r.error_count} with errors` : ''}`;
+  }
+
+  /** /btw: a side question, answered from the conversation so far (and earlier side questions, `history`) without tools, kept out of the transcript. */
+  async sideQuestion(question: string, history: Array<{ question: string; response: string }> = []): Promise<{ response: string; synthetic: boolean }> {
+    if (this.session.agent === 'codex') throw new Error('Side questions are not available in a Codex session');
+    if (!question.trim()) throw new Error('Ask a question');
+    const asked = history.filter((h) => h.response !== NO_SIDE_ANSWER);
+    const r = await this.session.request('side_question', { question, ...(asked.length && { history: asked }) }, SIDE_QUESTION_MS);
+    const response = typeof r.response === 'string' ? r.response : null;
+    return { response: response ?? NO_SIDE_ANSWER, synthetic: r.synthetic === true || response === null };
+  }
+
+  async setFastMode(on = !this.session.fastMode): Promise<string> {
+    const r = await this.session.setFastMode(on);
+    if (r.state) this.dispatch({ type: 'fast_mode', state: r.state });
+    if (!on) return 'Fast mode off';
+    if (r.state === 'cooldown') return 'Fast mode on, paused after a rate limit';
+    // Unknown (an older CLI) or still being checked: the next turn's init will say.
+    if (r.state !== 'off' || r.reason === 'pending') return 'Fast mode on';
+    await this.session.setFastMode(false).catch(() => {});
+    return r.reason ? (FAST_UNAVAILABLE[r.reason] ?? 'Fast mode is not available right now') : `${modelDisplayName(this.current.model) || 'This model'} has no fast mode`;
   }
 
   async setEffort(level: string): Promise<void> {
@@ -491,6 +765,7 @@ export class SessionHost extends EventEmitter<HostEvents> {
 
   async close(): Promise<void> {
     if (this.flushTimer) clearTimeout(this.flushTimer);
+    if (this.prTimer) clearInterval(this.prTimer);
     for (const kill of this.bashRuns.values()) kill();
     await this.session.close();
   }

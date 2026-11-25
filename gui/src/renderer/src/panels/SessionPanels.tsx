@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { BackgroundTask, ToolBlock, WireBlock, WireState, WireTab } from '@shared/wire';
+import { prLine, type BackgroundTask, type PrStatus, type ToolBlock, type WireBlock, type WireState, type WireTab } from '@shared/wire';
 import { baseName, elapsed, firstLine, fmtTokens, modelDisplayName, shortPath } from '../lib/format';
-import { errText, getState, request, sameComputer, toast, useApp } from '../store';
+import { errText, getState, openLink, openSession, request, sameComputer, toast, useApp } from '../store';
 import { findModel, stepEffort, stepModel } from '../lib/models';
 import { Picker, type PickerItem } from '../components/Picker';
 import { toolLine } from '../components/Blocks';
 import { PERMISSION_MODES } from '../components/StatusBar';
+import { resolveFile, tabFiles } from '../lib/files';
+import { findingPlace, severityCounts, severityName, type Finding } from '../lib/findings';
+import { askToFix } from '../components/FindingsCard';
 import { folderRank, recentFolders } from './AppPanels';
 
 // binder's own panels for one session, over its transcript: /model, /effort,
@@ -412,7 +415,50 @@ const DETAIL_LINES = 14;
 
 // Under the /tasks list: the highlighted task's latest output. A shell's or
 // monitor's comes from the host every second; an agent's is its latest steps.
-function TaskDetail({ conn, task, tabs, cwd, onStop }: { conn: string; task: BackgroundTask; tabs: WireTab[]; cwd: string; onStop: () => void }) {
+const AGENT_MARK: Record<string, string> = { done: '✓', start: '◐', error: '✗', failed: '✗' };
+
+// A workflow's phases, each with its agents: done, running, or waiting.
+function WorkflowDetail({ task, onStop }: { task: BackgroundTask; onStop: () => void }) {
+  const run = task.workflow;
+  return (
+    <div className="task-detail">
+      <div className="task-detail-head">
+        <span>
+          Phases{task.progress && <span className="note"> · {task.progress}</span>}
+        </span>
+        <button onClick={onStop}>Stop</button>
+      </div>
+      <div className="wf-progress">
+        {run?.phases.length ? (
+          run.phases.map((phase) => (
+            <div key={phase} className="wf-phase">
+              <div className="wf-phase-title">{phase}</div>
+              {run.agents
+                .filter((a) => a.phase === phase)
+                .map((a, i) => (
+                  <div key={i} className={`wf-agent ${a.state}`}>
+                    <span className="mark">{AGENT_MARK[a.state] ?? '·'}</span> {a.label}
+                    <span className="meta">
+                      {[a.model?.replace(/^claude-/, ''), a.durationMs !== undefined && `${(a.durationMs / 1000).toFixed(1)}s`, a.result && `→ ${a.result.replace(/\s+/g, ' ').slice(0, 80)}`].filter(Boolean).join(' · ')}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          ))
+        ) : (
+          <div className="note">No phase started yet</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TaskDetail(props: { conn: string; task: BackgroundTask; tabs: WireTab[]; cwd: string; onStop: () => void }) {
+  if (props.task.type === 'local_workflow') return <WorkflowDetail task={props.task} onStop={props.onStop} />;
+  return <OutputDetail {...props} />;
+}
+
+function OutputDetail({ conn, task, tabs, cwd, onStop }: { conn: string; task: BackgroundTask; tabs: WireTab[]; cwd: string; onStop: () => void }) {
   const agent = task.type === 'local_agent';
   const [shell, setShell] = useState<{ lines: string[]; note: string } | null>(null);
   useEffect(() => {
@@ -526,6 +572,300 @@ export function ContextPanel({ conn, close, active }: Common) {
   );
 }
 
+type InstalledPlugin = { id: string; version?: string; scope?: string; enabled: boolean };
+type AvailablePlugin = { pluginId: string; name: string; description?: string; marketplaceName?: string };
+type McpRow = { name: string; status: string; scope?: string };
+
+/** /plugins: the installed plugins (enable or disable, uninstall), the marketplaces to install from (typing filters), and the claude.ai connectors. */
+export function PluginsPanel({ conn, close, active }: Common) {
+  const [installed, setInstalled] = useState<InstalledPlugin[] | null>(null);
+  const [available, setAvailable] = useState<AvailablePlugin[] | null>(null);
+  const [view, setView] = useState<'top' | 'browse' | 'connectors'>('top');
+  const [picked, setPicked] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState('');
+  const [connectors, setConnectors] = useState<McpRow[] | null>(null);
+  const load = (withAvailable = false) =>
+    request(conn, 'plugins', { available: withAvailable }).then(
+      (r) => {
+        setInstalled((r.installed as InstalledPlugin[]) ?? []);
+        if (r.available) setAvailable(r.available as AvailablePlugin[]);
+      },
+      (e) => toast(errText(e), true),
+    );
+  useEffect(() => void load(), [conn]);
+  const run = (action: string, plugin: string) => {
+    setBusy(`${action === 'install' ? 'Installing' : action === 'uninstall' ? 'Uninstalling' : action === 'enable' ? 'Enabling' : 'Disabling'} ${plugin}…`);
+    request(conn, 'plugin_action', { action, plugin }).then(
+      (r) => {
+        setBusy('');
+        toast(String(r.message));
+        setPicked(null);
+        void load(view === 'browse');
+      },
+      (e) => {
+        setBusy('');
+        toast(errText(e), true);
+      },
+    );
+  };
+  const list = installed ?? [];
+  if (view === 'connectors') {
+    return (
+      <Picker
+        key="connectors"
+        active={active}
+        title="claude.ai connectors"
+        subtitle={connectors ? 'From your claude.ai account · /mcp authenticates, reconnects or turns one off' : 'Asking Claude Code…'}
+        items={(connectors ?? []).map((s) => ({ key: s.name, label: s.name.replace(/^claude\.ai /, ''), description: s.status, mark: '●', markColor: s.status === 'connected' ? 'var(--green)' : s.status === 'failed' ? 'var(--red)' : 'var(--gold)' }))}
+        empty={connectors ? 'No claude.ai connectors in this session' : 'Asking Claude Code…'}
+        onSelect={() => toast('/mcp authenticates, reconnects or turns off a connector')}
+        onCancel={() => setView('top')}
+      />
+    );
+  }
+  if (view === 'browse') {
+    const have = new Set(list.map((p) => p.id));
+    const q = query.toLowerCase();
+    const rows = (available ?? []).filter((p) => !have.has(p.pluginId) && (!q || `${p.name} ${p.description ?? ''} ${p.marketplaceName ?? ''}`.toLowerCase().includes(q))).slice(0, 300);
+    return (
+      <Picker
+        key="browse"
+        active={active}
+        title="Install a plugin"
+        subtitle={busy || (available ? `${available.length} in your marketplaces · Enter installs it (user scope)` : 'Reading the marketplaces…')}
+        items={rows.map((p) => ({ key: p.pluginId, label: p.name, description: `${p.marketplaceName ?? ''}${p.description ? `: ${p.description.replace(/\s+/g, ' ')}` : ''}` }))}
+        search={{ query, onChange: setQuery, placeholder: 'Filter by name or description' }}
+        empty={available ? 'No plugin matches' : 'Reading the marketplaces…'}
+        onSelect={(item) => !busy && run('install', item.key)}
+        onCancel={() => setView('top')}
+      />
+    );
+  }
+  const plugin = list.find((p) => p.id === picked);
+  if (plugin) {
+    return (
+      <Picker
+        key={`plugin:${plugin.id}`}
+        active={active}
+        title={plugin.id}
+        subtitle={busy || `${plugin.enabled ? 'Enabled' : 'Disabled'} · ${plugin.scope ?? 'user'} scope${plugin.version ? ` · ${plugin.version}` : ''}`}
+        items={[
+          { key: plugin.enabled ? 'disable' : 'enable', label: plugin.enabled ? 'Disable' : 'Enable', description: plugin.enabled ? 'Keeps it installed, off' : 'Turns it on again' },
+          { key: 'uninstall', label: 'Uninstall', description: 'Removes it' },
+        ]}
+        onSelect={(item) => !busy && run(item.key, plugin.id)}
+        onCancel={() => setPicked(null)}
+      />
+    );
+  }
+  return (
+    <Picker
+      key="plugins"
+      active={active}
+      title="Plugins"
+      subtitle={busy || (installed ? `${list.length} installed (${list.filter((p) => p.enabled).length} enabled)` : 'Asking Claude Code…')}
+      items={[
+        { key: '__browse', label: 'Install a plugin…', description: 'From your marketplaces' },
+        { key: '__connectors', label: 'claude.ai connectors…', description: 'The ones this session has' },
+        ...list.map((p) => ({ key: p.id, label: p.id, description: `${p.enabled ? 'Enabled' : 'Disabled'} · ${p.scope ?? 'user'}${p.version ? ` · ${p.version}` : ''}`, mark: p.enabled ? '●' : '○', markColor: p.enabled ? 'var(--green)' : 'var(--text-dim)' })),
+      ]}
+      onSelect={(item) => {
+        if (item.key === '__browse') {
+          setView('browse');
+          if (!available) void load(true);
+        } else if (item.key === '__connectors') {
+          setView('connectors');
+          request(conn, 'mcp_status').then(
+            (r) => setConnectors(((r.servers as McpRow[]) ?? []).filter((s) => s.scope === 'claudeai')),
+            (e) => toast(errText(e), true),
+          );
+        } else setPicked(item.key);
+      }}
+      onCancel={close}
+    />
+  );
+}
+
+type Task = { id: string; name: string; prompt: string; cwd: string; when: string; describe: string; next: number | null; paused?: boolean; lastRun: TaskRun | null };
+type TaskRun = { scheduleId: string; name: string; at: number; sessionId?: string; error?: string; manual?: boolean };
+
+/** "today 09:00", "Wed 09:00", "Nov 30 09:00" (bindertui's whenText). */
+export function whenText(ms: number, now = Date.now()): string {
+  const d = new Date(ms);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(d) - day(new Date(now))) / 86_400_000);
+  if (days === 0) return `today ${hm}`;
+  if (days === 1) return `tomorrow ${hm}`;
+  if (days === -1) return `yesterday ${hm}`;
+  if (Math.abs(days) < 7) return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${hm}`;
+  return `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()} ${hm}`;
+}
+
+/** /schedule: this Mac's scheduled tasks; one opens its actions, and a run opens its session. */
+export function SchedulePanel({ close, active }: Common) {
+  const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [runs, setRuns] = useState<TaskRun[] | null>(null);
+  const off = useApp((st) => !st.schedules);
+  const load = () => window.binder.schedule(['list']).then((t) => setTasks(t as Task[]), (e) => toast(errText(e), true));
+  useEffect(() => void load(), []);
+  const task = tasks?.find((t) => t.id === picked);
+  if (runs && task) {
+    return (
+      <Picker
+        key={`runs:${task.id}`}
+        active={active}
+        title={`Runs: ${task.name}`}
+        subtitle="Enter opens a run's session"
+        items={runs.length ? runs.map((r, i) => ({ key: String(i), label: whenText(r.at), description: r.error ? `Failed: ${r.error}` : `${r.manual ? 'Run by hand · ' : ''}session ${r.sessionId?.slice(0, 8)}`, mark: r.error ? '✗' : '✓', markColor: r.error ? 'var(--red)' : 'var(--green)' })) : [{ key: 'none', label: 'No runs yet' }]}
+        onSelect={(item) => {
+          const r = runs[Number(item.key)];
+          if (!r?.sessionId) return;
+          openSession({ sessionId: r.sessionId, cwd: task.cwd, resume: true, title: task.name });
+          close();
+        }}
+        onCancel={() => setRuns(null)}
+      />
+    );
+  }
+  if (task) {
+    const act = (key: string) => {
+      if (key === 'runs') return void window.binder.schedule(['history', task.id]).then((r) => setRuns(r as TaskRun[]), (e) => toast(errText(e), true));
+      if (key === 'run') toast(`Starting ${task.name}…`);
+      const sub = key === 'pause' ? (task.paused ? 'resume' : 'pause') : key === 'delete' ? 'remove' : 'run';
+      window.binder.schedule([sub, task.id]).then(
+        (r) => {
+          const run = r as TaskRun;
+          if (sub === 'run') toast(run.error ? `${task.name} did not start: ${run.error}` : `${task.name} is running (Runs opens it)`, Boolean(run.error));
+          else toast(sub === 'remove' ? `Deleted ${task.name}` : `${task.name} ${sub === 'pause' ? 'paused' : 'resumed'}`);
+          if (sub === 'remove') setPicked(null);
+          void load();
+        },
+        (e) => toast(errText(e), true),
+      );
+    };
+    return (
+      <Picker
+        key={`task:${task.id}`}
+        active={active}
+        title={task.name}
+        subtitle={`${task.describe} in ${shortPath(task.cwd)}: ${task.prompt}`}
+        items={[
+          { key: 'run', label: 'Run it now', description: 'In a fresh session, as on schedule' },
+          { key: 'pause', label: task.paused ? 'Resume' : 'Pause', description: task.paused ? 'Runs on schedule again' : 'Skips its runs until resumed' },
+          { key: 'runs', label: 'Runs', description: task.lastRun ? `Last ${whenText(task.lastRun.at)}${task.lastRun.error ? ' (failed)' : ''}` : 'None yet' },
+          { key: 'delete', label: 'Delete', description: 'Its runs stay as sessions' },
+        ]}
+        onSelect={(item) => act(item.key)}
+        onCancel={() => setPicked(null)}
+      />
+    );
+  }
+  return (
+    <Picker
+      key="tasks"
+      active={active}
+      title="Scheduled tasks"
+      subtitle={off ? 'Off in config.json (schedules): none runs' : 'They run on this Mac while the app (or binder) is open · /schedule <when> <prompt> adds one'}
+      items={
+        !tasks
+          ? []
+          : tasks.length
+            ? tasks.map((t) => ({ key: t.id, label: t.name, description: `${t.describe} · ${t.paused ? 'paused' : t.next ? `next ${whenText(t.next)}` : 'never'}${t.lastRun ? ` · last ${whenText(t.lastRun.at)}${t.lastRun.error ? ' (failed)' : ''}` : ''}`, mark: t.paused ? '⏸' : '⏲' }))
+            : [{ key: 'none', label: 'None yet', description: 'e.g. /schedule weekdays 9:00 Summarize what changed yesterday' }]
+      }
+      empty="Reading the tasks…"
+      onSelect={(item) => item.key !== 'none' && setPicked(item.key)}
+      onCancel={close}
+    />
+  );
+}
+
+/** /findings: the latest code review's findings; Enter asks Claude to fix one, or all, in the review's tab. */
+export function FindingsPanel({ conn, close, active, review }: Common & { review: { tabId: number; turn: number; findings: Finding[] } | null }) {
+  if (!review) return <Picker active={active} title="Findings" subtitle="No code review in this session yet: /code-review runs one" items={[{ key: 'close', label: 'Close' }]} onSelect={close} onCancel={close} />;
+  const { findings, tabId, turn } = review;
+  const counts = severityCounts(findings);
+  const items: PickerItem[] = [
+    { key: 'all', label: 'Apply fixes', description: `Ask Claude to fix all ${findings.length} in one prompt` },
+    ...findings.map((f, i) => ({ key: String(i), label: findingPlace(f), description: `${f.severity ? `${severityName(f.severity)}: ` : ''}${f.summary.replace(/\s+/g, ' ')}` })),
+  ];
+  const pick = (item: PickerItem) => {
+    void askToFix({ conn, tabId, turn }, item.key === 'all' ? findings : [findings[Number(item.key)]]);
+    close();
+  };
+  return <Picker active={active} title={`Findings: ${findings.length}${counts ? ` (${counts})` : ''}`} subtitle="Enter asks Claude to fix it, in the review's tab" items={items} onSelect={pick} onCancel={close} />;
+}
+
+/** /pr: the branch's pull request; open it, fix what failed, merge when ready, or look again. */
+export function PrPanel({ conn, close, active, pr }: Common & { pr: PrStatus | null }) {
+  const [busy, setBusy] = useState('');
+  const run = (t: string, then?: () => void) => {
+    setBusy(t === 'pr' ? 'Looking…' : 'Asking…');
+    request(conn, t)
+      .then((r) => {
+        setBusy('');
+        if (typeof r.message === 'string') toast(r.message);
+        then?.();
+      })
+      .catch((e) => {
+        setBusy('');
+        toast(errText(e), true);
+      });
+  };
+  if (!pr) return <Picker active={active} title="Pull request" subtitle={busy || 'No pull request for this branch (or gh cannot see one)'} items={[{ key: 'refresh', label: 'Look again' }]} onSelect={() => run('pr')} onCancel={close} />;
+  const failing = pr.checks.failing.length > 0;
+  const items: PickerItem[] = [
+    { key: 'open', label: 'Open it in the browser', description: pr.url },
+    ...(pr.state === 'OPEN' && (failing || pr.changesRequested) ? [{ key: 'fix', label: failing ? 'Fix the failing checks' : 'Address the review', description: failing ? pr.checks.failing.join(', ') : `Changes asked for by ${pr.changesRequested!.by}` }] : []),
+    ...(pr.state === 'OPEN' ? [{ key: 'merge', label: 'Merge when ready', description: 'Squash, once its checks pass and it is approved (gh pr merge --auto)' }] : []),
+    { key: 'refresh', label: 'Look again', description: 'binder looks every minute, and after each turn' },
+  ];
+  const pick = (item: PickerItem) => {
+    if (item.key === 'open') return void window.binder.openExternal(pr.url);
+    if (item.key === 'fix') return run('pr_fix', close);
+    if (item.key === 'merge') return run('pr_merge', close);
+    run('pr');
+  };
+  return <Picker active={active} title={`PR #${pr.number}: ${pr.title}`} subtitle={busy || prLine(pr)} items={items} onSelect={pick} onCancel={close} />;
+}
+
+/** /files: the files the tab's tool calls named; ⏎ opens one in config.json's editor, f shows it in Finder. */
+export function FilesPanel({ close, active, tab, cwd, local }: Common & { tab: WireTab; cwd: string; local: boolean }) {
+  const files = useMemo(() => tabFiles(tab), [tab]);
+  const items: PickerItem[] = files.map((f) => ({ key: f.path, label: f.path.startsWith(cwd + '/') ? f.path.slice(cwd.length + 1) : f.path, description: `${f.tool}${f.line ? ` · line ${f.line}` : ''}` }));
+  const act = (path: string, how: 'edit' | 'reveal') => {
+    if (!local) return toast("The files are on the session's computer", true);
+    window.binder
+      .openPath(path, cwd, how, files.find((f) => f.path === path)?.line)
+      .then(() => toast(`${how === 'reveal' ? 'Showed' : 'Opened'} ${path}`))
+      .catch((e) => toast(errText(e), true));
+  };
+  return (
+    <Picker
+      active={active}
+      title="Files in this tab"
+      subtitle="⏎ opens in your editor (Settings, ⌘,, changes it)"
+      items={items}
+      onSelect={(i) => act(i.key, 'edit')}
+      onCancel={close}
+      empty="No tool call in this tab named a file"
+      hint="↑↓ move · ⏎ open · f show in Finder · c copy the path · esc close"
+      onKey={(e, item) => {
+        if (!item || e.metaKey || e.ctrlKey) return false;
+        if (e.key === 'f') return act(item.key, 'reveal'), true;
+        if (e.key === 'c') {
+          const full = resolveFile(item.key, cwd, window.binder.home);
+          return void window.binder.copyText(full), toast(`Copied ${full}`), true;
+        }
+        return false;
+      }}
+    />
+  );
+}
+
 export function ArtifactsPanel({ conn, close, active }: Common) {
   const [list, setList] = useState<Artifact[] | null>(null);
   const [error, setError] = useState('');
@@ -536,8 +876,8 @@ export function ArtifactsPanel({ conn, close, active }: Common) {
   }, [conn]);
   const items: PickerItem[] = (list ?? []).map((a) => ({ key: a.url, label: a.title, description: `${a.url} · tab ${a.tabId}` }));
   const open = (url: string) => {
-    void window.binder.openExternal(url);
-    toast(`Opened ${url}`);
+    close();
+    void openLink(url);
   };
   return (
     <Picker active={active}
@@ -564,8 +904,7 @@ export async function openLatestArtifact(conn: string): Promise<void> {
     const list = ((await request(conn, 'artifacts')).artifacts as Artifact[]) ?? [];
     const latest = list.at(-1);
     if (!latest) return toast('No artifact published in this session yet');
-    void window.binder.openExternal(latest.url);
-    toast(`Opened ${latest.url}`);
+    await openLink(latest.url);
   } catch (e) {
     toast(errText(e), true);
   }

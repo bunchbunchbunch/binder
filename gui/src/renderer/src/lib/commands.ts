@@ -2,7 +2,7 @@ import type { SlashCommand } from '@shared/wire';
 
 // Slash commands the app runs itself rather than sending to Claude Code
 // (bindertui runs the same set; its host lists them among the commands).
-export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rename' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'chrome' | 'artifacts' | 'tasks' | 'settings';
+export type LocalCommandName = 'help' | 'resume' | 'clear' | 'exit' | 'fork' | 'rename' | 'rewind' | 'cd' | 'mcp' | 'model' | 'effort' | 'fast' | 'permission-mode' | 'chrome' | 'artifacts' | 'files' | 'diff' | 'pr' | 'findings' | 'btw' | 'schedule' | 'plugins' | 'preview' | 'simulator' | 'open' | 'window' | 'tasks' | 'settings';
 
 const LOCAL: Record<LocalCommandName, string[]> = {
   help: [],
@@ -16,8 +16,21 @@ const LOCAL: Record<LocalCommandName, string[]> = {
   mcp: [],
   model: [],
   effort: [],
+  fast: [],
+  'permission-mode': ['mode'],
   chrome: [],
   artifacts: [],
+  files: [],
+  diff: [],
+  pr: [],
+  findings: [],
+  btw: [],
+  schedule: [],
+  plugins: ['plugin'],
+  open: [],
+  preview: [],
+  simulator: ['sim'],
+  window: [],
   tasks: ['bashes'],
   settings: [],
 };
@@ -28,21 +41,36 @@ const HIDDEN = new Set(['markdown']);
 // Where the TUI's description does not fit the app.
 const DESCRIPTIONS: Record<string, string> = {
   exit: 'Close this session in the app (it keeps running until idle)',
+  fast: 'Turn fast mode on or off for this session (⌥O)',
+  'permission-mode': 'Pick the permission mode for this session (⌥M steps to the next)',
   settings: "Binder's settings (config.json): permission mode, sticky prompt, config dirs",
 };
 
+// The app's own, which the TUI has not.
+const APP_ONLY: SlashCommand[] = [
+  { name: 'preview', description: "Preview the app beside the session: /preview starts package.json's dev script; /preview <url, port or command> opens or starts that" },
+  { name: 'simulator', description: 'The iOS Simulator beside the session: its screen, refreshed; Show Claude sends it a capture', aliases: ['sim'] },
+  { name: 'open', description: "Browse and edit the session folder's files (⌘P); /open <path> opens one" },
+  { name: 'window', description: 'Move this session to a window of its own (⌘\\ shows two side by side instead)' },
+];
+
 export function visibleCommands(commands: SlashCommand[]): SlashCommand[] {
-  return commands.filter((c) => !HIDDEN.has(c.name)).map((c) => (DESCRIPTIONS[c.name] ? { ...c, description: DESCRIPTIONS[c.name] } : c));
+  const own = APP_ONLY.filter((a) => !commands.some((c) => c.name === a.name));
+  return [...commands, ...own]
+    .filter((c) => !HIDDEN.has(c.name))
+    .map((c) => (DESCRIPTIONS[c.name] ? { ...c, description: DESCRIPTIONS[c.name] } : c))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Commands for the menu while the prompt is "/" plus a partial name: prefix matches first, then substring ones. */
+/** Commands for the menu while the prompt is "/" plus a partial name: an exact name or alias first (so Enter runs it), then prefix matches, then substring ones. */
 export function matchCommands(commands: SlashCommand[], value: string): SlashCommand[] {
   const m = /^\/(\S*)$/.exec(value);
   if (!m) return [];
   const q = m[1].toLowerCase();
-  const starts = commands.filter((c) => c.name.toLowerCase().startsWith(q) || c.aliases?.some((a) => a.startsWith(q)));
-  const contains = commands.filter((c) => !starts.includes(c) && c.name.toLowerCase().includes(q));
-  return starts.concat(contains);
+  const exact = commands.filter((c) => c.name.toLowerCase() === q || c.aliases?.includes(q));
+  const starts = commands.filter((c) => !exact.includes(c) && (c.name.toLowerCase().startsWith(q) || c.aliases?.some((a) => a.startsWith(q))));
+  const contains = commands.filter((c) => !exact.includes(c) && !starts.includes(c) && c.name.toLowerCase().includes(q));
+  return exact.concat(starts, contains);
 }
 
 /** A prompt that is one of the app's own commands, by name or alias. */

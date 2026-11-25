@@ -4,13 +4,15 @@ import { diffLines, unifiedDiffRows, withContext, type DiffRow } from '../lib/di
 import { plural, shortPath } from '../lib/format';
 import { errText, request, toast } from '../store';
 import { highlight, Markdown } from './Markdown';
+import { HostImage } from './Images';
 
 // A turn's blocks: response text as Markdown, thinking, and tool calls with a
 // view per tool (bindertui src/ui/toolView.ts): Edit as a diff, Write as the
 // new file, Bash with its output, TodoWrite as a checklist, Read and Grep as
 // one line with counts. Each shows a few lines until opened; Ctrl+O opens all.
 
-export type BlockCtx = { conn: string; tabId: number; cwd: string; detail: boolean };
+// `session`: the session's id, so cached images never cross sessions; `local`: it runs on this Mac.
+export type BlockCtx = { conn: string; session: string; tabId: number; cwd: string; detail: boolean; local: boolean };
 
 export function Blocks({ blocks, ctx }: { blocks: WireBlock[]; ctx: BlockCtx }) {
   return (
@@ -22,10 +24,25 @@ export function Blocks({ blocks, ctx }: { blocks: WireBlock[]; ctx: BlockCtx }) 
   );
 }
 
+// The plan Claude asked to start on (ExitPlanMode), once answered: the
+// question card showed it while it waited.
+function Plan({ plan, result }: { plan: string; result?: { isError: boolean } }) {
+  if (!result) return null;
+  return (
+    <div className="plan-block">
+      <div className="plan-head">
+        Plan <span className="dim">· {result.isError ? 'kept planning' : 'approved'}</span>
+      </div>
+      <Markdown text={plan} />
+    </div>
+  );
+}
+
 const Block = memo(function Block({ block, ctx }: { block: WireBlock; ctx: BlockCtx }) {
+  if (block.kind === 'tool_use' && block.name === 'ExitPlanMode' && typeof (block.input as { plan?: unknown })?.plan === 'string') return <Plan plan={(block.input as { plan: string }).plan} result={block.result} />;
   if (block.kind === 'tool_use') return <ToolCall block={block} ctx={ctx} />;
   if (!block.text.trim()) return null;
-  return block.kind === 'text' ? <Markdown text={block.text} /> : <Thinking text={block.text} detail={ctx.detail} />;
+  return block.kind === 'text' ? <Markdown text={block.text} cwd={ctx.cwd} local={ctx.local} /> : <Thinking text={block.text} detail={ctx.detail} />;
 });
 
 function Thinking({ text, detail }: { text: string; detail: boolean }) {
@@ -47,7 +64,7 @@ function args(block: ToolBlock): Record<string, unknown> {
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
 const LANG: Record<string, string> = { ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript', py: 'python', sh: 'bash', zsh: 'bash', json: 'json', md: 'markdown', yml: 'yaml', yaml: 'yaml', css: 'css', html: 'xml', xml: 'xml', go: 'go', rs: 'rust', rb: 'ruby', swift: 'swift', toml: 'ini', sql: 'sql', java: 'java', kt: 'kotlin', c: 'c', h: 'c', cpp: 'cpp', cs: 'csharp', php: 'php' };
-const langOf = (path: string) => LANG[path.split('.').pop()?.toLowerCase() ?? ''];
+export const langOf = (path: string) => LANG[path.split('.').pop()?.toLowerCase() ?? ''];
 
 // Strings binder cut from a tool's input end like this.
 const CUT = /… \[\d+ more characters\]/;
@@ -56,7 +73,8 @@ function isCut(block: ToolBlock): boolean {
   return (block.result?.length ?? 0) > (block.result?.content.length ?? 0) || CUT.test(JSON.stringify(block.input ?? null));
 }
 
-type Arg = { text: string; kind?: 'path' | 'cmd' | 'agent' };
+// `file` (and `line`): the file a path names, which a click opens.
+type Arg = { text: string; kind?: 'path' | 'cmd' | 'agent'; file?: string; line?: number };
 
 type View = {
   name: string;
@@ -121,7 +139,7 @@ function describe(block: ToolBlock, cwd: string): View {
         ...(i ? [<div key={`sep${i}`} className="diff-row skip">⋯</div>] : []),
         ...diffRows(withContext(diffLines(str(e.old_string), str(e.new_string)))).map((r, j) => <div key={`${i}-${j}`}>{r}</div>),
       ]);
-      return { name: 'Edit', arg: { text: shortPath(str(a.file_path), cwd), kind: 'path' }, meta: a.replace_all ? 'all occurrences' : undefined, rows, preview: 12, frame: 'diff' };
+      return { name: 'Edit', arg: { text: shortPath(str(a.file_path), cwd), kind: 'path', file: str(a.file_path) }, meta: a.replace_all ? 'all occurrences' : undefined, rows, preview: 12, frame: 'diff' };
     }
     case 'Patch': {
       // A Codex file change: one or more files, each a unified diff.
@@ -134,19 +152,20 @@ function describe(block: ToolBlock, cwd: string): View {
       ]);
       const one = changes.length === 1 ? changes[0] : undefined;
       const arg = one ? shortPath(str(one.path), cwd) : changes.length ? plural(changes.length, 'file') : shortPath(str(a.file_path), cwd);
-      return { name: 'Patch', arg: { text: arg, kind: 'path' }, meta: one ? note(str(one.kind)) : undefined, rows, preview: 12, frame: 'diff' };
+      // One file is a link to it, as Edit's is.
+      return { name: 'Patch', arg: { text: arg, kind: 'path', ...(one && { file: str(one.path) }) }, meta: one ? note(str(one.kind)) : undefined, rows, preview: 12, frame: 'diff' };
     }
     case 'Write': {
       const path = str(a.file_path);
       const content = str(a.content);
       const lines = content ? content.split('\n') : [];
-      return { name: 'Write', arg: { text: shortPath(path, cwd), kind: 'path' }, meta: plural(lines.length, 'line'), rows: lines.map((l, i) => <div key={i} dangerouslySetInnerHTML={{ __html: highlight(l, langOf(path)) || ' ' }} />), preview: 6, frame: 'code' };
+      return { name: 'Write', arg: { text: shortPath(path, cwd), kind: 'path', file: path }, meta: plural(lines.length, 'line'), rows: lines.map((l, i) => <div key={i} dangerouslySetInnerHTML={{ __html: highlight(l, langOf(path)) || ' ' }} />), preview: 6, frame: 'code' };
     }
     case 'Read': {
       const offset = Number(a.offset ?? 0);
       const limit = Number(a.limit ?? 0);
       const range = offset || limit ? `lines ${offset || 1}${limit ? `-${(offset || 1) + limit - 1}` : '+'}` : '';
-      return { name: 'Read', arg: { text: shortPath(str(a.file_path), cwd), kind: 'path' }, meta: [range, done && !block.result?.isError ? plural(out.length, 'line') : ''].filter(Boolean).join(' · '), rows: block.result?.isError ? out : [], preview: 4, frame: 'out' };
+      return { name: 'Read', arg: { text: shortPath(str(a.file_path), cwd), kind: 'path', file: str(a.file_path), ...(offset > 0 && { line: offset }) }, meta: [range, done && !block.result?.isError ? (block.result?.images?.length ? plural(block.result.images.length, 'image') : plural(out.length, 'line')) : ''].filter(Boolean).join(' · '), rows: block.result?.isError ? out : [], preview: 4, frame: 'out' };
     }
     case 'Bash':
       return { name: 'Bash', arg: { text: str(a.command).replace(/\s+/g, ' ').trim(), kind: 'cmd' }, meta: str(a.description) || undefined, rows: out, preview: 5, frame: 'out' };
@@ -192,6 +211,25 @@ function describe(block: ToolBlock, cwd: string): View {
   }
 }
 
+type FileArgView = { text: string; kind?: string; file: string; line?: number };
+
+// A tool's file, for a session on this Mac: a click opens it in config.json's
+// editor (at its line, when the call says), Option-click shows it in Finder.
+function FileArg({ arg, cwd }: { arg: FileArgView; cwd: string }) {
+  return (
+    <span
+      className={`tool-arg ${arg.kind ?? ''} file-link`}
+      title={`${arg.file}\nClick to open it in your editor, Option-click to show it in Finder`}
+      onClick={(e) => {
+        e.stopPropagation();
+        window.binder.openPath(arg.file, cwd, e.altKey ? 'reveal' : 'edit', arg.line).catch((err) => toast(errText(err), true));
+      }}
+    >
+      {arg.text}
+    </span>
+  );
+}
+
 function ToolCall({ block: wire, ctx }: { block: ToolBlock; ctx: BlockCtx }) {
   // The untruncated call, once asked for.
   const [full, setFull] = useState<ToolBlock | null>(null);
@@ -223,19 +261,27 @@ function ToolCall({ block: wire, ctx }: { block: ToolBlock; ctx: BlockCtx }) {
     else body = <pre className={`tool-out${error ? ' error' : ''}`}>{(rows as string[]).join('\n')}</pre>;
   }
   const kids = block.children;
+  const images = block.result?.images ?? [];
   return (
     <div className="tool">
       <div className="tool-head" onClick={() => setOpen(!expanded)}>
         <span className={`tool-dot${pending ? ' pending' : error ? ' error' : ''}`} />
         <span className="tool-name">{view.name}</span>
-        {view.arg && (
+        {view.arg && (view.arg.file && ctx.local ? <FileArg arg={view.arg as FileArgView} cwd={ctx.cwd} /> : (
           <span className={`tool-arg ${view.arg.kind ?? ''}`} title={view.arg.text}>
             {view.arg.text}
           </span>
-        )}
+        ))}
         {view.meta && <span className="tool-meta">{view.meta}</span>}
         {pending && block.inputChars ? <span className="tool-meta">{plural(block.inputChars, 'char')}…</span> : null}
       </div>
+      {images.length > 0 && (
+        <div className="tool-images">
+          {images.map((img, i) => (
+            <HostImage key={i} img={img} at={{ conn: ctx.conn, session: ctx.session, tabId: ctx.tabId, toolUseId: block.id, index: i }} />
+          ))}
+        </div>
+      )}
       {(body || errorRows.length > 0 || hidden > 0 || kids.length > 0) && (
         <div className="tool-body">
           {body}

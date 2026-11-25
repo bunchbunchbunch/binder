@@ -1,10 +1,12 @@
 import type { Block, Tab, Turn } from '../store.js';
-import { renderTool, toolWidth } from './toolView.js';
+import { findingRows, renderTool, toolWidth } from './toolView.js';
+import { severityCounts, turnFindings } from '../findings.js';
 import { splitWork, workSummary } from './workSplit.js';
 import { clean, truncate, width as strWidth, wrap } from './md/text.js';
 import { styled, type Style } from './md/theme.js';
 import { keywordColors, ultrathinkRanges } from './ultrathink.js';
 import { flattenBig } from './lineAttrs.js';
+import { imageLines, imagesKey } from './images.js';
 
 // A tab is drawn as a flat list of pre-rendered ANSI lines, each at most
 // `width` columns. TabView hands Ink only the slice that is on screen, so
@@ -49,7 +51,29 @@ function thinkingLines(raw: string, w: number, detail: boolean): string[] {
   return ('✻ ' + body).split('\n').flatMap((l) => wrap(styled(l, THINK), w));
 }
 
+// The plan Claude asks to start on (ExitPlanMode), as markdown and in full:
+// it is what the user approves, and approving happens just below it.
+function planLines(block: Extract<Block, { kind: 'tool_use' }>, w: number, renderText: TextRenderer): string[] | undefined {
+  let plan = (block.input as { plan?: unknown } | undefined)?.plan;
+  if (typeof plan !== 'string' && block.inputJson) {
+    try {
+      plan = JSON.parse(block.inputJson).plan;
+    } catch {
+      return undefined; // still streaming in
+    }
+  }
+  if (typeof plan !== 'string' || !plan.trim()) return undefined;
+  const result = block.result;
+  const marker = styled('⏺ ', { fg: result ? (result.isError ? '#E06C75' : '#61AFEF') : '#E8C07D' });
+  const verdict = !result ? '' : result.isError ? styled(' · kept planning', DIM) : styled(' · approved', DIM);
+  const bar = styled('│', PROMPT_BAR) + ' ';
+  const body = flattenBig(renderText({ kind: 'text', text: plan, final: true }, Math.max(20, w - 2)));
+  return fit([marker + styled('Plan', { bold: true }) + verdict, ...body.map((l) => (l ? bar + l : bar.trimEnd()))], w);
+}
+
 function toolLines(block: Extract<Block, { kind: 'tool_use' }>, w: number, detail: boolean, renderText: TextRenderer): string[] {
+  const plan = block.name === 'ExitPlanMode' ? planLines(block, w, renderText) : undefined;
+  if (plan) return plan;
   const r = renderTool(block, toolWidth(w));
   const result = block.result;
   const marker = styled('⏺ ', { fg: result ? (result.isError ? '#E06C75' : '#61AFEF') : '#E8C07D' });
@@ -58,6 +82,8 @@ function toolLines(block: Extract<Block, { kind: 'tool_use' }>, w: number, detai
   const hidden = r.body.length - shown.length;
   for (const l of shown) out.push('  ' + l);
   if (hidden > 0) out.push('  ' + styled(`⋯ ${hidden} more line${hidden === 1 ? '' : 's'} (Ctrl+O)`, DIM));
+  // A tool's images (a screenshot, a Read of an image) show in full, not cut with its text.
+  for (const img of result?.images ?? []) out.push(...imageLines(img, w, '  '));
   if (block.children.length) {
     if (detail) {
       const bar = '  ' + styled('│', SUBAGENT_BAR) + ' ';
@@ -82,7 +108,7 @@ export function blockLines(block: Block, w: number, detail: boolean, renderText:
     case 'tool_use':
       // Subagent children render through renderText, so only cache final tools.
       if (!block.final || (block.children.length && detail)) return toolLines(block, w, detail, renderText);
-      return cached(block, `${w}:${detail}`, () => toolLines(block, w, detail, renderText));
+      return cached(block, `${w}:${detail}:${imagesKey()}`, () => toolLines(block, w, detail, renderText));
   }
 }
 
@@ -146,16 +172,21 @@ export type TabLinesOptions = {
   pinned?: Turn;
   // The queued prompt of this tab open in the prompt for editing, if any.
   editing?: string;
+  // A code review's findings listed, with how to fix them (config.json findingsCard); on unless false.
+  findings?: boolean;
 };
 
 // `workAt` is the row of the work summary line (-1 when there is no work), so
 // expanding can scroll the work into view.
-function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean, renderText: TextRenderer, out: string[], pinned?: Turn): number {
+function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean, renderText: TextRenderer, out: string[], pinned?: Turn, findings = true): number {
+  // The sticky header holds the pinned turn's prompt, but not its images: they stay here.
   if (turn !== pinned) {
     const head = turn.auto ? wrap(styled(`⏺ ${clean(turn.prompt)}`, AUTO), width) : promptLines(turn.prompt, width);
     for (const l of head) out.push(l);
-    out.push('');
   }
+  // Images sent with the prompt, under it.
+  for (const img of turn.images ?? []) out.push(...imageLines(img, width, '  '));
+  if (turn !== pinned || turn.images?.length) out.push('');
   const { work, response } = splitWork(turn.blocks);
   const workAt = work.length ? out.length : -1;
   if (work.length) {
@@ -163,6 +194,14 @@ function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean
   }
   const shown = expanded ? turn.blocks : response;
   for (const l of blocksLines(shown, width, detail, renderText)) out.push(l);
+  // A code review's findings: from its text (already shown) or ReportFindings (listed here), and how to fix them.
+  const found = findings && turn.status !== 'running' ? turnFindings(turn) : null;
+  if (found) {
+    if (!found.fromText) out.push(...findingRows(found.findings, width, detail), '');
+    const n = found.findings.length;
+    const counts = severityCounts(found.findings);
+    out.push(truncate(styled(`▸ ${n} finding${n === 1 ? '' : 's'}${counts ? ` (${counts})` : ''} · /findings fixes one or all · /diff marks them`, { fg: '#C9A0FF' }), width), '');
+  }
   if (turn.status === 'interrupted') out.push(styled('interrupted', { fg: '#E8C07D' }));
   if (turn.result && turn.status !== 'interrupted' && turn.status !== 'superseded') {
     out.push(styled(`${turn.status === 'error' ? 'error · ' : ''}${fmtDuration(turn.result.durationMs)}`, DIM));
@@ -172,13 +211,13 @@ function turnLines(turn: Turn, width: number, detail: boolean, expanded: boolean
 
 // The tab's turns in order, then its pending follow-ups. `workAt` points at
 // the latest turn's work.
-export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = false, renderText, pending = [], pinned, editing }: TabLinesOptions): { lines: string[]; workAt: number } {
+export function tabLines(tab: Tab, { width, detail, expanded, expandEarlier = false, renderText, pending = [], pinned, editing, findings = true }: TabLinesOptions): { lines: string[]; workAt: number } {
   const out: string[] = [];
   for (const turn of tab.earlier) {
-    turnLines(turn, width, detail, expandEarlier, renderText, out, pinned);
+    turnLines(turn, width, detail, expandEarlier, renderText, out, pinned, findings);
     if (out[out.length - 1] !== '') out.push('');
   }
-  const workAt = turnLines(tab, width, detail, expanded, renderText, out, pinned);
+  const workAt = turnLines(tab, width, detail, expanded, renderText, out, pinned, findings);
   // The tab's queued prompts: a new tab's own, then follow-ups. Up on an empty
   // prompt opens the last one, so its note says how; the one open in the
   // prompt says how to save it instead.

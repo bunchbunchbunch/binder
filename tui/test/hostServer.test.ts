@@ -1,12 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
-import { createInterface } from 'node:readline';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { Session } from '../src/session.js';
 import { SessionHost } from '../src/host.js';
 import { HostServer } from '../src/remote/hostServer.js';
+import { onLines } from '../src/lines.js';
 import { liveElsewhere, lockPath, socketPath } from '../src/remote/sockets.js';
 import { applyPatch, wireState, type WireState } from '../src/remote/wire.js';
 import { initialState } from '../src/store.js';
@@ -35,13 +35,12 @@ function setup(fixture: string, env: Record<string, string> = {}) {
   process.env.BINDER_STATE_DIR = stateDir;
   process.env.BINDER_CLAUDE_BIN = FAKE_BIN;
   process.env.BINDER_FAKE_FIXTURE = join(FIXTURES, fixture);
-  for (const k of ['BINDER_FAKE_DELAY_MS', 'BINDER_FAKE_ANSWERS_OUT', 'BINDER_FAKE_INPUT_OUT', 'BINDER_FAKE_CAPS']) delete process.env[k];
+  for (const k of ['BINDER_FAKE_DELAY_MS', 'BINDER_FAKE_ANSWERS_OUT', 'BINDER_FAKE_INPUT_OUT', 'BINDER_FAKE_CAPS', 'BINDER_FAKE_FAST_REASON', 'BINDER_FAKE_REFUSE_MODES']) delete process.env[k];
   Object.assign(process.env, env);
   return stateDir;
 }
 
-async function startHost(sessionId: string, stateDir: string) {
-  const cwd = process.cwd();
+async function startHost(sessionId: string, stateDir: string, cwd = process.cwd()) {
   const session = new Session({ sessionId, resume: false, cwd, passthrough: [] });
   const host = new SessionHost(session, initialState(sessionId), cwd, join(stateDir, 'claude'));
   const server = new HostServer(host);
@@ -76,7 +75,7 @@ function viewer(sessionId: string, hello: Record<string, unknown> = { t: 'hello'
   };
   let nextId = 1;
   socket.on('error', () => {});
-  createInterface({ input: socket }).on('error', () => {}).on('line', (line) => {
+  onLines(socket, (line) => {
     const m = JSON.parse(line);
     v.msgs.push(m);
     if (m.t === 'snapshot') v.state = m.state;
@@ -127,6 +126,104 @@ describe('host server', () => {
     expect(JSON.parse(readFileSync(answersOut, 'utf8')).response.response.updatedInput.answers).toEqual({ 'Which color do you prefer?': 'Blue' });
     // A stale answer is refused.
     expect((await a.request('answer', { requestId: q.requestId, answers: {} })).ok).toBe(false);
+  });
+
+  it('switches fast mode and the permission mode, and answers a prompt with an "always allow" choice', async () => {
+    const stateDir = setup('permission-suggestions.jsonl', { BINDER_FAKE_REFUSE_MODES: 'plan' });
+    const answersOut = join(stateDir, 'answers.json');
+    process.env.BINDER_FAKE_ANSWERS_OUT = answersOut;
+    const id = '00000000-0000-4000-8000-0000000000b3';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    expect((await v.request('set_fast_mode')).result).toEqual({ message: 'Fast mode on' });
+    await until(() => v.state!.fastMode === 'on');
+    expect((await v.request('set_fast_mode', { on: false })).result).toEqual({ message: 'Fast mode off' });
+    await until(() => v.state!.fastMode === 'off');
+    expect((await v.request('cycle_mode')).result).toEqual({ message: 'Permission mode: accept edits' });
+    expect((await v.request('cycle_mode')).result).toEqual({ message: 'Permission mode: auto mode' });
+    await until(() => v.state!.permissionMode === 'auto');
+
+    await v.request('send', { text: 'make a folder' });
+    await until(() => v.state!.question !== null);
+    const q = v.state!.question!;
+    expect(q.kind).toBe('permission');
+    const labels = q.questions[0].options.map((o) => o.label);
+    expect(labels).toEqual(['Allow', 'Always allow Bash(mkdir -p alpha && echo made)', 'Allow, and accept all edits from now on', 'Deny']);
+    await v.request('answer', { requestId: q.requestId, answers: { 'Allow Bash?': labels[1] } });
+    await until(() => existsSync(answersOut));
+    expect(JSON.parse(readFileSync(answersOut, 'utf8')).response.response.updatedPermissions[0].rules).toEqual([{ toolName: 'Bash', ruleContent: 'mkdir -p alpha && echo made' }]);
+  });
+
+  it('reports itself outdated, and restarts only where the host process allows it and only when idle', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl', { BINDER_FAKE_DELAY_MS: '150' });
+    const id = '00000000-0000-4000-8000-0000000000b4';
+    const cwd = process.cwd();
+    const session = new Session({ sessionId: id, resume: false, cwd, passthrough: [] });
+    const host = new SessionHost(session, initialState(id), cwd, join(stateDir, 'claude'));
+    let restarts = 0;
+    const server = new HostServer(host, { restart: () => void restarts++ });
+    session.start();
+    await server.listen();
+    cleanup.push(async () => {
+      server.close();
+      await host.close();
+    });
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    expect(v.state!.outdated).toBe(false);
+    server.markOutdated();
+    await until(() => v.state!.outdated === true);
+
+    await v.request('send', { text: 'first prompt' });
+    await until(() => v.state!.running !== null);
+    expect(await v.request('restart_host')).toMatchObject({ ok: false, error: 'Wait until the session is idle' });
+    await until(() => v.state!.running === null);
+    expect((await v.request('restart_host')).ok).toBe(true);
+    await until(() => restarts === 1);
+  });
+
+  it('refuses restart_host in a host without a restart (the terminal app)', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl');
+    const id = '00000000-0000-4000-8000-0000000000b5';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    expect(await v.request('restart_host')).toMatchObject({ ok: false, error: 'This session runs in the terminal app; restart binder there' });
+  });
+
+  it('sends a plan in full with its choices, and a choice approves it with the mode', async () => {
+    const stateDir = setup('plan-approval.jsonl');
+    const answersOut = join(stateDir, 'answers.json');
+    process.env.BINDER_FAKE_ANSWERS_OUT = answersOut;
+    const id = '00000000-0000-4000-8000-0000000000b6';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    await v.request('send', { text: 'plan it' });
+    await until(() => v.state!.question !== null);
+    const q = v.state!.question!;
+    expect(q.kind).toBe('permission');
+    expect(q.plan).toMatch(/^# Add hello\.txt/);
+    expect(q.questions[0].options.map((o) => o.label)).toEqual(['Yes, and use auto mode', 'Yes, and auto-accept edits', 'Yes, and manually approve edits', 'No, keep planning']);
+    await v.request('answer', { requestId: q.requestId, answers: { 'Ready to code?': 'Yes, and use auto mode' } });
+    await until(() => existsSync(answersOut));
+    expect(JSON.parse(readFileSync(answersOut, 'utf8')).response.response.updatedPermissions).toEqual([{ type: 'setMode', mode: 'auto', destination: 'session' }]);
+  });
+
+  it('sends an image on request: a tool result\'s, and one sent with a prompt', async () => {
+    const stateDir = setup('image-result.jsonl');
+    const id = '00000000-0000-4000-8000-0000000000b7';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    const png = readFileSync(join(FIXTURES, 'orange.png')).toString('base64');
+    await v.request('send', { text: 'look at this', images: [{ mediaType: 'image/png', data: png }] });
+    await until(() => v.state!.tabs[0]?.status === 'done');
+    expect(v.state!.tabs[0].images).toEqual([{ mediaType: 'image/png', bytes: 176 }]);
+    expect((await v.request('image', { tabId: 1, toolUseId: 'toolu_img', index: 0 })).result).toEqual({ mediaType: 'image/png', data: png });
+    expect((await v.request('image', { tabId: 1, turn: 0, index: 0 })).result).toEqual({ mediaType: 'image/png', data: png });
+    expect((await v.request('image', { tabId: 1, toolUseId: 'toolu_img', index: 1 })).error).toBe('No such image');
   });
 
   it('edits and removes queued prompts, and refuses one already sent', async () => {
@@ -269,6 +366,75 @@ describe('host server', () => {
     other.kill();
     await sleep(100);
     expect(liveElsewhere(id)).toBeUndefined();
+  });
+
+  it('refuses file_write while config.json turns file editing off; reads still work', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl');
+    const dir = realpathSync(mkdtempSync('/tmp/bx-'));
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    const was = process.env.BINDER_CONFIG;
+    const config = join(stateDir, 'config.json');
+    process.env.BINDER_CONFIG = config;
+    cleanup.push(() => void (process.env.BINDER_CONFIG = was));
+    writeFileSync(config, JSON.stringify({ fileEditing: false }));
+    const id = '00000000-0000-4000-8000-0000000000b1';
+    await startHost(id, stateDir, dir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    expect(await v.request('file_write', { path: 'a.txt', text: 'two\n' })).toMatchObject({ ok: false, error: 'File editing is off (fileEditing in config.json)' });
+    expect(await v.request('file_write', { path: 'b.txt', text: 'new\n' })).toMatchObject({ ok: false });
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('one\n');
+    expect(existsSync(join(dir, 'b.txt'))).toBe(false);
+    expect((await v.request('file_read', { path: 'a.txt' })).result).toMatchObject({ text: 'one\n' });
+    // Turned back on while the host runs.
+    writeFileSync(config, '{}');
+    expect(await v.request('file_write', { path: 'a.txt', text: 'two\n' })).toMatchObject({ ok: true });
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('two\n');
+  });
+
+  it('answers a request over the line cap with an error, and keeps the viewer attached', async () => {
+    const stateDir = setup('two-turns-stdin.jsonl');
+    const id = '00000000-0000-4000-8000-0000000000b2';
+    await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    const reply = (n: number) => v.msgs.find((m) => m.t === 'reply' && m.id === n);
+    // A 32 MB PDF as base64 fits; the Mac app writes the id last, after the attachments.
+    v.socket.write(JSON.stringify({ pad: 'x'.repeat(45 * 1024 * 1024), t: 'history', id: 900 }) + '\n');
+    await until(() => reply(900) !== undefined, 20000);
+    expect(reply(900)).toMatchObject({ ok: true });
+    const over = 'x'.repeat(64 * 1024 * 1024);
+    v.socket.write(JSON.stringify({ pad: over, t: 'history', id: 901 }) + '\n');
+    await until(() => reply(901) !== undefined, 20000);
+    expect(reply(901)).toEqual({ t: 'reply', id: 901, ok: false, error: 'Too big to send: 64.0 MB, over the 64 MB limit' });
+    // With no id to answer, a notice says why.
+    v.socket.write(JSON.stringify({ t: 'history', pad: over }) + '\n');
+    await until(() => v.msgs.some((m) => m.t === 'notice'), 20000);
+    expect(v.msgs.find((m) => m.t === 'notice')).toEqual({ t: 'notice', text: 'Too big to send: 64.0 MB, over the 64 MB limit' });
+    expect((await v.request('history')).ok).toBe(true);
+  }, 60000);
+
+  // U+2028 and U+2029 are legal, unescaped, inside JSON strings, and since
+  // Node 24 readline ends a line at each: a line holding one must stay whole.
+  it('keeps U+2028 and U+2029 whole in a viewer\'s prompt and in what claude says', async () => {
+    const said = 'A\u2028B\u2029C';
+    const fixture = join(mkdtempSync('/tmp/bx-'), 'sep.jsonl');
+    writeFileSync(fixture, readFileSync(join(FIXTURES, 'two-turns-stdin.jsonl'), 'utf8').replaceAll('"text":"A"', `"text":"${said}"`));
+    const stateDir = setup('two-turns-stdin.jsonl', { BINDER_FAKE_FIXTURE: fixture });
+    const id = '00000000-0000-4000-8000-0000000000b3';
+    const { host } = await startHost(id, stateDir);
+    const v = viewer(id);
+    await until(() => v.state !== null);
+    // What claude says, read from its stdout.
+    expect((await v.request('send', { text: 'go' })).ok).toBe(true);
+    await until(() => JSON.stringify(v.state!.tabs[0] ?? null).includes(said));
+    expect(JSON.stringify(roundTrip(wireState({ state: host.state, cwd: host.cwd, effort: host.effort })).tabs[0])).toContain(said);
+    // A viewer's prompt, read from the socket. (The fake claude's own stdin
+    // reader may cut it, so this waits for the host, not for a reply.)
+    const prompt = 'Line one\u2028Line two\u2029end';
+    expect((await v.request('send', { text: prompt })).ok).toBe(true);
+    await until(() => v.state!.tabs[1]?.prompt === prompt);
+    expect(roundTrip(wireState({ state: host.state, cwd: host.cwd, effort: host.effort })).tabs[1].prompt).toBe(prompt);
   });
 
   it('moves its socket and resends a snapshot after /clear', async () => {

@@ -1,4 +1,7 @@
 import React from 'react';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
@@ -144,6 +147,38 @@ describe('pasting into the prompt', () => {
     ui.unmount();
   });
 
+  it('turns each dropped path into an attachment, and keeps one that cannot be attached as its path, saying why', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'binder-drop-'));
+    writeFileSync(join(dir, 'a.pdf'), '%PDF-1.4');
+    writeFileSync(join(dir, 'b c.md'), '# B');
+    writeFileSync(join(dir, 'blob.zip'), Buffer.from([0, 1, 2, 255]));
+    const sent: Array<{ text: string; names: (string | undefined)[] }> = [];
+    const ui = render(<PromptInput onSubmit={(text, images) => void sent.push({ text, names: images.map((i) => i.name) })} isActive width={400} />);
+    // Two files dropped at once: iTerm2 types both paths, spaces escaped.
+    paste(ui, `${join(dir, 'a.pdf')} ${join(dir, 'b\\ c.md')} `);
+    await until(() => plain(ui.lastFrame()).includes('❯ [File #1: a.pdf] [File #2: b c.md]'));
+    ui.stdin.write(' ');
+    await sleep(30);
+    paste(ui, `${join(dir, 'blob.zip')} `);
+    await until(() => plain(ui.lastFrame()).includes('blob.zip is not an image, a PDF or text; mention it with @ so Claude reads it'));
+    ui.stdin.write('\r');
+    await until(() => sent.length === 1);
+    expect(sent[0]).toEqual({ text: `[File #1: a.pdf] [File #2: b c.md] ${join(dir, 'blob.zip')}`, names: ['a.pdf', 'b c.md'] });
+    ui.unmount();
+  });
+
+  it('keeps the text when the send is refused', async () => {
+    let tries = 0;
+    const ui = render(<PromptInput onSubmit={() => (tries++, false)} isActive width={60} />);
+    ui.stdin.write('summarize it');
+    await sleep(30);
+    ui.stdin.write('\r');
+    await until(() => tries === 1);
+    await sleep(30);
+    expect(plain(ui.lastFrame())).toContain('❯ summarize it');
+    ui.unmount();
+  });
+
   it('shows a one-line paste over 800 characters as [Pasted text #1]', async () => {
     const sent: string[] = [];
     const ui = render(<PromptInput onSubmit={(text) => sent.push(text)} isActive width={60} />);
@@ -194,7 +229,7 @@ describe('shortcuts popup', () => {
     );
     const rows = plain(ui.lastFrame()).split('\n');
     const box = rows.filter((r) => /^[╭│╰]/.test(r));
-    expect(box).toHaveLength(11); // 9 rows of shortcuts and the border
+    expect(box).toHaveLength(12); // 10 rows of shortcuts and the border
     for (const r of box) expect(r).toMatch(/^[╭│╰][^#]*[╮│╯]#*$/);
     ui.unmount();
   });

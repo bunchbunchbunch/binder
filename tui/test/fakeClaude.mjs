@@ -8,6 +8,10 @@
 //   BINDER_FAKE_ARGS_OUT  if set, the argv this process received is written here
 //   BINDER_FAKE_INPUT_OUT if set, every stdin line is appended here
 //   BINDER_FAKE_CAPS      comma-separated capabilities added to init lines
+//   BINDER_FAKE_FAST_REASON  why fast mode cannot serve (e.g. extra_usage_disabled);
+//                         unset, fast mode turns on when asked
+//   BINDER_FAKE_REFUSE_MODES comma-separated permission modes set_permission_mode refuses
+//   BINDER_FAKE_PLUGINS   a JSON file of {installed, available} that `plugin ...` runs read and write
 //
 // A user message with a uuid gets command_lifecycle frames, and a send_now
 // interrupt cuts the running turn short with an aborted result, as the real
@@ -20,6 +24,33 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
+// `claude plugin list|install|uninstall|enable|disable ... --json`, as the real CLI answers.
+if (process.argv[2] === 'plugin') {
+  const file = process.env.BINDER_FAKE_PLUGINS;
+  const state = file ? JSON.parse(readFileSync(file, 'utf8')) : { installed: [], available: [] };
+  const [, , , cmd, id] = process.argv;
+  if (cmd === 'list') {
+    process.stdout.write(JSON.stringify(process.argv.includes('--available') ? state : state.installed) + '\n');
+    process.exit(0);
+  }
+  const say = (outcome, message) => {
+    process.stdout.write(JSON.stringify({ command: cmd, outcome, plugin: id, scope: 'user', message }) + '\n');
+    if (file && outcome === 'ok') writeFileSync(file, JSON.stringify(state));
+    process.exit(outcome === 'ok' ? 0 : 1);
+  };
+  const found = state.installed.find((p) => p.id === id);
+  if (cmd === 'install') {
+    const a = state.available.find((p) => p.pluginId === id);
+    if (!a) say('failed', `Plugin "${id}" not found`);
+    state.installed.push({ id, version: '1.0.0', scope: 'user', enabled: true });
+    say('ok', `Successfully installed plugin: ${a.name} (scope: user)`);
+  }
+  if (!found) say('failed', `Plugin "${id}" is not installed`);
+  if (cmd === 'uninstall') state.installed = state.installed.filter((p) => p.id !== id);
+  else found.enabled = cmd === 'enable';
+  say('ok', `Successfully ${cmd === 'uninstall' ? 'uninstalled' : `${cmd}d`} plugin: ${id.split('@')[0]} (scope: user)`);
+}
+
 const fixture = process.env.BINDER_FAKE_FIXTURE;
 if (!fixture) {
   process.stderr.write('BINDER_FAKE_FIXTURE not set\n');
@@ -30,6 +61,14 @@ if (process.env.BINDER_FAKE_ARGS_OUT) {
 }
 const delay = Number(process.env.BINDER_FAKE_DELAY_MS ?? 0);
 const caps = process.env.BINDER_FAKE_CAPS ? process.env.BINDER_FAKE_CAPS.split(',') : null;
+const refusedModes = (process.env.BINDER_FAKE_REFUSE_MODES ?? '').split(',').filter(Boolean);
+// Fast mode, once binder has asked about it (apply_flag_settings fastMode):
+// it shows on init lines from then on, as the real binary always reports it.
+let fast = null;
+const fastFields = () => {
+  const reason = fast ? process.env.BINDER_FAKE_FAST_REASON : 'sdk_opt_in_required';
+  return { fast_mode_state: fast && !reason ? 'on' : 'off', ...(reason && { fast_mode_disabled_reason: reason }) };
+};
 const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 
 const lines = readFileSync(fixture, 'utf8').split('\n').filter((l) => l.trim());
@@ -69,7 +108,8 @@ async function emitTurn(uuid) {
     }
     const e = JSON.parse(line);
     const init = e.type === 'system' && e.subtype === 'init';
-    process.stdout.write((init ? JSON.stringify({ ...e, ...(e.cwd === recordedCwd && { cwd: process.cwd() }), ...(caps && { capabilities: caps }) }) : line) + '\n');
+    const result = e.type === 'result' && fast !== null;
+    process.stdout.write((init || result ? JSON.stringify({ ...e, ...(init && e.cwd === recordedCwd && { cwd: process.cwd() }), ...(init && caps && { capabilities: caps }), ...(fast !== null && fastFields()) }) : line) + '\n');
     // A recorded can_use_tool request blocks the turn until the host answers,
     // like the real binary does.
     if (e.type === 'control_request') {
@@ -90,7 +130,7 @@ const mcp = [
 
 // Answers shaped like the real binary's, for the control requests binder's panels send.
 const CONTROL = {
-  initialize: () => ({ commands: FAKE_COMMANDS, account: { subscriptionType: 'Claude Max' } }),
+  initialize: () => ({ commands: FAKE_COMMANDS, account: { subscriptionType: 'Claude Max' }, ...fastFields() }),
   get_settings: () => ({ applied: { model: 'claude-opus-5-5', effort: 'xhigh' } }),
   get_context_usage: () => ({
     categories: [
@@ -110,8 +150,25 @@ const CONTROL = {
     ],
   }),
   set_model: () => ({}),
-  apply_flag_settings: () => ({}),
-  set_permission_mode: (r) => ({ mode: r.mode === 'manual' ? 'default' : r.mode }),
+  // The plugins as they now are: the enabled ones, each with a command named for it.
+  reload_plugins: () => {
+    const file = process.env.BINDER_FAKE_PLUGINS;
+    const on = file ? JSON.parse(readFileSync(file, 'utf8')).installed.filter((p) => p.enabled) : [];
+    return { commands: [...FAKE_COMMANDS, ...on.map((p) => ({ name: p.id.split('@')[0], description: `From the ${p.id} plugin`, argumentHint: '' }))], agents: [], plugins: on.map((p) => ({ name: p.id.split('@')[0], source: p.id })), mcpServers: [], error_count: 0 };
+  },
+  // A side question (/btw): answered at once, saying what it was asked and how many came before.
+  side_question: (r) => ({ response: `**Side answer** to: ${r.question}${r.history?.length ? ` (after ${r.history.length} earlier)` : ''}`, synthetic: false }),
+  apply_flag_settings: (r) => {
+    if (typeof r.settings?.fastMode === 'boolean') fast = r.settings.fastMode;
+    return {};
+  },
+  // The real binary reports the new mode in a status event before it answers.
+  set_permission_mode: (r) => {
+    if (refusedModes.includes(r.mode)) throw new Error(`Cannot set permission mode to ${r.mode}`);
+    const mode = r.mode === 'manual' ? 'default' : r.mode;
+    emit({ type: 'system', subtype: 'status', status: null, permissionMode: mode, session_id: 'fake' });
+    return { mode };
+  },
   // The real binary names the session (tidied) before it answers.
   rename_session: (r) => {
     emit({ type: 'system', subtype: 'session_title_changed', title: String(r.title).replace(/\s+/g, ' ').trim(), uuid: 'fake-title', session_id: 'fake' });
@@ -164,7 +221,14 @@ rl.on('line', (line) => {
     if (msg.uuid) emit({ type: 'command_lifecycle', command_uuid: msg.uuid, state: 'queued' });
     busy = busy.then(() => emitTurn(msg.uuid));
   } else if (msg.type === 'control_request' && CONTROL[msg.request?.subtype]) {
-    emit({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id, response: CONTROL[msg.request.subtype](msg.request) } });
+    let response;
+    try {
+      response = CONTROL[msg.request.subtype](msg.request);
+    } catch (e) {
+      emit({ type: 'control_response', response: { subtype: 'error', request_id: msg.request_id, error: e.message } });
+      return;
+    }
+    emit({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id, response } });
   } else if (msg.type === 'control_request') {
     const sendNow = msg.request?.send_now === true && inTurn;
     if (sendNow) cut = true;

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { BinderApi, ControlRequest, PaneEvent, WebPaneEvent } from '../shared/api';
+import type { BinderApi, ControlRequest, PaneEvent, PreviewEvent, WebPaneEvent, SidePaneEvent } from '../shared/api';
 import type { KeyDesc } from '../shared/keys';
 import type { HostMessage } from '../shared/wire';
 
@@ -12,6 +12,7 @@ const api: BinderApi = {
   open: (conn, req) => ipcRenderer.invoke('open', conn, req),
   request: (conn, t, fields) => ipcRenderer.invoke('request', conn, t, fields),
   close: (conn) => ipcRenderer.invoke('close', conn),
+  newWindow: (ref) => ipcRenderer.invoke('newWindow', ref),
   onMessage: (cb) => {
     const listener = (_e: IpcRendererEvent, conn: string, msg: HostMessage) => cb(conn, msg);
     ipcRenderer.on('host', listener);
@@ -43,8 +44,27 @@ const api: BinderApi = {
   },
   panes: () => ipcRenderer.invoke('panes'),
   paneStart: (name, cols, rows) => ipcRenderer.invoke('paneStart', name, cols, rows),
+  termStart: (id, cwd, computer, cols, rows) => ipcRenderer.invoke('termStart', id, cwd, computer, cols, rows),
+  termStop: (id) => ipcRenderer.send('termStop', id),
   paneInput: (name, data) => ipcRenderer.send('paneInput', name, data),
   paneResize: (name, cols, rows) => ipcRenderer.send('paneResize', name, cols, rows),
+  previewCommand: (cwd) => ipcRenderer.invoke('previewCommand', cwd),
+  previewServerStart: (conn, cwd, command, cols, rows) => ipcRenderer.invoke('previewServerStart', conn, cwd, command, cols, rows),
+  previewServerStop: (conn) => ipcRenderer.send('previewServerStop', conn),
+  previewOpen: (conn, url) => ipcRenderer.invoke('previewOpen', conn, url),
+  previewLayout: (conn, box, show) => ipcRenderer.send('previewLayout', conn, box, show),
+  previewReload: (conn) => ipcRenderer.send('previewReload', conn),
+  previewCapture: (conn) => ipcRenderer.invoke('previewCapture', conn),
+  previewClose: (conn) => ipcRenderer.send('previewClose', conn),
+  simDevices: () => ipcRenderer.invoke('simDevices'),
+  simBoot: (udid) => ipcRenderer.invoke('simBoot', udid),
+  simShot: (udid, type) => ipcRenderer.invoke('simShot', udid, type),
+  simOpenApp: (udid) => ipcRenderer.send('simOpenApp', udid),
+  onPreview: (cb) => {
+    const listener = (_e: IpcRendererEvent, conn: string, e: PreviewEvent) => cb(conn, e);
+    ipcRenderer.on('preview', listener);
+    return () => void ipcRenderer.removeListener('preview', listener);
+  },
   onPane: (cb) => {
     const listener = (_e: IpcRendererEvent, name: string, e: PaneEvent) => cb(name, e);
     ipcRenderer.on('pane', listener);
@@ -70,6 +90,25 @@ const api: BinderApi = {
   },
   setStatus: (status) => ipcRenderer.send('status', status),
   attention: () => ipcRenderer.send('attention'),
+  notify: (note) => ipcRenderer.send('notify', note),
+  openLink: (url) => ipcRenderer.invoke('openLink', url),
+  searchSessions: (query) => ipcRenderer.invoke('searchSessions', query),
+  archiveSession: (id, on, computer) => ipcRenderer.invoke('archiveSession', id, on, computer),
+  schedule: (args) => ipcRenderer.invoke('schedule', args),
+  localImage: (path, cwd) => ipcRenderer.invoke('localImage', path, cwd),
+  openPath: (path, cwd, how, line) => ipcRenderer.invoke('openPath', path, cwd, how, line),
+  fetchImage: (url) => ipcRenderer.invoke('fetchImage', url),
+  sidePaneLayout: (box, show) => ipcRenderer.send('sidePaneLayout', box, show),
+  onSidePane: (cb) => {
+    const listener = (_e: IpcRendererEvent, e: SidePaneEvent) => cb(e);
+    ipcRenderer.on('sidePane', listener);
+    return () => void ipcRenderer.off('sidePane', listener);
+  },
+  onNotificationClick: (cb) => {
+    const listener = (_e: IpcRendererEvent, conn: string) => cb(conn);
+    ipcRenderer.on('notificationClick', listener);
+    return () => void ipcRenderer.off('notificationClick', listener);
+  },
   quit: () => ipcRenderer.send('quit'),
 };
 
